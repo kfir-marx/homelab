@@ -1,0 +1,42 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Atlantis repo-level config.
+#
+# Atlantis watches for PRs that touch terraform/ and runs plan/apply
+# automatically. Require explicit approval before apply.
+#
+# Docs: https://www.runatlantis.io/docs/repo-level-atlantis-yaml.html
+# ──────────────────────────────────────────────────────────────────────────────
+
+version: 3
+automerge: false
+parallel_plan: true
+parallel_apply: false         # Apply one environment at a time for safety.
+abort_on_execution_order_fail: true
+
+projects:
+  - name: homelab-prod
+    dir: terraform/environments/prod
+    workspace: default
+    terraform_version: v1.11.4
+    autoplan:
+      when_modified:
+        - "*.tf"
+        - "*.tfvars"
+        - "../../modules/**/*.tf"       # Re-plan when shared modules change.
+        - "../../modules/**/*.yaml"
+      enabled: true
+    apply_requirements:
+      - approved                        # At least one PR approval required.
+      - mergeable                       # Branch protection checks must pass.
+    workflow: default
+
+workflows:
+  default:
+    plan:
+      steps:
+        - init:
+            extra_args: ["-upgrade"]
+        - plan
+    apply:
+      steps:
+        - apply

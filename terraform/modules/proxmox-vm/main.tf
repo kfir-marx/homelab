@@ -1,0 +1,170 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  Module: proxmox-vm                                                        ║
+# ║  Creates a single Proxmox QEMU VM suitable for Talos Linux.                ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+terraform {
+  required_providers {
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = "~> 0.78"
+    }
+  }
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Variables
+# ──────────────────────────────────────────────────────────────────────────────
+
+variable "hostname" {
+  type = string
+}
+
+variable "proxmox_node" {
+  description = "Proxmox host to place this VM on"
+  type        = string
+}
+
+variable "vm_id" {
+  type = number
+}
+
+variable "cores" {
+  type    = number
+  default = 4
+}
+
+variable "memory_mb" {
+  type    = number
+  default = 8192
+}
+
+variable "disk_size_gb" {
+  type    = number
+  default = 50
+}
+
+variable "ip_address" {
+  description = "Static IP in CIDR notation (e.g. 10.0.10.11/24)"
+  type        = string
+}
+
+variable "mac_address" {
+  type = string
+}
+
+variable "gateway" {
+  type = string
+}
+
+variable "bridge" {
+  type    = string
+  default = "vmbr0"
+}
+
+variable "iso_datastore" {
+  type    = string
+  default = "local"
+}
+
+variable "iso_file" {
+  type    = string
+  default = "talos-amd64.iso"
+}
+
+variable "pci_devices" {
+  description = "PCIe devices to passthrough (empty list = no passthrough)"
+  type = list(object({
+    id   = string
+    pcie = bool
+  }))
+  default = []
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# VM resource
+# ──────────────────────────────────────────────────────────────────────────────
+
+resource "proxmox_virtual_environment_vm" "this" {
+  name      = var.hostname
+  node_name = var.proxmox_node
+  vm_id     = var.vm_id
+  tags      = ["talos", "terraform"]
+
+  # Machine type q35 is required for PCIe passthrough.
+  machine = length(var.pci_devices) > 0 ? "q35" : "q35"
+  bios    = length(var.pci_devices) > 0 ? "ovmf" : "seabios"
+
+  # Boot from the Talos ISO on first boot; Talos installs to disk automatically.
+  cdrom {
+    enabled   = true
+    file_id   = "${var.iso_datastore}:iso/${var.iso_file}"
+    interface = "ide2"
+  }
+
+  cpu {
+    cores = var.cores
+    type  = "host" # Required for GPU passthrough; also gives best perf.
+  }
+
+  memory {
+    dedicated = var.memory_mb
+  }
+
+  disk {
+    datastore_id = "local-lvm"
+    interface    = "scsi0"
+    size         = var.disk_size_gb
+    file_format  = "raw"
+    ssd          = true
+    discard      = "on"
+  }
+
+  network_device {
+    bridge      = var.bridge
+    mac_address = var.mac_address
+    model       = "virtio"
+  }
+
+  # EFI disk — required for OVMF (GPU passthrough nodes).
+  dynamic "efi_disk" {
+    for_each = length(var.pci_devices) > 0 ? [1] : []
+    content {
+      datastore_id = "local-lvm"
+      type         = "4m"
+    }
+  }
+
+  # PCIe passthrough — one block per device.
+  dynamic "hostpci" {
+    for_each = var.pci_devices
+    content {
+      device = "hostpci${hostpci.key}"
+      id     = hostpci.value.id
+      pcie   = hostpci.value.pcie
+      rombar = true
+    }
+  }
+
+  operating_system {
+    type = "l26" # Linux 2.6+ kernel
+  }
+
+  on_boot = true
+
+  lifecycle {
+    ignore_changes = [cdrom] # After install, the ISO is no longer needed.
+  }
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Outputs
+# ──────────────────────────────────────────────────────────────────────────────
+
+output "vm_id" {
+  value = proxmox_virtual_environment_vm.this.vm_id
+}
+
+output "name" {
+  value = proxmox_virtual_environment_vm.this.name
+}

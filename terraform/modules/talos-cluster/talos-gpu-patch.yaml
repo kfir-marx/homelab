@@ -1,0 +1,49 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Talos machine config patch for GPU worker nodes.
+#
+# This patch:
+#   1. Loads the NVIDIA container toolkit and open-gpu-kernel-modules as
+#      Talos system extensions (installed at OS level, not in-cluster).
+#   2. Loads kernel modules required for GPU passthrough.
+#   3. Configures the NVIDIA runtime so containers can access the GPU.
+#
+# The extensions are pulled from the Talos Image Factory. Adjust the Talos
+# version in the image reference if you upgrade Talos.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Install NVIDIA system extensions into the Talos image.
+# These run outside Kubernetes at the OS level.
+machine:
+  install:
+    extensions:
+      - image: ghcr.io/siderolabs/nvidia-container-toolkit:535.183.06-v1.17.4
+      - image: ghcr.io/siderolabs/nvidia-open-gpu-kernel-modules:535.183.06-v1.9.5
+
+  # Load kernel modules needed for the GPU at boot.
+  kernel:
+    modules:
+      - name: nvidia
+      - name: nvidia_uvm
+      - name: nvidia_drm
+      - name: nvidia_modeset
+
+  # Sysctls sometimes needed for large-memory GPU workloads.
+  sysctls:
+    vm.nr_hugepages: "1024"
+
+  # Register the NVIDIA runtime with containerd so Kubernetes pods
+  # can request GPU resources via the nvidia-device-plugin DaemonSet.
+  files:
+    - content: |
+        [plugins]
+          [plugins."io.containerd.grpc.v1.cri"]
+            [plugins."io.containerd.grpc.v1.cri".containerd]
+              default_runtime_name = "nvidia"
+              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia]
+                  privileged_without_host_devices = false
+                  runtime_type = "io.containerd.runc.v2"
+                  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
+                    BinaryName = "/usr/bin/nvidia-container-runtime"
+      path: /etc/cri/conf.d/20-customization.part
+      op: create

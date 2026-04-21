@@ -1,0 +1,11 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit real credentials.
+# ──────────────────────────────────────────────────────────────────────────────
+
+proxmox_api_url   = "https://pve1.home.lab:8006"
+proxmox_api_token = "terraform@pam!homelab=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+cluster_name     = "homelab"
+cluster_endpoint = "https://10.0.10.100:6443"
+cluster_vip      = "10.0.10.100"
