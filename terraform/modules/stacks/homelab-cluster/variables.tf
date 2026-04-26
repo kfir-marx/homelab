@@ -3,7 +3,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 variable "proxmox_api_url" {
-  description = "Proxmox VE API endpoint (e.g. https://pve1.home.lab:8006)"
+  description = "Proxmox VE API endpoint (e.g. https://192.168.1.101:8006)"
   type        = string
 }
 
@@ -20,19 +20,16 @@ variable "proxmox_api_token" {
 variable "cluster_name" {
   description = "Talos / Kubernetes cluster name"
   type        = string
-  default     = "homelab"
 }
 
 variable "cluster_endpoint" {
   description = "Kubernetes API endpoint (VIP or load-balancer address)"
   type        = string
-  default     = "https://10.0.10.100:6443"
 }
 
 variable "cluster_vip" {
   description = "Virtual IP for the control-plane (Talos built-in VIP)"
   type        = string
-  default     = "10.0.10.100"
 }
 
 variable "talos_version" {
@@ -70,7 +67,6 @@ variable "network_bridge" {
 variable "network_gateway" {
   description = "Default gateway for the VM network"
   type        = string
-  default     = "10.0.10.1"
 }
 
 variable "network_nameservers" {
@@ -80,55 +76,41 @@ variable "network_nameservers" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Node definitions — each map key is the hostname.
-#
-# Compute nodes: 4 pure-compute nodes (control-plane or workers).
-# GPU nodes:     1 large-storage/strong-GPU, 1 mid-storage/mid-GPU.
-#
-# Fill in your real Proxmox node names, MAC addresses, IP addresses,
-# and PCI device IDs from `lspci -nn | grep -i nvidia` on each host.
+# ArgoCD / GitOps
+# ──────────────────────────────────────────────────────────────────────────────
+
+variable "argocd_repo_url" {
+  description = "Git repository URL for ArgoCD to watch"
+  type        = string
+}
+
+variable "argocd_target_revision" {
+  description = "Git branch/tag for ArgoCD to track"
+  type        = string
+  default     = "main"
+}
+
+variable "argocd_app_path" {
+  description = "Path within the repo where Kubernetes manifests live"
+  type        = string
+  default     = "kubernetes/apps"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Node definitions
 # ──────────────────────────────────────────────────────────────────────────────
 
 variable "control_plane_nodes" {
-  description = "Control-plane node specs (run on the pure-compute Proxmox hosts)"
+  description = "Control-plane node specs"
   type = map(object({
-    proxmox_node = string # Proxmox host to schedule the VM on
+    proxmox_node = string
     vm_id        = number
-    ip_address   = string # static IP in CIDR (e.g. 10.0.10.11/24)
-    mac_address  = string # fixed MAC for DHCP reservations / PXE
+    ip_address   = string
+    mac_address  = string
     cores        = number
-    memory_mb    = number # RAM in MiB
+    memory_mb    = number
     disk_size_gb = number
   }))
-  default = {
-    "cp-1" = {
-      proxmox_node = "pve1"
-      vm_id        = 201
-      ip_address   = "10.0.10.11/24"
-      mac_address  = "BC:24:11:AA:BB:01"
-      cores        = 4
-      memory_mb    = 8192
-      disk_size_gb = 50
-    }
-    "cp-2" = {
-      proxmox_node = "pve2"
-      vm_id        = 202
-      ip_address   = "10.0.10.12/24"
-      mac_address  = "BC:24:11:AA:BB:02"
-      cores        = 4
-      memory_mb    = 8192
-      disk_size_gb = 50
-    }
-    "cp-3" = {
-      proxmox_node = "pve3"
-      vm_id        = 203
-      ip_address   = "10.0.10.13/24"
-      mac_address  = "BC:24:11:AA:BB:03"
-      cores        = 4
-      memory_mb    = 8192
-      disk_size_gb = 50
-    }
-  }
 }
 
 variable "worker_nodes" {
@@ -142,25 +124,11 @@ variable "worker_nodes" {
     memory_mb    = number
     disk_size_gb = number
   }))
-  default = {
-    "worker-1" = {
-      proxmox_node = "pve4"
-      vm_id        = 301
-      ip_address   = "10.0.10.21/24"
-      mac_address  = "BC:24:11:AA:CC:01"
-      cores        = 8
-      memory_mb    = 16384
-      disk_size_gb = 100
-    }
-  }
+  default = {}
 }
 
 variable "gpu_nodes" {
-  description = <<-EOT
-    GPU worker node specs. Each entry includes PCIe device IDs for passthrough.
-    Run `lspci -nn | grep -i nvidia` on each Proxmox host to find the IDs.
-    Format is "BUS:DEVICE.FUNCTION" (e.g. "01:00").
-  EOT
+  description = "GPU worker node specs with PCIe passthrough devices"
   type = map(object({
     proxmox_node = string
     vm_id        = number
@@ -170,37 +138,9 @@ variable "gpu_nodes" {
     memory_mb    = number
     disk_size_gb = number
     pci_devices = list(object({
-      id   = string # PCI address, e.g. "01:00" passthrough both .0 and .1
-      pcie = bool   # true for PCIe passthrough (vs legacy PCI)
+      id   = string
+      pcie = bool
     }))
   }))
-  default = {
-    # Large-storage node with a strong GPU (e.g. RTX 4090)
-    "gpu-large" = {
-      proxmox_node = "pve5"
-      vm_id        = 401
-      ip_address   = "10.0.10.31/24"
-      mac_address  = "BC:24:11:AA:DD:01"
-      cores        = 16
-      memory_mb    = 65536
-      disk_size_gb = 500
-      pci_devices = [
-        { id = "01:00", pcie = true }, # GPU
-        { id = "01:00", pcie = true }, # GPU audio (if separate function)
-      ]
-    }
-    # Mid-storage node with a mid-range GPU (e.g. RTX 3060)
-    "gpu-mid" = {
-      proxmox_node = "pve6"
-      vm_id        = 402
-      ip_address   = "10.0.10.32/24"
-      mac_address  = "BC:24:11:AA:DD:02"
-      cores        = 8
-      memory_mb    = 32768
-      disk_size_gb = 250
-      pci_devices = [
-        { id = "41:00", pcie = true },
-      ]
-    }
-  }
+  default = {}
 }

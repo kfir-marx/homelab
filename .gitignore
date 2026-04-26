@@ -11,9 +11,12 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# Terragrunt
+.terragrunt-cache/
+.terragrunt.generated/
+
 # Secrets — never commit these
-*.tfvars
-!*.tfvars.example
+.env
 *.pem
 *.key
 talosconfig

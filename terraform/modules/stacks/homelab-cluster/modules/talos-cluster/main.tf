@@ -69,8 +69,6 @@ resource "talos_machine_secrets" "this" {}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Machine configuration data sources
-# Talos generates a base config from the cluster name + endpoint + secrets,
-# then we layer on patches per-role.
 # ──────────────────────────────────────────────────────────────────────────────
 
 data "talos_client_configuration" "this" {
@@ -78,8 +76,6 @@ data "talos_client_configuration" "this" {
   client_configuration = talos_machine_secrets.this.client_configuration
   endpoints            = [for n in var.control_plane_nodes : split("/", n.ip_address)[0]]
 }
-
-# --- Control-plane config (per node) ---
 
 data "talos_machine_configuration" "controlplane" {
   for_each = var.control_plane_nodes
@@ -91,7 +87,6 @@ data "talos_machine_configuration" "controlplane" {
   talos_version    = var.talos_version
 
   config_patches = [
-    # Hostname + network
     yamlencode({
       machine = {
         network = {
@@ -114,8 +109,6 @@ data "talos_machine_configuration" "controlplane" {
     }),
   ]
 }
-
-# --- Worker config (non-GPU) ---
 
 data "talos_machine_configuration" "worker" {
   for_each = var.worker_nodes
@@ -147,8 +140,6 @@ data "talos_machine_configuration" "worker" {
   ]
 }
 
-# --- GPU worker config (with NVIDIA extensions + labels/taints) ---
-
 data "talos_machine_configuration" "gpu_worker" {
   for_each = var.gpu_worker_nodes
 
@@ -159,7 +150,6 @@ data "talos_machine_configuration" "gpu_worker" {
   talos_version    = var.talos_version
 
   config_patches = [
-    # Network configuration
     yamlencode({
       machine = {
         network = {
@@ -178,10 +168,8 @@ data "talos_machine_configuration" "gpu_worker" {
       }
     }),
 
-    # GPU-specific patch — loaded from the YAML file next to this module.
     file("${path.module}/talos-gpu-patch.yaml"),
 
-    # Node labels and taints so GPU workloads land only here.
     yamlencode({
       machine = {
         nodeLabels = {

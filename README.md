@@ -19,29 +19,29 @@ Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 6-nod
      Terraform apply                   ArgoCD sync (automated)
              │                                  │
              ▼                                  ▼
-┌────────────────────────┐       ┌──────────────────────────┐
-│   Proxmox VE cluster   │       │   Kubernetes cluster     │
-│                        │       │   (Talos Linux)          │
-│  pve1  ── cp-1    (CP) │       │                          │
-│  pve2  ── cp-2    (CP) │       │  ArgoCD ─► apps/         │
-│  pve3  ── cp-3    (CP) │       │            system/        │
-│  pve4  ── worker-1 (W) │       │            bootstrap/     │
-│  pve5  ── gpu-large(G) │       │                          │
-│  pve6  ── gpu-mid  (G) │       │  GPU nodes tainted with  │
-│                        │       │  nvidia.com/gpu=NoSchedule│
-└────────────────────────┘       └──────────────────────────┘
+┌──────────────────────────────────┐   ┌──────────────────────────────┐
+│     Proxmox VE cluster           │   │   Kubernetes cluster         │
+│                                  │   │   (Talos Linux)              │
+│  worker1       ── cp-1      (CP) │   │                              │
+│  worker2       ── cp-2      (CP) │   │  ArgoCD ─► apps/            │
+│  worker3       ── cp-3      (CP) │   │            system/           │
+│  worker4       ── worker-1  (W)  │   │            bootstrap/        │
+│  storage1      ── worker-2  (W)  │   │                              │
+│  gpunvdgtx1060 ── gpu-1     (G)  │   │  GPU node tainted with      │
+│                                  │   │  nvidia.com/gpu=NoSchedule   │
+└──────────────────────────────────┘   └──────────────────────────────┘
 ```
 
 ### Physical nodes (Proxmox hosts)
 
-| Proxmox host | VM name      | Role              | Key specs (defaults)              |
-|--------------|-------------|-------------------|-----------------------------------|
-| `pve1`       | `cp-1`      | Control plane     | 4 cores, 8 GiB RAM, 50 GB disk   |
-| `pve2`       | `cp-2`      | Control plane     | 4 cores, 8 GiB RAM, 50 GB disk   |
-| `pve3`       | `cp-3`      | Control plane     | 4 cores, 8 GiB RAM, 50 GB disk   |
-| `pve4`       | `worker-1`  | Compute worker    | 8 cores, 16 GiB RAM, 100 GB disk |
-| `pve5`       | `gpu-large` | GPU worker (strong) | 16 cores, 64 GiB RAM, 500 GB disk, PCIe GPU |
-| `pve6`       | `gpu-mid`   | GPU worker (mid)  | 8 cores, 32 GiB RAM, 250 GB disk, PCIe GPU  |
+| Proxmox host       | VM name    | Role                  | Key specs (defaults)                         |
+|--------------------|------------|-----------------------|----------------------------------------------|
+| `worker1`          | `cp-1`     | Control plane         | 4 cores, 8 GiB RAM, 50 GB disk              |
+| `worker2`          | `cp-2`     | Control plane         | 4 cores, 8 GiB RAM, 50 GB disk              |
+| `worker3`          | `cp-3`     | Control plane         | 4 cores, 8 GiB RAM, 50 GB disk              |
+| `worker4`          | `worker-1` | Compute worker        | 8 cores, 16 GiB RAM, 100 GB disk            |
+| `storage1`         | `worker-2` | Compute worker        | 4 cores, 10 GiB RAM, 100 GB disk            |
+| `gpunvdgtx1060`    | `gpu-1`    | GPU worker (GTX 1060) | 8 cores, 12 GiB RAM, 100 GB disk, PCIe GPU  |
 
 All specs, IPs, MAC addresses, and PCI device IDs are defined in `terraform/environments/prod/variables.tf` as map variables and can be overridden in `terraform.tfvars`.
 
@@ -55,8 +55,8 @@ All specs, IPs, MAC addresses, and PCI device IDs are defined in `terraform/envi
 | Bridge           | `vmbr0`             |
 | DNS              | `1.1.1.1`, `8.8.8.8` |
 | CP node IPs      | `10.0.10.11-13/24`  |
-| Worker IPs       | `10.0.10.21/24`     |
-| GPU node IPs     | `10.0.10.31-32/24`  |
+| Worker IPs       | `10.0.10.21-22/24`  |
+| GPU node IPs     | `10.0.10.31/24`     |
 
 The control-plane VIP is managed by Talos's built-in VIP mechanism — no external load balancer needed. Each control-plane node's network interface includes a `vip` block pointing at the shared VIP.
 

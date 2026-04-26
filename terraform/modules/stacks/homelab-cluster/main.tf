@@ -7,7 +7,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 module "control_plane_vms" {
-  source   = "../../modules/proxmox-vm"
+  source   = "./modules/proxmox-vm"
   for_each = var.control_plane_nodes
 
   hostname     = each.key
@@ -24,11 +24,11 @@ module "control_plane_vms" {
   iso_datastore = var.talos_iso_datastore
   iso_file      = var.talos_iso_file
 
-  pci_devices = [] # No GPU on control-plane nodes
+  pci_devices = []
 }
 
 module "worker_vms" {
-  source   = "../../modules/proxmox-vm"
+  source   = "./modules/proxmox-vm"
   for_each = var.worker_nodes
 
   hostname     = each.key
@@ -49,7 +49,7 @@ module "worker_vms" {
 }
 
 module "gpu_vms" {
-  source   = "../../modules/proxmox-vm"
+  source   = "./modules/proxmox-vm"
   for_each = var.gpu_nodes
 
   hostname     = each.key
@@ -74,7 +74,7 @@ module "gpu_vms" {
 # ──────────────────────────────────────────────────────────────────────────────
 
 module "talos_cluster" {
-  source = "../../modules/talos-cluster"
+  source = "./modules/talos-cluster"
 
   cluster_name     = var.cluster_name
   cluster_endpoint = var.cluster_endpoint
@@ -119,11 +119,10 @@ resource "helm_release" "argocd" {
   create_namespace = true
   repository       = "https://argoproj.github.io/argo-helm"
   chart            = "argo-cd"
-  version          = "7.8.13" # Pin to a known-good version
+  version          = "7.8.13"
   wait             = true
   timeout          = 600
 
-  # Point ArgoCD at this repo so it can manage itself and all apps going forward.
   values = [
     yamlencode({
       configs = {
@@ -131,7 +130,7 @@ resource "helm_release" "argocd" {
           "admin.enabled" = "true"
         }
         params = {
-          "server.insecure" = true # Terminate TLS at ingress, not ArgoCD
+          "server.insecure" = true
         }
       }
       server = {
@@ -147,7 +146,6 @@ resource "helm_release" "argocd" {
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 4. ArgoCD root Application — the "app of apps" pattern
-#    This tells ArgoCD to watch kubernetes/ in this repo for all other apps.
 # ──────────────────────────────────────────────────────────────────────────────
 
 resource "helm_release" "argocd_root_app" {
@@ -164,10 +162,9 @@ resource "helm_release" "argocd_root_app" {
           namespace = "argocd"
           project   = "default"
           source = {
-            # TODO: Replace with your actual repo URL.
-            repoURL        = "https://github.com/YOUR_USER/homelab.git"
-            targetRevision = "main"
-            path           = "kubernetes/apps"
+            repoURL        = var.argocd_repo_url
+            targetRevision = var.argocd_target_revision
+            path           = var.argocd_app_path
           }
           destination = {
             server    = "https://kubernetes.default.svc"

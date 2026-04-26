@@ -1,0 +1,42 @@
+---
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  Staging environment                                                       ║
+# ║  Lightweight cluster for pre-prod validation: 1 CP + 1 worker, no GPU.    ║
+# ║  Runs on the 10.0.20.0/24 subnet to isolate from production traffic.      ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+# ── Cluster settings ─────────────────────────────────────────────────────────
+cluster_name: "homelab-staging"
+cluster_endpoint: "https://10.0.20.100:6443"
+cluster_vip: "10.0.20.100"
+
+# ── Network ──────────────────────────────────────────────────────────────────
+network_gateway: "10.0.20.1"
+
+# ── ArgoCD ───────────────────────────────────────────────────────────────────
+argocd_target_revision: "staging"
+
+# ── Control-plane (single node — HA not needed for staging) ──────────────────
+control_plane_nodes:
+  cp-1:
+    proxmox_node: "worker1"
+    vm_id: 501
+    ip_address: "10.0.20.11/24"
+    mac_address: "BC:24:11:BB:BB:01"
+    cores: 2
+    memory_mb: 4096
+    disk_size_gb: 30
+
+# ── Worker (single node, smaller footprint) ──────────────────────────────────
+worker_nodes:
+  worker-1:
+    proxmox_node: "worker2"
+    vm_id: 601
+    ip_address: "10.0.20.21/24"
+    mac_address: "BC:24:11:BB:CC:01"
+    cores: 4
+    memory_mb: 8192
+    disk_size_gb: 50
+
+# No GPU in staging.
+gpu_nodes: {}

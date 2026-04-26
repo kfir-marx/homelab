@@ -15,15 +15,6 @@ terraform {
       version = "~> 2.17"
     }
   }
-
-  # Uncomment and configure for remote state (recommended for Atlantis).
-  # backend "s3" {
-  #   bucket         = "homelab-tfstate"
-  #   key            = "prod/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "homelab-tflock"
-  #   encrypt        = true
-  # }
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -32,11 +23,9 @@ terraform {
 # The token needs PVEVMAdmin + PVEDatastoreUser on /.
 # ──────────────────────────────────────────────────────────────────────────────
 provider "proxmox" {
-  endpoint = var.proxmox_api_url   # e.g. "https://pve1.home.lab:8006"
-  api_token = var.proxmox_api_token # format: "user@realm!tokenid=secret-value"
-
-  # Set to true if using a self-signed cert (common in home labs).
-  insecure = true
+  endpoint  = var.proxmox_api_url
+  api_token = var.proxmox_api_token
+  insecure  = true
 
   ssh {
     agent = true

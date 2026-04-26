@@ -91,11 +91,9 @@ resource "proxmox_virtual_environment_vm" "this" {
   vm_id     = var.vm_id
   tags      = ["talos", "terraform"]
 
-  # Machine type q35 is required for PCIe passthrough.
   machine = length(var.pci_devices) > 0 ? "q35" : "q35"
   bios    = length(var.pci_devices) > 0 ? "ovmf" : "seabios"
 
-  # Boot from the Talos ISO on first boot; Talos installs to disk automatically.
   cdrom {
     enabled   = true
     file_id   = "${var.iso_datastore}:iso/${var.iso_file}"
@@ -104,7 +102,7 @@ resource "proxmox_virtual_environment_vm" "this" {
 
   cpu {
     cores = var.cores
-    type  = "host" # Required for GPU passthrough; also gives best perf.
+    type  = "host"
   }
 
   memory {
@@ -126,7 +124,6 @@ resource "proxmox_virtual_environment_vm" "this" {
     model       = "virtio"
   }
 
-  # EFI disk — required for OVMF (GPU passthrough nodes).
   dynamic "efi_disk" {
     for_each = length(var.pci_devices) > 0 ? [1] : []
     content {
@@ -135,7 +132,6 @@ resource "proxmox_virtual_environment_vm" "this" {
     }
   }
 
-  # PCIe passthrough — one block per device.
   dynamic "hostpci" {
     for_each = var.pci_devices
     content {
@@ -147,13 +143,13 @@ resource "proxmox_virtual_environment_vm" "this" {
   }
 
   operating_system {
-    type = "l26" # Linux 2.6+ kernel
+    type = "l26"
   }
 
   on_boot = true
 
   lifecycle {
-    ignore_changes = [cdrom] # After install, the ISO is no longer needed.
+    ignore_changes = [cdrom]
   }
 }
 

@@ -1,0 +1,23 @@
+---
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  Global defaults — shared across all environments                          ║
+# ║  Override any value in environment-specific config.yml files.              ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+# ── Proxmox connection ───────────────────────────────────────────────────────
+proxmox_api_url: "https://pve1.home.lab:8006"
+
+# ── Talos ────────────────────────────────────────────────────────────────────
+talos_version: "v1.9.5"
+talos_iso_datastore: "local"
+talos_iso_file: "talos-amd64.iso"
+
+# ── Network defaults ─────────────────────────────────────────────────────────
+network_bridge: "vmbr0"
+network_nameservers:
+  - "1.1.1.1"
+  - "8.8.8.8"
+
+# ── ArgoCD / GitOps ─────────────────────────────────────────────────────────
+argocd_repo_url: "https://github.com/YOUR_USER/homelab.git"
+argocd_app_path: "kubernetes/apps"

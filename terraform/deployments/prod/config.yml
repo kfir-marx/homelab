@@ -1,0 +1,76 @@
+---
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  Production environment                                                    ║
+# ║  3 CP + 2 workers + 1 GPU on the 10.0.10.0/24 subnet.                     ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+# ── Cluster settings ─────────────────────────────────────────────────────────
+cluster_name: "homelab"
+cluster_endpoint: "https://10.0.10.100:6443"
+cluster_vip: "10.0.10.100"
+
+# ── Network ──────────────────────────────────────────────────────────────────
+network_gateway: "10.0.10.1"
+
+# ── ArgoCD ───────────────────────────────────────────────────────────────────
+argocd_target_revision: "main"
+
+# ── Control-plane nodes (3x HA across worker1-3 Proxmox hosts) ──────────────
+control_plane_nodes:
+  cp-1:
+    proxmox_node: "worker1"
+    vm_id: 201
+    ip_address: "10.0.10.11/24"
+    mac_address: "BC:24:11:AA:BB:01"
+    cores: 4
+    memory_mb: 8192
+    disk_size_gb: 50
+  cp-2:
+    proxmox_node: "worker2"
+    vm_id: 202
+    ip_address: "10.0.10.12/24"
+    mac_address: "BC:24:11:AA:BB:02"
+    cores: 4
+    memory_mb: 8192
+    disk_size_gb: 50
+  cp-3:
+    proxmox_node: "worker3"
+    vm_id: 203
+    ip_address: "10.0.10.13/24"
+    mac_address: "BC:24:11:AA:BB:03"
+    cores: 4
+    memory_mb: 8192
+    disk_size_gb: 50
+
+# ── Worker nodes (compute) ───────────────────────────────────────────────────
+worker_nodes:
+  worker-1:
+    proxmox_node: "worker4"
+    vm_id: 301
+    ip_address: "10.0.10.21/24"
+    mac_address: "BC:24:11:AA:CC:01"
+    cores: 8
+    memory_mb: 16384
+    disk_size_gb: 100
+  worker-2:
+    proxmox_node: "storage1"
+    vm_id: 302
+    ip_address: "10.0.10.22/24"
+    mac_address: "BC:24:11:AA:CC:02"
+    cores: 4
+    memory_mb: 10240
+    disk_size_gb: 100
+
+# ── GPU nodes (PCIe passthrough) ─────────────────────────────────────────────
+gpu_nodes:
+  gpu-1:
+    proxmox_node: "gpunvdgtx1060"
+    vm_id: 401
+    ip_address: "10.0.10.31/24"
+    mac_address: "BC:24:11:AA:DD:01"
+    cores: 8
+    memory_mb: 12288
+    disk_size_gb: 100
+    pci_devices:
+      - id: "01:00"
+        pcie: true
