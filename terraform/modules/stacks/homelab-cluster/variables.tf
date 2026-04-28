@@ -13,6 +13,13 @@ variable "proxmox_api_token" {
   sensitive   = true
 }
 
+variable "proxmox_ssh_password" {
+  description = "Proxmox root SSH password for disk import operations"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Cluster-wide settings
 # ──────────────────────────────────────────────────────────────────────────────
@@ -39,19 +46,19 @@ variable "talos_version" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# ISO / image
+# Talos image
 # ──────────────────────────────────────────────────────────────────────────────
 
-variable "talos_iso_datastore" {
-  description = "Proxmox datastore where the Talos ISO is uploaded"
+variable "talos_schematic_id" {
+  description = "Talos Image Factory schematic ID (default = vanilla, no extensions)"
   type        = string
-  default     = "local"
+  default     = "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba"
 }
 
-variable "talos_iso_file" {
-  description = "Filename of the Talos ISO on the datastore"
+variable "talos_image_datastore" {
+  description = "Proxmox datastore to download the Talos image to"
   type        = string
-  default     = "talos-amd64.iso"
+  default     = "local"
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -106,7 +113,6 @@ variable "control_plane_nodes" {
     proxmox_node = string
     vm_id        = number
     ip_address   = string
-    mac_address  = string
     cores        = number
     memory_mb    = number
     disk_size_gb = number
@@ -119,7 +125,6 @@ variable "worker_nodes" {
     proxmox_node = string
     vm_id        = number
     ip_address   = string
-    mac_address  = string
     cores        = number
     memory_mb    = number
     disk_size_gb = number
@@ -133,7 +138,6 @@ variable "gpu_nodes" {
     proxmox_node = string
     vm_id        = number
     ip_address   = string
-    mac_address  = string
     cores        = number
     memory_mb    = number
     disk_size_gb = number

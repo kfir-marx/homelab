@@ -5,12 +5,11 @@
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 # ── Proxmox connection ───────────────────────────────────────────────────────
-proxmox_api_url: "https://pve1.home.lab:8006"
+proxmox_api_url: "https://192.168.1.101:8006"
 
 # ── Talos ────────────────────────────────────────────────────────────────────
 talos_version: "v1.9.5"
-talos_iso_datastore: "local"
-talos_iso_file: "talos-amd64.iso"
+talos_image_datastore: "local"
 
 # ── Network defaults ─────────────────────────────────────────────────────────
 network_bridge: "vmbr0"
@@ -19,5 +18,5 @@ network_nameservers:
   - "8.8.8.8"
 
 # ── ArgoCD / GitOps ─────────────────────────────────────────────────────────
-argocd_repo_url: "https://github.com/YOUR_USER/homelab.git"
+argocd_repo_url: "https://github.com/kfir-marx/homelab.git"
 argocd_app_path: "kubernetes/apps"

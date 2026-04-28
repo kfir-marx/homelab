@@ -30,7 +30,8 @@ locals {
 # Pass merged YAML config as Terraform input variables.
 # Secrets are injected from environment variables — never stored in YAML.
 inputs = merge(local.merged_config, {
-  proxmox_api_token = get_env("PROXMOX_API_TOKEN")
+  proxmox_api_token    = get_env("PROXMOX_API_TOKEN")
+  proxmox_ssh_password = get_env("PROXMOX_SSH_PASSWORD", "")
 })
 
 # ──────────────────────────────────────────────────────────────────────────────

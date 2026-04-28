@@ -91,9 +91,9 @@ load_secrets
 if [[ "$STACK" == "all" ]]; then
   echo -e "${YELLOW}▸ terragrunt run-all ${COMMAND} [${ENVIRONMENT}]${NC}"
   cd "$DEPLOYMENTS_DIR/$ENVIRONMENT"
-  terragrunt run-all "$COMMAND" "${EXTRA_ARGS[@]}"
+  terragrunt run-all "$COMMAND" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 else
   echo -e "${YELLOW}▸ terragrunt ${COMMAND} [${ENVIRONMENT}/${STACK}]${NC}"
   cd "$DEPLOYMENTS_DIR/$ENVIRONMENT/$STACK"
-  terragrunt "$COMMAND" "${EXTRA_ARGS[@]}"
+  terragrunt "$COMMAND" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 fi

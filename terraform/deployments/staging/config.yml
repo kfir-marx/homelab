@@ -22,7 +22,6 @@ control_plane_nodes:
     proxmox_node: "worker1"
     vm_id: 501
     ip_address: "10.0.20.11/24"
-    mac_address: "BC:24:11:BB:BB:01"
     cores: 2
     memory_mb: 4096
     disk_size_gb: 30
@@ -33,7 +32,6 @@ worker_nodes:
     proxmox_node: "worker2"
     vm_id: 601
     ip_address: "10.0.20.21/24"
-    mac_address: "BC:24:11:BB:CC:01"
     cores: 4
     memory_mb: 8192
     disk_size_gb: 50

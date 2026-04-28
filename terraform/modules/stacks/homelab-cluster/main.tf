@@ -3,6 +3,31 @@
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────────────────────────────────────────────────────
+# 0. Talos nocloud image — downloaded once per Proxmox host via the API
+# ──────────────────────────────────────────────────────────────────────────────
+
+locals {
+  all_proxmox_nodes = distinct(concat(
+    [for n in var.control_plane_nodes : n.proxmox_node],
+    [for n in var.worker_nodes : n.proxmox_node],
+    [for n in var.gpu_nodes : n.proxmox_node],
+  ))
+
+  talos_image_url = "https://factory.talos.dev/image/${var.talos_schematic_id}/${var.talos_version}/nocloud-amd64.raw.xz"
+}
+
+resource "proxmox_virtual_environment_download_file" "talos_image" {
+  for_each = toset(local.all_proxmox_nodes)
+
+  content_type = "iso"
+  datastore_id = var.talos_image_datastore
+  node_name    = each.value
+  url          = local.talos_image_url
+  file_name    = "talos-${var.talos_version}-nocloud-amd64.img"
+  overwrite    = false
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # 1. Proxmox VMs — one module call per node role
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -16,13 +41,10 @@ module "control_plane_vms" {
   cores        = each.value.cores
   memory_mb    = each.value.memory_mb
   disk_size_gb = each.value.disk_size_gb
-  ip_address   = each.value.ip_address
-  mac_address  = each.value.mac_address
-  gateway      = var.network_gateway
-  bridge       = var.network_bridge
-
-  iso_datastore = var.talos_iso_datastore
-  iso_file      = var.talos_iso_file
+  ip_address    = each.value.ip_address
+  gateway       = var.network_gateway
+  bridge        = var.network_bridge
+  image_file_id = proxmox_virtual_environment_download_file.talos_image[each.value.proxmox_node].id
 
   pci_devices = []
 }
@@ -31,19 +53,16 @@ module "worker_vms" {
   source   = "./modules/proxmox-vm"
   for_each = var.worker_nodes
 
-  hostname     = each.key
-  proxmox_node = each.value.proxmox_node
-  vm_id        = each.value.vm_id
-  cores        = each.value.cores
-  memory_mb    = each.value.memory_mb
-  disk_size_gb = each.value.disk_size_gb
-  ip_address   = each.value.ip_address
-  mac_address  = each.value.mac_address
-  gateway      = var.network_gateway
-  bridge       = var.network_bridge
-
-  iso_datastore = var.talos_iso_datastore
-  iso_file      = var.talos_iso_file
+  hostname      = each.key
+  proxmox_node  = each.value.proxmox_node
+  vm_id         = each.value.vm_id
+  cores         = each.value.cores
+  memory_mb     = each.value.memory_mb
+  disk_size_gb  = each.value.disk_size_gb
+  ip_address    = each.value.ip_address
+  gateway       = var.network_gateway
+  bridge        = var.network_bridge
+  image_file_id = proxmox_virtual_environment_download_file.talos_image[each.value.proxmox_node].id
 
   pci_devices = []
 }
@@ -52,19 +71,16 @@ module "gpu_vms" {
   source   = "./modules/proxmox-vm"
   for_each = var.gpu_nodes
 
-  hostname     = each.key
-  proxmox_node = each.value.proxmox_node
-  vm_id        = each.value.vm_id
-  cores        = each.value.cores
-  memory_mb    = each.value.memory_mb
-  disk_size_gb = each.value.disk_size_gb
-  ip_address   = each.value.ip_address
-  mac_address  = each.value.mac_address
-  gateway      = var.network_gateway
-  bridge       = var.network_bridge
-
-  iso_datastore = var.talos_iso_datastore
-  iso_file      = var.talos_iso_file
+  hostname      = each.key
+  proxmox_node  = each.value.proxmox_node
+  vm_id         = each.value.vm_id
+  cores         = each.value.cores
+  memory_mb     = each.value.memory_mb
+  disk_size_gb  = each.value.disk_size_gb
+  ip_address    = each.value.ip_address
+  gateway       = var.network_gateway
+  bridge        = var.network_bridge
+  image_file_id = proxmox_virtual_environment_download_file.talos_image[each.value.proxmox_node].id
 
   pci_devices = each.value.pci_devices
 }

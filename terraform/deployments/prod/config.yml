@@ -21,7 +21,6 @@ control_plane_nodes:
     proxmox_node: "worker1"
     vm_id: 201
     ip_address: "10.0.10.11/24"
-    mac_address: "BC:24:11:AA:BB:01"
     cores: 4
     memory_mb: 8192
     disk_size_gb: 50
@@ -29,7 +28,6 @@ control_plane_nodes:
     proxmox_node: "worker2"
     vm_id: 202
     ip_address: "10.0.10.12/24"
-    mac_address: "BC:24:11:AA:BB:02"
     cores: 4
     memory_mb: 8192
     disk_size_gb: 50
@@ -37,7 +35,6 @@ control_plane_nodes:
     proxmox_node: "worker3"
     vm_id: 203
     ip_address: "10.0.10.13/24"
-    mac_address: "BC:24:11:AA:BB:03"
     cores: 4
     memory_mb: 8192
     disk_size_gb: 50
@@ -48,7 +45,6 @@ worker_nodes:
     proxmox_node: "worker4"
     vm_id: 301
     ip_address: "10.0.10.21/24"
-    mac_address: "BC:24:11:AA:CC:01"
     cores: 8
     memory_mb: 16384
     disk_size_gb: 100
@@ -56,7 +52,6 @@ worker_nodes:
     proxmox_node: "storage1"
     vm_id: 302
     ip_address: "10.0.10.22/24"
-    mac_address: "BC:24:11:AA:CC:02"
     cores: 4
     memory_mb: 10240
     disk_size_gb: 100
@@ -67,7 +62,6 @@ gpu_nodes:
     proxmox_node: "gpunvdgtx1060"
     vm_id: 401
     ip_address: "10.0.10.31/24"
-    mac_address: "BC:24:11:AA:DD:01"
     cores: 8
     memory_mb: 12288
     disk_size_gb: 100

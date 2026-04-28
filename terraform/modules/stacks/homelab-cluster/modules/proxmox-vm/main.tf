@@ -49,10 +49,6 @@ variable "ip_address" {
   type        = string
 }
 
-variable "mac_address" {
-  type = string
-}
-
 variable "gateway" {
   type = string
 }
@@ -62,14 +58,9 @@ variable "bridge" {
   default = "vmbr0"
 }
 
-variable "iso_datastore" {
-  type    = string
-  default = "local"
-}
-
-variable "iso_file" {
-  type    = string
-  default = "talos-amd64.iso"
+variable "image_file_id" {
+  description = "Proxmox file ID of the downloaded Talos nocloud image"
+  type        = string
 }
 
 variable "pci_devices" {
@@ -94,12 +85,6 @@ resource "proxmox_virtual_environment_vm" "this" {
   machine = length(var.pci_devices) > 0 ? "q35" : "q35"
   bios    = length(var.pci_devices) > 0 ? "ovmf" : "seabios"
 
-  cdrom {
-    enabled   = true
-    file_id   = "${var.iso_datastore}:iso/${var.iso_file}"
-    interface = "ide2"
-  }
-
   cpu {
     cores = var.cores
     type  = "host"
@@ -113,15 +98,15 @@ resource "proxmox_virtual_environment_vm" "this" {
     datastore_id = "local-lvm"
     interface    = "scsi0"
     size         = var.disk_size_gb
+    file_id      = var.image_file_id
     file_format  = "raw"
     ssd          = true
     discard      = "on"
   }
 
   network_device {
-    bridge      = var.bridge
-    mac_address = var.mac_address
-    model       = "virtio"
+    bridge = var.bridge
+    model  = "virtio"
   }
 
   dynamic "efi_disk" {
@@ -149,7 +134,7 @@ resource "proxmox_virtual_environment_vm" "this" {
   on_boot = true
 
   lifecycle {
-    ignore_changes = [cdrom]
+    ignore_changes = [disk[0].file_id]
   }
 }
 
@@ -163,4 +148,8 @@ output "vm_id" {
 
 output "name" {
   value = proxmox_virtual_environment_vm.this.name
+}
+
+output "ip_address" {
+  value = var.ip_address
 }
