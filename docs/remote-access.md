@@ -20,7 +20,7 @@ Secure external access to the homelab using two complementary solutions: **Cloud
                         ┌─────────────────────────────────────┐
                         │           Cloudflare Edge            │
                         │                                     │
-  Family / Friends ────►│  jellyfin.yourdomain.com  (public)  │◄──── cloudflared pod
+  Family / Friends ────►│  jellyfin.547600.xyz  (public)  │◄──── cloudflared pod
   (browser, apps, TV)   │  DDoS protection + TLS termination  │      (outbound tunnel)
                         └─────────────────────────────────────┘          │
                                                                          │
@@ -57,7 +57,7 @@ Expose HTTPS services (primarily Jellyfin) to friends and family on any device, 
 ### How It Works
 
 1. A `cloudflared` pod in the cluster maintains a persistent **outbound** connection to Cloudflare's edge.
-2. Cloudflare DNS points `jellyfin.yourdomain.com` to Cloudflare's edge (home IP stays hidden).
+2. Cloudflare DNS points `jellyfin.547600.xyz` to Cloudflare's edge (home IP stays hidden).
 3. Incoming requests from users hit Cloudflare's edge, flow through the tunnel, and reach the target service inside the cluster.
 4. No static IP, no public IP, no port forwarding required. Works behind CGNAT.
 
@@ -66,7 +66,7 @@ Expose HTTPS services (primarily Jellyfin) to friends and family on any device, 
 ```
 User's device (anywhere)
     │
-    │  HTTPS request to jellyfin.yourdomain.com
+    │  HTTPS request to jellyfin.547600.xyz
     ▼
 Cloudflare Edge (104.x.x.x)
     │  DNS resolves to Cloudflare, NOT your home IP
@@ -88,7 +88,7 @@ Stream video back through the same path
 
 | Service | Public hostname | Internal target | Auth |
 |---------|----------------|-----------------|------|
-| Jellyfin | `jellyfin.yourdomain.com` | `jellyfin.media.svc:8096` | Jellyfin built-in (username/password) |
+| Jellyfin | `jellyfin.547600.xyz` | `jellyfin.media.svc:8096` | Jellyfin built-in (username/password) |
 
 Add more services by adding ingress rules to the `cloudflared` config. Only expose services that are intended for external users.
 
