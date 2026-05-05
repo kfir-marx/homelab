@@ -21,6 +21,16 @@ variable "proxmox_ssh_password" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Proxmox node management IPs (for host-level configuration via SSH)
+# ──────────────────────────────────────────────────────────────────────────────
+
+variable "proxmox_node_ips" {
+  description = "Map of Proxmox node names to their management IPs (enables routing setup)"
+  type        = map(string)
+  default     = {}
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Cluster-wide settings
 # ──────────────────────────────────────────────────────────────────────────────
 

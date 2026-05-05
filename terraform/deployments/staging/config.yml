@@ -13,6 +13,11 @@ cluster_vip: "10.0.20.100"
 # ── Network ──────────────────────────────────────────────────────────────────
 network_gateway: "10.0.20.1"
 
+# ── Proxmox node management IPs (for host routing setup) ────────────────────
+proxmox_node_ips:
+  worker1: "192.168.1.101"
+  worker2: "192.168.1.102"   # TODO: verify this IP
+
 # ── ArgoCD ───────────────────────────────────────────────────────────────────
 argocd_target_revision: "staging"
 
