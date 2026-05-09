@@ -1,6 +1,6 @@
 # Homelab — GitOps Kubernetes on Proxmox
 
-Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 6-node Proxmox hypervisor fleet. Infrastructure is provisioned with Terraform; in-cluster workloads are managed by ArgoCD. No SSH, no manual `kubectl apply` — everything flows through Git.
+Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 7-node Proxmox hypervisor fleet. Infrastructure is provisioned with Terraform (orchestrated by Terragrunt); in-cluster workloads are managed by ArgoCD. No SSH, no manual `kubectl apply` — everything flows through Git.
 
 ---
 
@@ -27,36 +27,41 @@ Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 6-nod
 │  worker3       ── cp-3      (CP) │   │            system/           │
 │  worker4       ── worker-1  (W)  │   │            bootstrap/        │
 │  storage1      ── worker-2  (W)  │   │                              │
-│  gpunvdgtx1060 ── gpu-1     (G)  │   │  GPU node tainted with      │
-│                                  │   │  nvidia.com/gpu=NoSchedule   │
+│  gpunvdgtx1060 ── gpu-1     (G)  │   │  GPU nodes tainted with      │
+│  largegpu      ── gpu-2     (G)  │   │  nvidia.com/gpu=NoSchedule   │
 └──────────────────────────────────┘   └──────────────────────────────┘
 ```
 
 ### Physical nodes (Proxmox hosts)
 
-| Proxmox host       | VM name    | Role                  | Key specs (defaults)                         |
-|--------------------|------------|-----------------------|----------------------------------------------|
-| `worker1`          | `cp-1`     | Control plane         | 4 cores, 8 GiB RAM, 50 GB disk              |
-| `worker2`          | `cp-2`     | Control plane         | 4 cores, 8 GiB RAM, 50 GB disk              |
-| `worker3`          | `cp-3`     | Control plane         | 4 cores, 8 GiB RAM, 50 GB disk              |
-| `worker4`          | `worker-1` | Compute worker        | 8 cores, 16 GiB RAM, 100 GB disk            |
-| `storage1`         | `worker-2` | Compute worker        | 4 cores, 10 GiB RAM, 100 GB disk            |
-| `gpunvdgtx1060`    | `gpu-1`    | GPU worker (GTX 1060) | 8 cores, 12 GiB RAM, 100 GB disk, PCIe GPU  |
+| Proxmox host       | Mgmt IP          | VM name    | VM IP            | Role                    | Key specs (prod defaults)                       |
+|--------------------|------------------|------------|------------------|-------------------------|-------------------------------------------------|
+| `worker1`          | `192.168.1.101`  | `cp-1`     | `192.168.1.211`  | Control plane           | 4 cores, 8 GiB RAM, 50 GB disk                  |
+| `worker2`          | `192.168.1.102`  | `cp-2`     | `192.168.1.212`  | Control plane           | 4 cores, 8 GiB RAM, 50 GB disk                  |
+| `worker3`          | `192.168.1.103`  | `cp-3`     | `192.168.1.213`  | Control plane           | 4 cores, 8 GiB RAM, 50 GB disk                  |
+| `worker4`          | `192.168.1.104`  | `worker-1` | `192.168.1.221`  | Compute worker          | 8 cores, 16 GiB RAM, 100 GB disk                |
+| `storage1`         | `192.168.1.106`  | `worker-2` | `192.168.1.222`  | Compute worker          | 4 cores, 10 GiB RAM, 100 GB disk                |
+| `gpunvdgtx1060`    | `192.168.1.105`  | `gpu-1`    | `192.168.1.231`  | GPU worker (GTX 1060)   | 8 cores, 12 GiB RAM, 100 GB disk, PCIe GPU      |
+| `largegpu`         | `192.168.1.107`  | `gpu-2`    | `192.168.1.232`  | GPU worker (RTX 3080)   | 8 cores, 32 GiB RAM, 200 GB disk, PCIe GPU      |
 
-All specs, IPs, MAC addresses, and PCI device IDs are defined in `terraform/environments/prod/variables.tf` as map variables and can be overridden in `terraform.tfvars`.
+The cluster VIP is `192.168.1.210` — control-plane Talos VIP, also the Kubernetes API endpoint.
+
+**Why VMs live on the home subnet, not an isolated `10.x` block:** every Proxmox host's `vmbr0` is already bridged to the home LAN, so VMs on `192.168.1.x` are L2-reachable from any device on the network with zero routing config. Mac, kubectl, talosctl, and any future Proxmox host you add work out of the box. The IP convention follows the rest of the homelab — physical machines `192.168.1.101–199`, VMs `192.168.1.200–299`. Make sure your router's DHCP pool excludes the static range you reserve for VMs.
+
+All node specs, IPs, and PCI device IDs are defined as YAML in [`terraform/deployments/<env>/config.yml`](../terraform/deployments/) and consumed via Terragrunt's hierarchical config-merging in [`root.hcl`](../terraform/deployments/root.hcl).
 
 ### Network defaults
 
-| Setting          | Default value       |
-|------------------|---------------------|
-| Cluster VIP      | `10.0.10.100`       |
-| K8s API endpoint | `https://10.0.10.100:6443` |
-| Gateway          | `10.0.10.1`         |
-| Bridge           | `vmbr0`             |
-| DNS              | `1.1.1.1`, `8.8.8.8` |
-| CP node IPs      | `10.0.10.11-13/24`  |
-| Worker IPs       | `10.0.10.21-22/24`  |
-| GPU node IPs     | `10.0.10.31/24`     |
+| Setting          | Default value                   |
+|------------------|---------------------------------|
+| Cluster VIP      | `192.168.1.210`                 |
+| K8s API endpoint | `https://192.168.1.210:6443`    |
+| Gateway          | `192.168.1.1` (home router)     |
+| Bridge           | `vmbr0`                         |
+| DNS              | `1.1.1.1`, `8.8.8.8`            |
+| CP node IPs      | `192.168.1.211-213/24`          |
+| Worker IPs       | `192.168.1.221-222/24`          |
+| GPU node IPs     | `192.168.1.231` (gpu-1), `192.168.1.232` (gpu-2) |
 
 The control-plane VIP is managed by Talos's built-in VIP mechanism — no external load balancer needed. Each control-plane node's network interface includes a `vip` block pointing at the shared VIP.
 
@@ -66,13 +71,14 @@ The control-plane VIP is managed by Talos's built-in VIP mechanism — no extern
 
 | Layer              | Tool                          | Purpose                                                  |
 |--------------------|-------------------------------|----------------------------------------------------------|
-| Hypervisor         | Proxmox VE                    | Runs all VMs across 6 physical hosts                     |
+| Hypervisor         | Proxmox VE                    | Runs all VMs across 7 physical hosts                     |
 | Node OS            | Talos Linux (`v1.9.5`)        | Immutable, API-driven Linux — no SSH, no shell           |
 | VM provisioning    | Terraform + `bpg/proxmox` provider (~> 0.78) | Creates QEMU VMs with optional PCIe passthrough |
 | Cluster bootstrap  | Terraform + `siderolabs/talos` provider (~> 0.7) | Generates machine configs, applies them, bootstraps etcd |
+| Stack orchestration| Terragrunt                    | Hierarchical YAML config merging + per-env state isolation |
 | GitOps engine      | ArgoCD (Helm chart `argo-cd` v7.8.13) | Manages all in-cluster workloads from Git              |
 | CI                 | GitHub Actions                | Runs `terraform fmt`, `validate`, `tfsec`, and `plan` on PRs |
-| CD / Terraform PRs | Atlantis                      | Runs `terraform plan` on PR open, `apply` on PR approval |
+| CD / Terraform PRs | Atlantis                      | Runs `terragrunt plan` on PR open, `apply` on PR approval |
 
 ---
 
@@ -80,41 +86,58 @@ The control-plane VIP is managed by Talos's built-in VIP mechanism — no extern
 
 ```
 .
+├── .env                                  # Proxmox API token + SSH password (gitignored)
 ├── .github/
 │   └── workflows/
-│       └── terraform-plan.yml        # CI pipeline: lint → security → plan
-├── atlantis.yaml                     # Atlantis repo-level config
+│       └── terraform-plan.yml            # CI pipeline: lint → security → plan
+├── atlantis.yaml                         # Atlantis repo-level config
 ├── terraform/
-│   ├── environments/
-│   │   └── prod/
-│   │       ├── providers.tf          # Proxmox, Talos, Helm provider config
-│   │       ├── variables.tf          # All node definitions, network, cluster settings
-│   │       ├── main.tf               # Orchestration: VMs → Talos → ArgoCD
-│   │       └── terraform.tfvars.example  # Template for credentials
+│   ├── deploy.sh                         # Wrapper: loads .env → runs terragrunt
+│   ├── deployments/                      # Per-environment Terragrunt stacks
+│   │   ├── root.hcl                      # Shared backend + input plumbing
+│   │   ├── merge_configs.sh              # Hierarchical YAML deep-merge
+│   │   ├── config.yml                    # Global defaults
+│   │   ├── prod/
+│   │   │   ├── config.yml                # Prod overrides (3 CP + 2 W + 2 GPU)
+│   │   │   └── homelab-cluster/
+│   │   │       └── terragrunt.hcl        # Just `include "root"`; module auto-detected
+│   │   └── staging/
+│   │       ├── config.yml                # Staging overrides (1 CP + 1 W)
+│   │       └── homelab-cluster/
+│   │           └── terragrunt.hcl
 │   └── modules/
-│       ├── proxmox-vm/
-│       │   └── main.tf               # Single VM resource with dynamic GPU passthrough
-│       └── talos-cluster/
-│           ├── main.tf               # Secrets, machine config, bootstrap, kubeconfig
-│           └── talos-gpu-patch.yaml   # NVIDIA extensions + containerd runtime
+│       └── stacks/
+│           └── homelab-cluster/
+│               ├── main.tf               # Orchestration: VMs → Talos → ArgoCD
+│               ├── variables.tf          # All input variables
+│               ├── providers.tf          # Proxmox, Talos, Helm providers
+│               └── modules/
+│                   ├── proxmox-vm/
+│                   │   └── main.tf       # Single VM with dynamic GPU passthrough
+│                   └── talos-cluster/
+│                       ├── main.tf       # Secrets, configs, bootstrap, kubeconfig
+│                       └── talos-gpu-patch.yaml  # NVIDIA extensions + containerd
 └── kubernetes/
-    ├── apps/                          # ArgoCD Application manifests (app of apps)
-    ├── system/                        # Cluster-wide services (cert-manager, ingress, etc.)
-    └── bootstrap/                     # One-time bootstrap resources
+    ├── apps/                              # ArgoCD Application manifests (app of apps)
+    ├── system/                            # Cluster-wide services (cert-manager, ingress, etc.)
+    └── bootstrap/                         # One-time bootstrap resources
 ```
 
 ### Key file reference
 
 | File | What it does | When to edit |
 |------|-------------|--------------|
-| `terraform/environments/prod/variables.tf` | Defines every node's specs, IPs, MACs, PCI IDs as typed maps | Adding/removing nodes, changing hardware |
-| `terraform/environments/prod/main.tf` | Calls modules in order: VMs → Talos → ArgoCD bootstrap + root app | Changing orchestration logic, ArgoCD settings |
-| `terraform/environments/prod/providers.tf` | Configures Proxmox API, Talos, and Helm providers; remote state backend | Changing Proxmox endpoint, enabling remote state |
-| `terraform/modules/proxmox-vm/main.tf` | Creates one Proxmox QEMU VM with conditional GPU passthrough | Changing VM hardware defaults, disk config |
-| `terraform/modules/talos-cluster/main.tf` | Generates Talos machine configs per role, applies them, bootstraps etcd | Changing Talos config patches, cluster topology |
-| `terraform/modules/talos-cluster/talos-gpu-patch.yaml` | NVIDIA system extensions, kernel modules, containerd config | Upgrading GPU driver version, adding kernel params |
+| `terraform/deployments/<env>/config.yml` | Per-environment node maps, network, cluster settings | Adding/removing nodes, changing hardware |
+| `terraform/deployments/config.yml` | Global defaults shared across all environments | Changing Talos version, default DNS, etc. |
+| `terraform/deployments/root.hcl` | Terragrunt root config: input plumbing, remote backend (commented out) | Switching to remote state, changing retry policy |
+| `terraform/deployments/<env>/<stack>/terragrunt.hcl` | One-line include of `root.hcl` — stack name auto-derived from dir | Almost never |
+| `terraform/modules/stacks/homelab-cluster/main.tf` | Calls sub-modules: VMs → host routing → Talos → ArgoCD bootstrap + root app | Changing orchestration logic, ArgoCD settings |
+| `terraform/modules/stacks/homelab-cluster/modules/proxmox-vm/main.tf` | Creates one Proxmox QEMU VM with conditional GPU passthrough | Changing VM hardware defaults, disk config |
+| `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/main.tf` | Generates per-role machine configs, applies them, bootstraps etcd | Changing Talos config patches, cluster topology |
+| `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/talos-gpu-patch.yaml` | NVIDIA system extensions, kernel modules, containerd config | Upgrading GPU driver version, adding kernel params |
+| `terraform/deploy.sh` | Wrapper: `./deploy.sh <env> <stack> <plan|apply|destroy>` | Almost never |
 | `kubernetes/apps/` | ArgoCD watches this directory for Application manifests | Deploying any new workload |
-| `.github/workflows/terraform-plan.yml` | CI: format check → validate → tfsec → plan posted to PR | Changing CI behavior |
+| `.github/workflows/terraform-plan.yml` | CI: format check → validate → plan posted to PR | Changing CI behavior |
 | `atlantis.yaml` | Defines which dirs Atlantis watches and apply requirements | Adding environments, changing approval rules |
 
 ---
@@ -198,7 +221,7 @@ via hostpci block             kernel modules loaded:
 
 **Proxmox side** (handled by `proxmox-vm` module):
 - GPU VMs use `bios = "ovmf"` and `machine = "q35"`.
-- Each GPU's PCI address (e.g. `01:00`) is passed through via `hostpci` blocks.
+- Each GPU's PCI address (e.g. `01:00` for `gpu-1`'s GTX 1060, `08:00` for `gpu-2`'s RTX 3080) is passed through via `hostpci` blocks.
 - Proxmox host must have IOMMU enabled and the GPU bound to `vfio-pci` (host-level prerequisite, not managed by Terraform).
 
 **Talos side** (handled by `talos-gpu-patch.yaml`):
@@ -218,11 +241,11 @@ via hostpci block             kernel modules loaded:
 
 ### GitHub Actions (`.github/workflows/terraform-plan.yml`)
 
-Triggers on PRs to `main` that touch `terraform/**`. Runs three jobs:
+Triggers on PRs to `main` that touch `terraform/**`. Runs three jobs against `terraform/deployments/prod/homelab-cluster` via Terragrunt:
 
-1. **Lint & Format** — `terraform fmt -check -recursive` + `terraform validate` (init with `-backend=false`).
+1. **Lint & Format** — `terraform fmt -check -recursive` + `terragrunt validate-inputs` / `terragrunt hclfmt -check`.
 2. **Security Scan** — `tfsec` via the `aquasecurity/tfsec-action`. Currently `soft_fail: true` (non-blocking) — tighten once rules are tuned.
-3. **Terraform Plan** — runs `terraform plan` and posts the output as a PR comment inside a collapsible `<details>` block. Requires GitHub secrets `PROXMOX_API_URL` and `PROXMOX_API_TOKEN`.
+3. **Terraform Plan** — runs `terragrunt plan` and posts the output as a PR comment inside a collapsible `<details>` block. Requires GitHub secrets `PROXMOX_APITOKEN_ID`, `PROXMOX_APITOKEN_SECRET`, `PROXMOX_HOST`, `PROXMOX_PORT`, `PROXMOX_SSH_PASSWORD`.
 
 The plan job depends on lint + security passing first.
 
@@ -230,11 +253,11 @@ The plan job depends on lint + security passing first.
 
 Atlantis provides the PR-driven plan/apply workflow:
 
-- **Watches:** `terraform/environments/prod/` and all files under `terraform/modules/`.
+- **Watches:** `terraform/deployments/prod/homelab-cluster/` and all files under `terraform/modules/stacks/`.
 - **Auto-plan:** Enabled — opens a plan on every PR that modifies watched files.
 - **Apply requirements:** Requires both `approved` (at least one PR approval) and `mergeable` (branch protection checks pass).
 - **Parallel plan:** Enabled. **Parallel apply:** Disabled (one environment at a time for safety).
-- **Terraform version:** Pinned to `v1.11.4`.
+- **Workflow:** Custom `terragrunt` workflow that runs `terragrunt plan -out=$PLANFILE` and `terragrunt apply $PLANFILE`.
 
 GitHub Actions and Atlantis are complementary: Actions provides the fast-feedback lint/security/plan checks; Atlantis provides the gated apply workflow.
 
@@ -259,7 +282,7 @@ To deploy a new workload, add an ArgoCD `Application` manifest to `kubernetes/ap
 | `system/` | Cluster-wide infrastructure (cert-manager, ingress-nginx, nvidia-device-plugin, etc.) |
 | `bootstrap/` | One-time setup resources that don't fit the ArgoCD lifecycle |
 
-The root app's `repoURL` is set to `https://github.com/YOUR_USER/homelab.git` — update this in `terraform/environments/prod/main.tf` (line ~167).
+The root app's `repoURL` is set in [`terraform/deployments/config.yml`](../terraform/deployments/config.yml) (`argocd_repo_url`). Per-environment `argocd_target_revision` lives in each env's `config.yml`.
 
 ---
 
@@ -275,25 +298,27 @@ The root app's `repoURL` is set to `https://github.com/YOUR_USER/homelab.git` �
 ### Deploy
 
 ```bash
-cd terraform/environments/prod
+# 1. Populate .env at the repo root with your Proxmox credentials:
+#      PROXMOX_APITOKEN_ID=root@pam!claude-token
+#      PROXMOX_APITOKEN_SECRET=<uuid>
+#      PROXMOX_HOST=192.168.1.101
+#      PROXMOX_PORT=8006
+#      PROXMOX_SSH_PASSWORD="..."     # Used by remote-exec for host routing setup
 
-# 1. Create your tfvars (gitignored)
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your Proxmox URL and API token
+# 2. Edit terraform/deployments/prod/config.yml — node specs, IPs, PCI IDs.
 
-# 2. Edit variables.tf with your real node specs, IPs, MACs, and PCI IDs
-
-# 3. Initialize and apply
-terraform init
-terraform plan          # Review the plan
-terraform apply         # Creates VMs, bootstraps Talos, installs ArgoCD
+# 3. Plan + apply via the wrapper script (no router config needed —
+#    VMs live on the home subnet)
+./terraform/deploy.sh prod homelab-cluster plan
+./terraform/deploy.sh prod homelab-cluster apply
 
 # 4. Export configs
-terraform output -raw talosconfig > ~/.talos/config
-terraform output -raw kubeconfig > ~/.kube/config
+cd terraform/deployments/prod/homelab-cluster
+terragrunt output -raw talosconfig > ~/.talos/config
+terragrunt output -raw kubeconfig > ~/.kube/config
 
 # 5. Verify
-talosctl health
+talosctl --talosconfig ~/.talos/config health
 kubectl get nodes
 kubectl get applications -n argocd
 ```

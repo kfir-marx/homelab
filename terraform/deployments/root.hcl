@@ -37,20 +37,33 @@ inputs = merge(local.merged_config, {
 # ──────────────────────────────────────────────────────────────────────────────
 # Remote state (uncomment when ready)
 #
-# remote_state {
-#   backend = "s3"
-#   generate = {
-#     path      = "backend.tf"
-#     if_exists = "overwrite_terragrunt"
-#   }
-#   config = {
-#     bucket         = "homelab-tfstate"
-#     key            = "${dirname(local.relative_deployment_path)}/${local.stack}.tfstate"
-#     region         = "us-east-1"
-#     encrypt        = true
-#     dynamodb_table = "homelab-tflock"
-#   }
-# }
+remote_state {
+  backend = "s3"
+  generate = {
+    path      = "backend.tf"
+    if_exists = "overwrite_terragrunt"
+  }
+  config = {
+    bucket         = "kfir-homelab-tfstate"
+    key            = "${dirname(local.relative_deployment_path)}/${local.stack}.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "homelab-tflock"
+    encrypt        = true
+    dynamodb_table = "terragrunt-state-locks"
+
+    # Optional but highly recommended: Tag the resources Terragrunt creates
+    s3_bucket_tags = {
+      Owner = "DevOps"
+      Name  = "Terragrunt state storage"
+    }
+
+    dynamodb_table_tags = {
+      Owner = "DevOps"
+      Name  = "Terragrunt state lock table"
+    }
+  }
+}
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Auto-detect the Terraform stack module from the deployment directory name.

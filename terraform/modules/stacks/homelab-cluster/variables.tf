@@ -158,3 +158,30 @@ variable "gpu_nodes" {
   }))
   default = {}
 }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Windows VMs (mutually exclusive with gpu_nodes on the same Proxmox host —
+# see locals.windows_hosts in main.tf for the enforcement logic).
+# ──────────────────────────────────────────────────────────────────────────────
+
+variable "windows_vms" {
+  description = "Windows VM specs. Defining an entry here destroys any Talos GPU node that lives on the same Proxmox host."
+  type = map(object({
+    proxmox_node = string
+    vm_id        = number
+    cores        = number
+    memory_mb    = number
+    disk_size_gb = number
+    windows_iso  = string
+    virtio_iso   = string
+    pci_devices = list(object({
+      id   = string
+      pcie = bool
+    }))
+    usb_devices = list(object({
+      host = string
+      usb3 = bool
+    }))
+  }))
+  default = {}
+}

@@ -1,16 +1,25 @@
 ---
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  Production environment                                                    ║
-# ║  3 CP + 2 workers + 1 GPU on the 10.0.10.0/24 subnet.                     ║
+# ║                                                                            ║
+# ║  3 CP + 2 workers + 2 GPU on the home LAN (192.168.1.0/24).               ║
+# ║                                                                            ║
+# ║  IP convention (matches the rest of the homelab):                          ║
+# ║    192.168.1.101–199  → physical machines (Proxmox hosts, etc.)            ║
+# ║    192.168.1.200–299  → VMs                                                ║
+# ║                                                                            ║
+# ║  Putting VMs directly on the home subnet means no static route on the      ║
+# ║  router and no IP-forwarding tricks on the Proxmox host. Mac, kubectl,     ║
+# ║  talosctl, and any future Proxmox node can reach VMs natively over L2.     ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 # ── Cluster settings ─────────────────────────────────────────────────────────
 cluster_name: "homelab"
-cluster_endpoint: "https://10.0.10.100:6443"
-cluster_vip: "10.0.10.100"
+cluster_endpoint: "https://192.168.1.210:6443"
+cluster_vip: "192.168.1.210"
 
 # ── Network ──────────────────────────────────────────────────────────────────
-network_gateway: "10.0.10.1"
+network_gateway: "192.168.1.1"
 
 # ── ArgoCD ───────────────────────────────────────────────────────────────────
 argocd_target_revision: "main"
@@ -20,21 +29,21 @@ control_plane_nodes:
   cp-1:
     proxmox_node: "worker1"
     vm_id: 201
-    ip_address: "10.0.10.11/24"
+    ip_address: "192.168.1.211/24"
     cores: 4
     memory_mb: 8192
     disk_size_gb: 50
   cp-2:
     proxmox_node: "worker2"
     vm_id: 202
-    ip_address: "10.0.10.12/24"
+    ip_address: "192.168.1.212/24"
     cores: 4
     memory_mb: 8192
     disk_size_gb: 50
   cp-3:
     proxmox_node: "worker3"
     vm_id: 203
-    ip_address: "10.0.10.13/24"
+    ip_address: "192.168.1.213/24"
     cores: 4
     memory_mb: 8192
     disk_size_gb: 50
@@ -44,27 +53,81 @@ worker_nodes:
   worker-1:
     proxmox_node: "worker4"
     vm_id: 301
-    ip_address: "10.0.10.21/24"
+    ip_address: "192.168.1.221/24"
     cores: 8
     memory_mb: 16384
     disk_size_gb: 100
   worker-2:
     proxmox_node: "storage1"
     vm_id: 302
-    ip_address: "10.0.10.22/24"
+    ip_address: "192.168.1.222/24"
     cores: 4
     memory_mb: 10240
     disk_size_gb: 100
 
 # ── GPU nodes (PCIe passthrough) ─────────────────────────────────────────────
 gpu_nodes:
+  # GTX 1060 host — laptop-class CoffeeLake + 16 GiB RAM, ~100 GB disk.
   gpu-1:
     proxmox_node: "gpunvdgtx1060"
     vm_id: 401
-    ip_address: "10.0.10.31/24"
+    ip_address: "192.168.1.231/24"
     cores: 8
     memory_mb: 12288
     disk_size_gb: 100
     pci_devices:
       - id: "01:00"
         pcie: true
+  # RTX 3080 host — Ryzen 7 5800X (8c/16t), 64 GiB RAM, 850 GB local-lvm.
+  # IOMMU group 21 contains only the GPU at 0000:08:00.0.
+  gpu-2:
+    proxmox_node: "largegpu"
+    vm_id: 402
+    ip_address: "192.168.1.232/24"
+    cores: 8
+    memory_mb: 32768
+    disk_size_gb: 200
+    pci_devices:
+      - id: "08:00"
+        pcie: true
+
+# ── Windows VMs (mutually exclusive with gpu_nodes on the same host) ─────────
+# Uncomment a block below to take the GPU off the matching Talos GPU worker
+# (gpu-2 on largegpu) and hand it to a Windows VM instead. Re-comment to
+# flip back. The mutex is enforced in modules/stacks/homelab-cluster/main.tf
+# via locals.windows_hosts → local.active_gpu_nodes.
+#
+# Before applying with this enabled:
+#   1. Upload Win11 ISO and virtio-win.iso to the largegpu node's `local`
+#      ISO datastore (Proxmox UI → largegpu → local → ISO Images → Upload).
+#      virtio-win.iso source:
+#        https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso
+#   2. Fill in usb_devices below — run `lsusb` on the largegpu Proxmox host
+#      with mouse/keyboard/controllers plugged in, then copy the VID:PID
+#      pairs (e.g. "046d:c52b") into the list.
+windows_vms: {}
+#  largegpu-win11:
+#    proxmox_node: "largegpu"
+#    vm_id: 502
+#    cores: 8
+#    memory_mb: 32768
+#    disk_size_gb: 200
+#    windows_iso: "Win11_25H2_EnglishInternational_x64_v2.iso"
+#    virtio_iso: "virtio-win.iso"
+#    pci_devices:
+#      - id: "08:00"
+#        pcie: true
+#    # Mix of VID:PID (replug-safe) and bus-port (used where two devices
+#    # share a VID:PID — both Novalite dongles emulate Sony 054c:09cc).
+#    # Re-pull /nodes/largegpu/hardware/usb if devices move between ports.
+#    usb_devices:
+#      - host: "046d:c077"    # Logitech USB Optical Mouse
+#        usb3: false
+#      - host: "046d:c34b"    # Logitech USB Keyboard
+#        usb3: false
+#      - host: "1-2"          # Novalite controller #1 dongle (bus1 port2)
+#        usb3: false
+#      - host: "5-3"          # Novalite controller #2 dongle (bus5 port3)
+#        usb3: false
+#      - host: "33fa:0012"    # BARROT Bluetooth 6.0 adapter
+#        usb3: false

@@ -7,10 +7,23 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 locals {
+  # Mutual exclusion between Talos GPU workers and Windows VMs on the same
+  # physical Proxmox host: a single GPU can only be PCIe-passed-through to
+  # one VM at a time, so when a Windows VM is defined for host X, the Talos
+  # GPU node on host X is filtered out of every downstream resource. Flipping
+  # the toggle in config.yml destroys one VM and creates the other in the
+  # same apply.
+  windows_hosts = toset([for w in var.windows_vms : w.proxmox_node])
+
+  active_gpu_nodes = {
+    for name, node in var.gpu_nodes : name => node
+    if !contains(local.windows_hosts, node.proxmox_node)
+  }
+
   all_proxmox_nodes = distinct(concat(
     [for n in var.control_plane_nodes : n.proxmox_node],
     [for n in var.worker_nodes : n.proxmox_node],
-    [for n in var.gpu_nodes : n.proxmox_node],
+    [for n in local.active_gpu_nodes : n.proxmox_node],
   ))
 
   talos_image_url = "https://factory.talos.dev/image/${var.talos_schematic_id}/${var.talos_version}/nocloud-amd64.raw.xz"
@@ -73,7 +86,7 @@ module "worker_vms" {
 
 module "gpu_vms" {
   source   = "./modules/proxmox-vm"
-  for_each = var.gpu_nodes
+  for_each = local.active_gpu_nodes
 
   hostname      = each.key
   proxmox_node  = each.value.proxmox_node
@@ -87,6 +100,32 @@ module "gpu_vms" {
   image_file_id = proxmox_virtual_environment_download_file.talos_image[each.value.proxmox_node].id
 
   pci_devices = each.value.pci_devices
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 1c. Windows VMs — share Proxmox hosts (and GPUs) with Talos GPU workers.
+#     Defining an entry here causes the matching gpu_nodes entry to be
+#     stripped via local.active_gpu_nodes, so the Talos VM is destroyed
+#     before the Windows VM is created. Remove the entry to flip back.
+# ──────────────────────────────────────────────────────────────────────────────
+
+module "windows_vms" {
+  source   = "./modules/proxmox-windows-vm"
+  for_each = var.windows_vms
+
+  hostname     = each.key
+  proxmox_node = each.value.proxmox_node
+  vm_id        = each.value.vm_id
+  cores        = each.value.cores
+  memory_mb    = each.value.memory_mb
+  disk_size_gb = each.value.disk_size_gb
+  bridge       = var.network_bridge
+
+  windows_iso = each.value.windows_iso
+  virtio_iso  = each.value.virtio_iso
+
+  pci_devices = each.value.pci_devices
+  usb_devices = each.value.usb_devices
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -162,7 +201,7 @@ module "talos_cluster" {
   }
 
   gpu_worker_nodes = {
-    for name, node in var.gpu_nodes : name => {
+    for name, node in local.active_gpu_nodes : name => {
       ip_address = node.ip_address
       gpu        = true
     }

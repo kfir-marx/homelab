@@ -7,7 +7,7 @@ terraform {
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = "~> 0.78"
+      version = "~> 0.105.0"
     }
   }
 }
@@ -107,6 +107,22 @@ resource "proxmox_virtual_environment_vm" "this" {
   network_device {
     bridge = var.bridge
     model  = "virtio"
+  }
+
+  # Cloud-init cidata drive — Talos's nocloud platform reads this on first
+  # boot and configures eth0 with the static IP, so the Talos provider can
+  # reach the VM at its expected endpoint when it applies the machine config.
+  # Without this block Talos comes up in maintenance mode on a DHCP lease,
+  # and `talos_machine_configuration_apply` can't find the node.
+  initialization {
+    datastore_id = "local-lvm"
+
+    ip_config {
+      ipv4 {
+        address = var.ip_address
+        gateway = var.gateway
+      }
+    }
   }
 
   dynamic "efi_disk" {
