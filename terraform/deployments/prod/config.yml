@@ -78,15 +78,17 @@ gpu_nodes:
     pci_devices:
       - id: "01:00"
         pcie: true
-  # RTX 3080 host — Ryzen 7 5800X (8c/16t), 64 GiB RAM, 850 GB local-lvm.
+  # RTX 3080 host — Ryzen 7 5800X (8c/16t), 64 GiB RAM, 794 GB local-lvm.
   # IOMMU group 21 contains only the GPU at 0000:08:00.0.
+  # Disk sized to ~20% of largegpu's NVMe LVM-thin (Windows VM gets ~80%).
+  # Coexists with windows_vms.largegpu-win11; only one runs at a time.
   gpu-2:
     proxmox_node: "largegpu"
     vm_id: 402
     ip_address: "192.168.1.232/24"
     cores: 8
     memory_mb: 32768
-    disk_size_gb: 200
+    disk_size_gb: 159
     pci_devices:
       - id: "08:00"
         pcie: true
@@ -105,29 +107,41 @@ gpu_nodes:
 #   2. Fill in usb_devices below — run `lsusb` on the largegpu Proxmox host
 #      with mouse/keyboard/controllers plugged in, then copy the VID:PID
 #      pairs (e.g. "046d:c52b") into the list.
-windows_vms: 
- largegpu-win11:
-   proxmox_node: "largegpu"
-   vm_id: 502
-   cores: 8
-   memory_mb: 32768
-   disk_size_gb: 200
-   windows_iso: "Win11_25H2_EnglishInternational_x64_v2.iso"
-   virtio_iso: "virtio-win.iso"
-   pci_devices:
-     - id: "08:00"
-       pcie: true
-   # Mix of VID:PID (replug-safe) and bus-port (used where two devices
-   # share a VID:PID — both Novalite dongles emulate Sony 054c:09cc).
-   # Re-pull /nodes/largegpu/hardware/usb if devices move between ports.
-   usb_devices:
-     - host: "046d:c077"    # Logitech USB Optical Mouse
-       usb3: false
-     - host: "046d:c34b"    # Logitech USB Keyboard
-       usb3: false
-     - host: "1-2"          # Novalite controller #1 dongle (bus1 port2)
-       usb3: false
-     - host: "5-3"          # Novalite controller #2 dongle (bus5 port3)
-       usb3: false
-     - host: "33fa:0012"    # BARROT Bluetooth 6.0 adapter
-       usb3: false
+windows_vms:
+  largegpu-win11:
+    proxmox_node: "largegpu"
+    vm_id: 502
+    cores: 8
+    memory_mb: 32768
+    # ~80% of largegpu's NVMe LVM-thin (gpu-2 Talos worker gets the other ~20%).
+    # Plenty for Windows + Steam library; bulk media goes to storage1-bulk NFS.
+    disk_size_gb: 635
+    windows_iso: "Win11_25H2_EnglishInternational_x64_v2.iso"
+    virtio_iso: "virtio-win.iso"
+    # template_vm_id: when null/unset → INSTALL mode (boots Windows ISO).
+    # After you finish installing apps and clone-then-template VM 502 in
+    # the Proxmox UI (Clone → mode: Full Clone → new VMID like 9000 →
+    # then Convert-to-Template on 9000), set:
+    #   template_vm_id: 9000
+    # Subsequent applies will recreate this VM as a fresh clone of the
+    # template in ~30s (linked clone — change full_clone: true to false
+    # for that, or keep true for an independent disk copy).
+    # template_vm_id: 9000
+    # full_clone: true
+    pci_devices:
+      - id: "08:00"
+        pcie: true
+    # Mix of VID:PID (replug-safe) and bus-port (used where two devices
+    # share a VID:PID — both Novalite dongles emulate Sony 054c:09cc).
+    # Re-pull /nodes/largegpu/hardware/usb if devices move between ports.
+    usb_devices:
+      - host: "046d:c077"    # Logitech USB Optical Mouse
+        usb3: false
+      - host: "046d:c34b"    # Logitech USB Keyboard
+        usb3: false
+      - host: "1-2"          # Novalite controller #1 dongle (bus1 port2)
+        usb3: false
+      - host: "5-3"          # Novalite controller #2 dongle (bus5 port3)
+        usb3: false
+      - host: "33fa:0012"    # BARROT Bluetooth 6.0 adapter
+        usb3: false

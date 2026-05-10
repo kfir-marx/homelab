@@ -1,0 +1,52 @@
+# Cluster-scoped NFS PV backed by storage1's 9.3 TB NTFS bulk drive.
+# Source filesystem is NTFS mounted via the kernel `ntfs3` driver on the
+# Proxmox host, then exported over NFSv4 to the home LAN. RWX so multiple
+# pods (e.g. *arr stack alongside the streaming server) can share the
+# library. PVC lives in the consuming app's namespace — see the example
+# at the bottom.
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: storage1-bulk-pv
+  labels:
+    storage: storage1-bulk
+    medium: hdd
+spec:
+  capacity:
+    storage: 9Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage1
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  nfs:
+    server: 192.168.1.106 # storage1 Proxmox host (NFS server)
+    path: /mnt/storage1-bulk
+---
+# Empty StorageClass so the PV/PVC binding has a name to match on.
+# Not a provisioner — PVs here are statically defined.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-storage1
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: Immediate
+reclaimPolicy: Retain
+---
+# Example PVC — uncomment and move to the consuming app's namespace.
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: storage1-bulk
+#   namespace: media
+# spec:
+#   accessModes:
+#     - ReadWriteMany
+#   storageClassName: nfs-storage1
+#   resources:
+#     requests:
+#       storage: 9Ti
+#   volumeName: storage1-bulk-pv

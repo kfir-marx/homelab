@@ -160,20 +160,30 @@ variable "gpu_nodes" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Windows VMs (mutually exclusive with gpu_nodes on the same Proxmox host —
-# see locals.windows_hosts in main.tf for the enforcement logic).
+# Windows VMs — coexist with gpu_nodes on the same Proxmox host. Both have
+# the GPU configured for passthrough; Proxmox enforces start-time exclusivity.
+# Toggle which is running with `qm start/shutdown` (manual). Talos auto-starts
+# on boot, Windows VMs do not (on_boot=false in the module).
+#
+# Two install modes per VM, picked by template_vm_id:
+#   • template_vm_id = null → INSTALL mode: empty VM with Win11 ISO attached
+#                              for a one-time install + apps + drivers.
+#   • template_vm_id = NNNN → CLONE mode: clone a prebuilt template VM
+#                              (fast — ~30s, all your apps already installed).
 # ──────────────────────────────────────────────────────────────────────────────
 
 variable "windows_vms" {
-  description = "Windows VM specs. Defining an entry here destroys any Talos GPU node that lives on the same Proxmox host."
+  description = "Windows VM specs. Both gpu_nodes (Talos) and windows_vms can target the same proxmox_node + GPU; only one runs at a time (Proxmox enforces at start)."
   type = map(object({
-    proxmox_node = string
-    vm_id        = number
-    cores        = number
-    memory_mb    = number
-    disk_size_gb = number
-    windows_iso  = string
-    virtio_iso   = string
+    proxmox_node   = string
+    vm_id          = number
+    cores          = number
+    memory_mb      = number
+    disk_size_gb   = number
+    windows_iso    = string
+    virtio_iso     = string
+    template_vm_id = optional(number) # null = install from ISO, set = clone from template
+    full_clone     = optional(bool, true)
     pci_devices = list(object({
       id   = string
       pcie = bool

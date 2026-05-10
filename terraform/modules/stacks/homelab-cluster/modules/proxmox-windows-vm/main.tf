@@ -1,23 +1,23 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  Module: proxmox-windows-vm                                                ║
 # ║                                                                            ║
-# ║  Creates a single Proxmox QEMU VM tailored for a Windows 11 install:       ║
-# ║    • UEFI (OVMF) + Secure Boot pre-enrolled keys      → Win11 requirement  ║
-# ║    • vTPM 2.0 (tpm_state)                             → Win11 requirement  ║
-# ║    • q35 chipset                                      → required for       ║
-# ║                                                         clean PCIe         ║
-# ║                                                         passthrough        ║
-# ║    • Two CD-ROM devices: Windows installer + virtio-win drivers ISO        ║
-# ║    • Empty SCSI disk for Windows to install onto                           ║
-# ║    • Optional GPU passthrough (the same physical card the Talos GPU        ║
-# ║      worker normally uses — the parent stack enforces that only one of     ║
-# ║      the two VMs exists at a time, see homelab-cluster/main.tf).           ║
-# ║    • Optional USB passthrough — typically mouse, keyboard, and game        ║
-# ║      controllers so the VM is usable as a TV/console PC.                   ║
+# ║  Two operating modes, picked by var.template_vm_id:                        ║
+# ║                                                                            ║
+# ║  1. INSTALL mode (template_vm_id == null)                                  ║
+# ║     Builds an empty VM with everything Win11 needs: q35 + OVMF + Secure    ║
+# ║     Boot pre-enrolled keys, vTPM 2.0, scsi0 install disk, Windows ISO on   ║
+# ║     ide2. Used ONCE to install Windows + apps + drivers, after which the   ║
+# ║     VM is shut down, cloned in the Proxmox UI to a new VM (e.g. 9000),     ║
+# ║     and that copy is converted to a template.                              ║
+# ║                                                                            ║
+# ║  2. CLONE mode (template_vm_id set to the template's VMID)                 ║
+# ║     Skips disk/EFI/TPM/CDROM blocks — those are inherited from the         ║
+# ║     template's snapshot. Each apply produces a fresh, ready-to-use         ║
+# ║     Windows VM in ~30 seconds (linked clone). GPU passthrough, USB,        ║
+# ║     CPU/RAM/cores all configured per-clone.                                ║
 # ║                                                                            ║
 # ║  Networking is left to DHCP (Windows ignores nocloud cidata, so static     ║
-# ║  IP via Terraform is not possible without an Autounattend.xml setup —      ║
-# ║  out of scope here). DHCP-reserve at the router for stable addressing.    ║
+# ║  IP via Terraform is not possible without an Autounattend.xml setup).     ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 terraform {
@@ -46,6 +46,23 @@ variable "vm_id" {
   type = number
 }
 
+variable "template_vm_id" {
+  description = <<-EOT
+    VMID of a Proxmox template to clone from. When set, the resource clones
+    that template (fast, fully-installed Windows VM) instead of building an
+    empty install VM. When null (default), runs INSTALL mode and attaches
+    the Windows ISO so you can do a one-time install.
+  EOT
+  type    = number
+  default = null
+}
+
+variable "full_clone" {
+  description = "Full clone (independent disk) vs linked clone (CoW from template). Full = safer, slower; linked = ~30s and shares disk pages with the template."
+  type        = bool
+  default     = true
+}
+
 variable "cores" {
   type    = number
   default = 8
@@ -58,31 +75,32 @@ variable "memory_mb" {
 
 variable "disk_size_gb" {
   type        = number
-  description = "Size of the empty install disk; Windows 11 needs ~64 GB minimum"
+  description = "INSTALL mode: size of the install disk. CLONE mode: ignored — disk size is inherited from the template (resize manually post-clone if needed)."
   default     = 150
 }
 
 variable "datastore_id" {
-  description = "Proxmox datastore for the VM disk, EFI vars and TPM state"
+  description = "Proxmox datastore for VM disk, EFI vars and TPM state (INSTALL mode)"
   type        = string
   default     = "local-lvm"
 }
 
 variable "iso_datastore_id" {
-  description = "Proxmox datastore where the Windows + virtio-win ISOs live"
+  description = "Proxmox datastore where the Windows + virtio-win ISOs live (INSTALL mode)"
   type        = string
   default     = "local"
 }
 
 variable "windows_iso" {
-  description = "Filename of the Windows installer ISO inside iso_datastore_id"
+  description = "Filename of the Windows installer ISO inside iso_datastore_id (INSTALL mode)"
   type        = string
+  default     = ""
 }
 
-# NOTE: The virtio-win drivers ISO is *not* attached by Terraform — bpg/proxmox
-# v0.105 only allows one `cdrom` block per VM. Attach virtio-win.iso manually
-# for the install (Proxmox UI → VM → Hardware → Add → CD/DVD → IDE3 →
-# local:iso/virtio-win.iso), then detach once Windows boots.
+# NOTE: bpg/proxmox v0.105 only allows one `cdrom` block per VM. Attach
+# virtio-win.iso manually for the install (Proxmox UI → Hardware → Add →
+# CD/DVD on a SATA slot — SATA is hot-pluggable, IDE is not), then detach
+# once Windows is installed.
 variable "virtio_iso" {
   description = "Reserved for future use (currently mounted manually — see module header)"
   type        = string
@@ -121,6 +139,15 @@ variable "usb_devices" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Locals — derive mode flags
+# ──────────────────────────────────────────────────────────────────────────────
+
+locals {
+  is_install_mode = var.template_vm_id == null
+  is_clone_mode   = var.template_vm_id != null
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # VM resource
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -144,40 +171,61 @@ resource "proxmox_virtual_environment_vm" "this" {
     dedicated = var.memory_mb
   }
 
-  # ── Disks ──────────────────────────────────────────────────────────────────
+  # ── CLONE mode: source from template ───────────────────────────────────────
+  # When set, all the install-only blocks below (disk, efi_disk, tpm_state,
+  # cdrom) are skipped and inherited from the template instead.
+  dynamic "clone" {
+    for_each = local.is_clone_mode ? [1] : []
+    content {
+      vm_id = var.template_vm_id
+      full  = var.full_clone
+    }
+  }
+
+  # ── INSTALL mode: empty install disk ───────────────────────────────────────
   # scsi0 = empty install target. Windows can't see virtio-scsi without the
   # driver — at the disk-selection screen during install, click "Load driver"
-  # and point at the virtio-win ISO mounted on ide3 below.
-  disk {
-    datastore_id = var.datastore_id
-    interface    = "scsi0"
-    size         = var.disk_size_gb
-    file_format  = "raw"
-    ssd          = true
-    discard      = "on"
-    iothread     = true
+  # and point at the virtio-win ISO mounted on a SATA slot.
+  dynamic "disk" {
+    for_each = local.is_install_mode ? [1] : []
+    content {
+      datastore_id = var.datastore_id
+      interface    = "scsi0"
+      size         = var.disk_size_gb
+      file_format  = "raw"
+      ssd          = true
+      discard      = "on"
+      iothread     = true
+    }
   }
 
-  # ── EFI + TPM (Win11 hard requirements) ────────────────────────────────────
-  efi_disk {
-    datastore_id      = var.datastore_id
-    type              = "4m"
-    pre_enrolled_keys = true # Microsoft Secure Boot keys baked in
+  # ── INSTALL mode: EFI + TPM (Win11 hard requirements) ──────────────────────
+  dynamic "efi_disk" {
+    for_each = local.is_install_mode ? [1] : []
+    content {
+      datastore_id     = var.datastore_id
+      type             = "4m"
+      pre_enrolled_keys = true # Microsoft Secure Boot keys baked in
+    }
   }
 
-  tpm_state {
-    datastore_id = var.datastore_id
-    version      = "v2.0"
+  dynamic "tpm_state" {
+    for_each = local.is_install_mode ? [1] : []
+    content {
+      datastore_id = var.datastore_id
+      version      = "v2.0"
+    }
   }
 
-  # ── Installer ISO ─────────────────────────────────────────────────────────
-  # Only one cdrom block is permitted by bpg/proxmox 0.105, so this is the
-  # Windows installer. Mount virtio-win.iso on a second IDE slot manually in
-  # the Proxmox UI before powering on (needed to load vioscsi during install
-  # and NetKVM during OOBE — see module header).
-  cdrom {
-    file_id   = "${var.iso_datastore_id}:iso/${var.windows_iso}"
-    interface = "ide2"
+  # ── INSTALL mode: Windows installer ISO ────────────────────────────────────
+  # bpg/proxmox v0.105 caps cdrom at 1 block. Mount virtio-win.iso manually
+  # on a SATA slot (hot-pluggable) before powering on for the first time.
+  dynamic "cdrom" {
+    for_each = local.is_install_mode ? [1] : []
+    content {
+      file_id   = "${var.iso_datastore_id}:iso/${var.windows_iso}"
+      interface = "ide2"
+    }
   }
 
   # ── Network ────────────────────────────────────────────────────────────────
@@ -189,6 +237,8 @@ resource "proxmox_virtual_environment_vm" "this" {
   }
 
   # ── PCIe passthrough (GPU) ─────────────────────────────────────────────────
+  # Configured in both modes — clones get their own GPU per VM, not the
+  # template's. (Templates are shut down anyway, so they hold no live PCIe.)
   dynamic "hostpci" {
     for_each = var.pci_devices
     content {
@@ -212,14 +262,13 @@ resource "proxmox_virtual_environment_vm" "this" {
     type = "win11"
   }
 
-  # Try the installer CD first; once Windows writes its bootloader to scsi0,
-  # OVMF's NVRAM remembers the Windows EFI entry and boots that automatically.
-  boot_order = ["ide2", "scsi0"]
+  # INSTALL mode: boot from CD first so the Windows installer runs on first
+  # power-on. CLONE mode: boot order is inherited from the template (which
+  # was set up to boot from scsi0/the Windows install).
+  boot_order = local.is_install_mode ? ["ide2", "scsi0"] : []
 
-  on_boot = false # don't auto-start; user picks talos vs windows manually
+  on_boot = false # don't auto-start; user toggles between Talos and Windows manually
 
-  # Don't have Terraform bounce the VM on every drift in these mutable fields
-  # (the user will tweak USB lists, memory, etc. in the Proxmox UI sometimes).
   lifecycle {
     ignore_changes = [
       started,

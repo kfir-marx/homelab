@@ -7,23 +7,18 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 locals {
-  # Mutual exclusion between Talos GPU workers and Windows VMs on the same
-  # physical Proxmox host: a single GPU can only be PCIe-passed-through to
-  # one VM at a time, so when a Windows VM is defined for host X, the Talos
-  # GPU node on host X is filtered out of every downstream resource. Flipping
-  # the toggle in config.yml destroys one VM and creates the other in the
-  # same apply.
-  windows_hosts = toset([for w in var.windows_vms : w.proxmox_node])
-
-  active_gpu_nodes = {
-    for name, node in var.gpu_nodes : name => node
-    if !contains(local.windows_hosts, node.proxmox_node)
-  }
-
+  # Talos GPU workers and Windows VMs can coexist on the same Proxmox host.
+  # Both have the same GPU configured for passthrough — Proxmox enforces
+  # exclusivity at *start time*, not at config time, so only one of them
+  # runs at any moment. Toggle by stopping one and starting the other:
+  #   `qm shutdown 402 && qm start 502`   (Talos → Windows)
+  #   `qm shutdown 502 && qm start 402`   (Windows → Talos)
+  # Talos GPU VMs auto-start on Proxmox boot (on_boot=true in proxmox-vm);
+  # Windows VMs do not (on_boot=false in proxmox-windows-vm).
   all_proxmox_nodes = distinct(concat(
     [for n in var.control_plane_nodes : n.proxmox_node],
     [for n in var.worker_nodes : n.proxmox_node],
-    [for n in local.active_gpu_nodes : n.proxmox_node],
+    [for n in var.gpu_nodes : n.proxmox_node],
   ))
 
   # Using .zst (not .xz): bpg/proxmox v0.105 only knows how to decompress
@@ -89,7 +84,7 @@ module "worker_vms" {
 
 module "gpu_vms" {
   source   = "./modules/proxmox-vm"
-  for_each = local.active_gpu_nodes
+  for_each = var.gpu_nodes
 
   hostname      = each.key
   proxmox_node  = each.value.proxmox_node
@@ -106,10 +101,9 @@ module "gpu_vms" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 1c. Windows VMs — share Proxmox hosts (and GPUs) with Talos GPU workers.
-#     Defining an entry here causes the matching gpu_nodes entry to be
-#     stripped via local.active_gpu_nodes, so the Talos VM is destroyed
-#     before the Windows VM is created. Remove the entry to flip back.
+# 1c. Windows VMs — coexist with Talos GPU workers on the same Proxmox host.
+#     Both VMs have the GPU configured for passthrough; only one runs at a
+#     time (Proxmox enforces at start). Use `qm start/shutdown` to switch.
 # ──────────────────────────────────────────────────────────────────────────────
 
 module "windows_vms" {
@@ -126,6 +120,11 @@ module "windows_vms" {
 
   windows_iso = each.value.windows_iso
   virtio_iso  = each.value.virtio_iso
+
+  # Clone-mode plumbing: when template_vm_id is set in config.yml, the
+  # module skips ISO/disk/EFI/TPM blocks and clones the named template.
+  template_vm_id = each.value.template_vm_id
+  full_clone     = each.value.full_clone
 
   pci_devices = each.value.pci_devices
   usb_devices = each.value.usb_devices
@@ -204,7 +203,7 @@ module "talos_cluster" {
   }
 
   gpu_worker_nodes = {
-    for name, node in local.active_gpu_nodes : name => {
+    for name, node in var.gpu_nodes : name => {
       ip_address = node.ip_address
       gpu        = true
     }
