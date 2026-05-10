@@ -39,7 +39,7 @@ inputs = merge(local.merged_config, {
 # defined below before any AWS call (state read/write, lock acquisition).
 # Local AWS credentials must have sts:AssumeRole on the target role.
 # ──────────────────────────────────────────────────────────────────────────────
-iam_role = "arn:aws:iam::572412944390:role/TerragruntExecutionRole"
+iam_role = get_env("AWS_IAM_ROLE")
 
 remote_state {
   backend = "s3"
