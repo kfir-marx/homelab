@@ -26,7 +26,9 @@ locals {
     [for n in local.active_gpu_nodes : n.proxmox_node],
   ))
 
-  talos_image_url = "https://factory.talos.dev/image/${var.talos_schematic_id}/${var.talos_version}/nocloud-amd64.raw.xz"
+  # Using .zst (not .xz): bpg/proxmox v0.105 only knows how to decompress
+  # gz/zst/bz2. The factory serves both — zst gives the smallest download.
+  talos_image_url = "https://factory.talos.dev/image/${var.talos_schematic_id}/${var.talos_version}/nocloud-amd64.raw.zst"
 
   # Routing: derive subnet prefix and gateway host from the first CP node
   vm_subnet_prefix     = split("/", values(var.control_plane_nodes)[0].ip_address)[1]
@@ -36,12 +38,13 @@ locals {
 resource "proxmox_virtual_environment_download_file" "talos_image" {
   for_each = toset(local.all_proxmox_nodes)
 
-  content_type = "iso"
-  datastore_id = var.talos_image_datastore
-  node_name    = each.value
-  url          = local.talos_image_url
-  file_name    = "talos-${var.talos_version}-nocloud-amd64.img"
-  overwrite    = false
+  content_type            = "iso"
+  datastore_id            = var.talos_image_datastore
+  node_name               = each.value
+  url                     = local.talos_image_url
+  file_name               = "talos-${var.talos_version}-nocloud-amd64.img"
+  decompression_algorithm = "zst" # required — file_name has no .zst suffix
+  overwrite               = false
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -226,8 +229,12 @@ resource "helm_release" "argocd" {
   repository       = "https://argoproj.github.io/argo-helm"
   chart            = "argo-cd"
   version          = "7.8.13"
-  wait             = true
-  timeout          = 600
+  # wait=false: argocd-server is type LoadBalancer but there's no LB controller
+  # at bootstrap time (MetalLB comes in via GitOps). Helm `--wait` hangs on the
+  # pending external IP for 10 minutes and marks the release failed even though
+  # all pods are Ready. Skip the wait — ArgoCD comes up fine without it.
+  wait    = false
+  timeout = 600
 
   values = [
     yamlencode({

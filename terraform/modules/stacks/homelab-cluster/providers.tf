@@ -19,13 +19,19 @@ terraform {
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Proxmox provider — talks to the Proxmox VE API.
-# Create an API token in Datacenter → Permissions → API Tokens.
-# The token needs PVEVMAdmin + PVEDatastoreUser on /.
+#
+# Auth: username + password (root@pam), NOT API token. Reason:
+# Proxmox 8.x refuses to let API tokens set raw `hostpci` config — even
+# root-realm tokens with privsep=0 hit "only root can set 'hostpci0' config
+# for non-mapped devices". Real-user auth bypasses that. The alternative
+# (PCI Resource Mappings, then `mapping = "name"` in the hostpci block) is
+# the longer-term cleaner fix; switch when ready.
 # ──────────────────────────────────────────────────────────────────────────────
 provider "proxmox" {
-  endpoint  = var.proxmox_api_url
-  api_token = var.proxmox_api_token
-  insecure  = true
+  endpoint = var.proxmox_api_url
+  username = "root@pam"
+  password = var.proxmox_ssh_password
+  insecure = true
 
   ssh {
     agent    = true

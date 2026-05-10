@@ -35,8 +35,12 @@ inputs = merge(local.merged_config, {
 })
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Remote state (uncomment when ready)
-#
+# Remote state — S3 + DynamoDB locking. Terragrunt assumes the IAM role
+# defined below before any AWS call (state read/write, lock acquisition).
+# Local AWS credentials must have sts:AssumeRole on the target role.
+# ──────────────────────────────────────────────────────────────────────────────
+iam_role = "arn:aws:iam::572412944390:role/TerragruntExecutionRole"
+
 remote_state {
   backend = "s3"
   generate = {
@@ -48,11 +52,8 @@ remote_state {
     key            = "${dirname(local.relative_deployment_path)}/${local.stack}.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "homelab-tflock"
-    encrypt        = true
-    dynamodb_table = "terragrunt-state-locks"
+    dynamodb_table = "kfir-homelab-terragrunt-state-locks"
 
-    # Optional but highly recommended: Tag the resources Terragrunt creates
     s3_bucket_tags = {
       Owner = "DevOps"
       Name  = "Terragrunt state storage"
@@ -64,7 +65,6 @@ remote_state {
     }
   }
 }
-# ──────────────────────────────────────────────────────────────────────────────
 
 # Auto-detect the Terraform stack module from the deployment directory name.
 # deployments/prod/homelab-cluster → modules/stacks/homelab-cluster

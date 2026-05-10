@@ -105,29 +105,29 @@ gpu_nodes:
 #   2. Fill in usb_devices below — run `lsusb` on the largegpu Proxmox host
 #      with mouse/keyboard/controllers plugged in, then copy the VID:PID
 #      pairs (e.g. "046d:c52b") into the list.
-windows_vms: {}
-#  largegpu-win11:
-#    proxmox_node: "largegpu"
-#    vm_id: 502
-#    cores: 8
-#    memory_mb: 32768
-#    disk_size_gb: 200
-#    windows_iso: "Win11_25H2_EnglishInternational_x64_v2.iso"
-#    virtio_iso: "virtio-win.iso"
-#    pci_devices:
-#      - id: "08:00"
-#        pcie: true
-#    # Mix of VID:PID (replug-safe) and bus-port (used where two devices
-#    # share a VID:PID — both Novalite dongles emulate Sony 054c:09cc).
-#    # Re-pull /nodes/largegpu/hardware/usb if devices move between ports.
-#    usb_devices:
-#      - host: "046d:c077"    # Logitech USB Optical Mouse
-#        usb3: false
-#      - host: "046d:c34b"    # Logitech USB Keyboard
-#        usb3: false
-#      - host: "1-2"          # Novalite controller #1 dongle (bus1 port2)
-#        usb3: false
-#      - host: "5-3"          # Novalite controller #2 dongle (bus5 port3)
-#        usb3: false
-#      - host: "33fa:0012"    # BARROT Bluetooth 6.0 adapter
-#        usb3: false
+windows_vms: 
+ largegpu-win11:
+   proxmox_node: "largegpu"
+   vm_id: 502
+   cores: 8
+   memory_mb: 32768
+   disk_size_gb: 200
+   windows_iso: "Win11_25H2_EnglishInternational_x64_v2.iso"
+   virtio_iso: "virtio-win.iso"
+   pci_devices:
+     - id: "08:00"
+       pcie: true
+   # Mix of VID:PID (replug-safe) and bus-port (used where two devices
+   # share a VID:PID — both Novalite dongles emulate Sony 054c:09cc).
+   # Re-pull /nodes/largegpu/hardware/usb if devices move between ports.
+   usb_devices:
+     - host: "046d:c077"    # Logitech USB Optical Mouse
+       usb3: false
+     - host: "046d:c34b"    # Logitech USB Keyboard
+       usb3: false
+     - host: "1-2"          # Novalite controller #1 dongle (bus1 port2)
+       usb3: false
+     - host: "5-3"          # Novalite controller #2 dongle (bus5 port3)
+       usb3: false
+     - host: "33fa:0012"    # BARROT Bluetooth 6.0 adapter
+       usb3: false
