@@ -81,13 +81,15 @@ gpu_nodes:
   # RTX 3080 host — Ryzen 7 5800X (8c/16t), 64 GiB RAM, 794 GB local-lvm.
   # IOMMU group 21 contains only the GPU at 0000:08:00.0.
   # Disk sized to ~20% of largegpu's NVMe LVM-thin (Windows VM gets ~80%).
-  # Coexists with windows_vms.largegpu-win11; only one runs at a time.
+  # CPU/RAM maxed: this VM and largegpu-win11 both eat the entire host —
+  # only one runs at a time (Proxmox enforces at start). Leave ~2 GB for
+  # the Proxmox host itself; everything else goes to the active VM.
   gpu-2:
     proxmox_node: "largegpu"
     vm_id: 402
     ip_address: "192.168.1.232/24"
-    cores: 8
-    memory_mb: 32768
+    cores: 16
+    memory_mb: 61440
     disk_size_gb: 159
     pci_devices:
       - id: "08:00"
@@ -111,8 +113,11 @@ windows_vms:
   largegpu-win11:
     proxmox_node: "largegpu"
     vm_id: 502
-    cores: 8
-    memory_mb: 32768
+    # CPU/RAM maxed: gaming server, takes the entire host when running.
+    # 5800X has 8c/16t with SMT — expose all 16 threads as 1 socket × 16 cores.
+    # 61440 MB = 60 GB; host has ~62.7 GB usable, leaving ~2 GB for Proxmox.
+    cores: 16
+    memory_mb: 61440
     # ~80% of largegpu's NVMe LVM-thin (gpu-2 Talos worker gets the other ~20%).
     # Plenty for Windows + Steam library; bulk media goes to storage1-bulk NFS.
     disk_size_gb: 635
