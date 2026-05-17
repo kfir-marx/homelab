@@ -1,0 +1,35 @@
+# cloudflared — Cloudflare Tunnel daemon. Maintains an outbound
+# persistent connection to Cloudflare's edge; no inbound port needed.
+# Ingress rules (which hostname routes to which in-cluster service)
+# are configured in the Cloudflare dashboard against the named tunnel.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudflared
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/cloudflared
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cloudflared
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    # The tunnel-credentials Secret is created out-of-band (see runbook);
+    # don't let ArgoCD prune it.
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: cloudflared-credentials
+      jsonPointers:
+        - /data

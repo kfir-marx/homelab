@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tailscale-router
+  labels:
+    # Userspace mode + NET_ADMIN is needed for tailscaled routing.
+    # 'baseline' permits these; 'restricted' would block them.
+    pod-security.kubernetes.io/enforce: baseline

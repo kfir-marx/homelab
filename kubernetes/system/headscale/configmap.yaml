@@ -1,0 +1,104 @@
+# Headscale server config. Format targets headscale v0.23.x.
+# server_url MUST match the public hostname you expose via cloudflared,
+# because Tailscale clients use it both to reach the coordinator AND
+# to verify the TLS cert presented by Cloudflare's edge.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: headscale-config
+  namespace: headscale
+data:
+  config.yaml: |
+    server_url: https://admin.547600.xyz
+
+    # In-cluster listeners. TLS terminates at Cloudflare's edge — the
+    # tunnel from cloudflared to this pod is plaintext over the
+    # cluster network, which is fine since it never leaves the cluster.
+    listen_addr: 0.0.0.0:8080
+    metrics_listen_addr: 127.0.0.1:9090
+    grpc_listen_addr: 0.0.0.0:50443
+    grpc_allow_insecure: false
+
+    # CGNAT range Tailscale uses by default. Don't change unless you
+    # know what you're doing — clients hard-code expectations here.
+    prefixes:
+      v4: 100.64.0.0/10
+      v6: fd7a:115c:a1e0::/48
+      allocation: sequential
+
+    # Use Tailscale's public DERP relays for NAT traversal fallback.
+    # Self-hosted DERP is an optimisation; not needed to get going.
+    derp:
+      urls:
+        - https://controlplane.tailscale.com/derpmap/default
+      paths: []
+      auto_update_enabled: true
+      update_frequency: 24h
+      server:
+        enabled: false
+
+    disable_check_updates: true
+    ephemeral_node_inactivity_timeout: 30m
+
+    database:
+      type: sqlite
+      sqlite:
+        # NFS-backed. SQLite + NFSv4 works for single-writer access
+        # (headscale only ever has one pod). If you ever scale to >1
+        # replica, switch to PostgreSQL.
+        path: /var/lib/headscale/db.sqlite
+
+    log:
+      level: info
+      format: text
+
+    # MagicDNS gives every registered device a short hostname
+    # (e.g. laptop.homelab.ts.net) without touching your real DNS.
+    dns:
+      magic_dns: true
+      base_domain: homelab.ts.net
+      nameservers:
+        global:
+          - 1.1.1.1
+          - 8.8.8.8
+      search_domains: []
+
+    # Persistent key material. Generated on first start; do NOT delete
+    # without re-registering every client.
+    private_key_path: /var/lib/headscale/private.key
+    noise:
+      private_key_path: /var/lib/headscale/noise_private.key
+
+    # ACL policy — start permissive, lock down later via Git.
+    policy:
+      mode: file
+      path: /etc/headscale/acl.hujson
+
+    unix_socket: /var/run/headscale/headscale.sock
+    unix_socket_permission: "0770"
+  acl.hujson: |
+    // HuJSON (JSON with comments + trailing commas). Headscale parses this directly.
+    {
+      "groups": {
+        "group:admin": ["kfir@homelab"],
+      },
+
+      "tagOwners": {
+        // Subnet router runs unattended — owned by the admin group so
+        // headscale doesn't prompt for human re-auth on every restart.
+        "tag:router": ["group:admin"],
+      },
+
+      "acls": [
+        // Admins can reach anything. Tighten later if you onboard others.
+        { "action": "accept", "src": ["group:admin"], "dst": ["*:*"] },
+      ],
+
+      // Auto-approve the LAN subnet advertised by the router so you
+      // don't have to `headscale routes enable` after every restart.
+      "autoApprovers": {
+        "routes": {
+          "192.168.1.0/24": ["tag:router"],
+        },
+      },
+    }

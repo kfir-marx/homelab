@@ -1,0 +1,85 @@
+# Single-replica StatefulSet — SQLite + NFS only safely tolerates one
+# writer. If you ever want HA, the right move is PostgreSQL, not more
+# headscale replicas with shared sqlite.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: headscale
+  namespace: headscale
+  labels:
+    app: headscale
+spec:
+  serviceName: headscale
+  replicas: 1
+  selector:
+    matchLabels:
+      app: headscale
+  template:
+    metadata:
+      labels:
+        app: headscale
+      annotations:
+        # Force pod restart on config change. Without this, a configmap
+        # edit only takes effect when the pod happens to restart.
+        checksum/config: placeholder
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: headscale
+          image: headscale/headscale:0.23.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+          env:
+            - name: TZ
+              value: UTC
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: grpc
+              containerPort: 50443
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/headscale
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/headscale
+            - name: socket
+              mountPath: /var/run/headscale
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: headscale-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: headscale-data
+        - name: socket
+          emptyDir: {}

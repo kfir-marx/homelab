@@ -1,0 +1,38 @@
+# tailscaled stores node state (machine key, DERP map, peer list) in a
+# Kubernetes Secret instead of on disk. That requires it to read/write
+# Secrets and read Events in its own namespace.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tailscale-router
+  namespace: tailscale-router
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tailscale-router
+  namespace: tailscale-router
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    # 'create' is needed so tailscaled can initialise its state secret
+    # on first run; after that it only needs get/update.
+    verbs: ["create", "get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tailscale-router
+  namespace: tailscale-router
+subjects:
+  - kind: ServiceAccount
+    name: tailscale-router
+    namespace: tailscale-router
+roleRef:
+  kind: Role
+  name: tailscale-router
+  apiGroup: rbac.authorization.k8s.io

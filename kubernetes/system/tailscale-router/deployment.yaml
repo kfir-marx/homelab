@@ -1,0 +1,67 @@
+# Userspace networking mode — TS_USERSPACE=true. This avoids needing
+# /dev/net/tun (Talos doesn't expose it to pods by default) and keeps
+# the container runAsNonRoot-friendly. Throughput is lower than kernel
+# mode, but plenty for admin traffic (kubectl, Proxmox UI, SSH).
+#
+# Single replica only — two routers advertising the same /24 would
+# fight over route announcements in Headscale.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tailscale-router
+  namespace: tailscale-router
+  labels:
+    app: tailscale-router
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate: two tailscaled instances with the
+    # same auth key + hostname race for the same node identity.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tailscale-router
+  template:
+    metadata:
+      labels:
+        app: tailscale-router
+    spec:
+      serviceAccountName: tailscale-router
+      containers:
+        - name: tailscale
+          image: tailscale/tailscale:v1.74.1
+          imagePullPolicy: IfNotPresent
+          env:
+            # Store tailscaled state in this Secret instead of /var/lib.
+            # tailscaled creates + manages the Secret itself.
+            - name: TS_KUBE_SECRET
+              value: tailscale-router-state
+            - name: TS_USERSPACE
+              value: "true"
+            - name: TS_AUTH_ONCE
+              value: "true"
+            # Auth key produced by `headscale preauthkeys create
+            # --user kfir --tags tag:router --reusable`. See runbook.
+            - name: TS_AUTHKEY
+              valueFrom:
+                secretKeyRef:
+                  name: tailscale-auth
+                  key: TS_AUTHKEY
+            - name: TS_EXTRA_ARGS
+              value: >-
+                --login-server=https://admin.547600.xyz
+                --advertise-routes=192.168.1.0/24
+                --advertise-tags=tag:router
+                --hostname=k8s-router
+                --accept-dns=false
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

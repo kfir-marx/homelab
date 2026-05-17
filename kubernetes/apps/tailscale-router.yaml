@@ -1,0 +1,41 @@
+# Tailscale subnet router — bridges the WireGuard mesh to 192.168.1.0/24.
+# Without this, a remote Tailscale client reaches Headscale-registered
+# peers only; advertising the LAN as a route is what lets you hit
+# Proxmox (192.168.1.101) and other LAN hosts from outside.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tailscale-router
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/tailscale-router
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tailscale-router
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  # The auth-key Secret is created out-of-band after Headscale generates
+  # a preauthkey for tag:router — don't let ArgoCD prune it. Tailscale
+  # itself also writes node state into a self-managed Secret.
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: tailscale-auth
+      jsonPointers:
+        - /data
+    - group: ""
+      kind: Secret
+      name: tailscale-router-state
+      jsonPointers:
+        - /data

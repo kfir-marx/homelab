@@ -1,0 +1,63 @@
+# Cluster-scoped NFS PV backed by gpunvdgtx1060's gpu1-extra LVM-thin
+# pool. Carved out + ext4-formatted on the host, then exported over
+# NFSv4 to the home LAN. Replaces storage1-bulk for any workload that
+# was depending on it while the storage1 host is down.
+#
+# Host-side setup on 192.168.1.105 (gpunvdgtx1060) — one-time:
+#
+#   # 1. Inspect LVM — find the VG that backs gpu1-extra and its thin pool LV.
+#   vgs
+#   lvs
+#
+#   # 2. Carve a thin LV out of the pool. Adjust <vg> + <pool> from step 1.
+#   lvcreate -V 800G -T <vg>/<pool> -n storage2-bulk
+#   mkfs.ext4 /dev/<vg>/storage2-bulk
+#
+#   # 3. Mount persistently.
+#   mkdir -p /mnt/storage2-bulk
+#   echo '/dev/<vg>/storage2-bulk /mnt/storage2-bulk ext4 defaults,nofail 0 2' >> /etc/fstab
+#   mount /mnt/storage2-bulk
+#
+#   # 4. NFS server.
+#   apt update && apt install -y nfs-kernel-server
+#   echo '/mnt/storage2-bulk 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash,fsid=10)' \
+#     >> /etc/exports
+#   exportfs -ra
+#   systemctl enable --now nfs-kernel-server
+#
+#   # 5. Verify from a cluster node:
+#   #   showmount -e 192.168.1.105
+#
+# fsid=10 is a per-export NFSv4 identifier — pick a small int that
+# isn't already used in /etc/exports on this host.
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: storage2-bulk-pv
+  labels:
+    storage: storage2-bulk
+    medium: ssd
+spec:
+  capacity:
+    storage: 800Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  nfs:
+    server: 192.168.1.105 # gpunvdgtx1060 Proxmox host (NFS server)
+    path: /mnt/storage2-bulk
+---
+# Static StorageClass — same pattern as nfs-storage1. No dynamic
+# provisioning; PVs are declared explicitly so they bind by name.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-storage2
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: Immediate
+reclaimPolicy: Retain

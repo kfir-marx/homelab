@@ -1,0 +1,49 @@
+# Headscale needs persistent state for: SQLite DB, private keys (lose
+# these and every client must re-register), and the ACL file.
+# Backed by storage2-bulk (NFSv4 on gpunvdgtx1060, 192.168.1.105) —
+# dedicated subdirectory + dedicated PV so an accidental PVC delete on
+# one side can't blow away the other.
+#
+# Before this PV will bind, SSH to gpunvdgtx1060 and run:
+#   mkdir -p /mnt/storage2-bulk/headscale
+#   chown 1000:1000 /mnt/storage2-bulk/headscale
+# (uid 1000 = the `headscale` user inside the upstream image)
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: headscale-data-pv
+  labels:
+    app: headscale
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  # Hard-bind to the PVC below so a future PVC against nfs-storage2
+  # in some other namespace can't accidentally grab this volume.
+  claimRef:
+    namespace: headscale
+    name: headscale-data
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/headscale
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: headscale-data
+  namespace: headscale
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 5Gi
+  volumeName: headscale-data-pv

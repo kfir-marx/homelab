@@ -1,0 +1,27 @@
+# Headscale — self-hosted Tailscale coordination server.
+# Exposes admin.547600.xyz publicly via cloudflared tunnel (see cloudflared.yaml).
+# Once registered, clients reach in-cluster + LAN services through a
+# subnet router (see tailscale-router.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: headscale
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/headscale
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: headscale
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
