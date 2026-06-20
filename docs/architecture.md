@@ -28,14 +28,16 @@ Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 7-nod
 │  worker2       ── cp-2      (CP) │   │  ArgoCD ─► apps/             │
 │  worker3       ── cp-3      (CP) │   │            system/storage/   │
 │  worker4       ── worker-1  (W)  │   │            system/...        │
-│  storage1      ── worker-2  (W)  │   │            bootstrap/        │
+│  node6         ── worker-2  (W)  │   │            bootstrap/        │
 │                ── (NFS export of │   │                              │
 │                   storage1-bulk) │   │  GPU nodes tainted with      │
 │  gpunvdgtx1060 ── gpu-1     (G)  │   │  nvidia.com/gpu=NoSchedule   │
-│  largegpu      ── gpu-2     (G) ─┼───┤                              │
-│                ── largegpu-win11 │   │  NFS PV backed by            │
-│                   (Windows)      │   │  192.168.1.106:/mnt/         │
-│                ── ⚡ runtime mutex│   │  storage1-bulk               │
+│                ── (NFS export of │   │                              │
+│                   storage2-bulk) │   │  NFS PVs (static, RWX):      │
+│  largegpu      ── gpu-2     (G) ─┼───┤   bulk     → node6 10 TB     │
+│                ── largegpu-win11 │   │              /mnt/data10tb   │
+│                   (Windows)      │   │   critical → gtx1060 800 GB  │
+│                ── ⚡ runtime mutex│   │              /mnt/storage2…  │
 │                   (start-time)   │   │                              │
 └──────────────────────────────────┘   └──────────────────────────────┘
 ```
@@ -48,12 +50,23 @@ Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 7-nod
 | `worker2`          | `192.168.1.102`  | `cp-2`            | `192.168.1.212`  | Control plane                          | 4 cores, 8 GiB RAM, 50 GB disk             |
 | `worker3`          | `192.168.1.103`  | `cp-3`            | `192.168.1.213`  | Control plane                          | 4 cores, 8 GiB RAM, 50 GB disk             |
 | `worker4`          | `192.168.1.104`  | `worker-1`        | `192.168.1.221`  | Compute worker                         | 8 cores, 16 GiB RAM, 100 GB disk           |
-| `storage1`         | `192.168.1.106`  | `worker-2`        | `192.168.1.222`  | Compute worker + NFS server            | 4 cores, 10 GiB RAM, 100 GB disk           |
-| `gpunvdgtx1060`    | `192.168.1.105`  | `gpu-1`           | `192.168.1.231`  | GPU worker (GTX 1060)                  | 8 cores, 12 GiB RAM, 100 GB disk, PCIe GPU |
+| `node6`            | `192.168.1.106`  | `worker-2`        | `192.168.1.222`  | Compute worker + NFS server (bulk tier) | 6 cores, 16 GiB RAM, 100 GB disk           |
+| `gpunvdgtx1060`    | `192.168.1.105`  | `gpu-1`           | `192.168.1.231`  | GPU worker (GTX 1060) + NFS server (critical tier) | 8 cores, 12 GiB RAM, 100 GB disk, PCIe GPU |
 | `largegpu`         | `192.168.1.107`  | `gpu-2`           | `192.168.1.232`  | GPU worker (RTX 3080) — ⚡ runtime mutex | 16 cores, 60 GiB RAM, 159 GB disk, PCIe GPU |
 | `largegpu`         | `192.168.1.107`  | `largegpu-win11`  | DHCP             | Windows 11 gaming VM — ⚡ runtime mutex  | 16 cores, 60 GiB RAM, 635 GB disk, PCIe GPU + USB |
 
 The cluster VIP is `192.168.1.210` — control-plane Talos VIP, also the Kubernetes API endpoint.
+
+### Node ownership and permanence
+
+Only **`gpunvdgtx1060`** (the GTX 1060 host) is permanently owned hardware. Every other Proxmox host in the table above — `worker1–4`, `node6`, and `largegpu` — is borrowed: some belong to the current employer, some belong to a friend who may eventually ask them back. They're available for now, but the cluster has to assume any one of them could leave on short notice.
+
+Practical consequences that the rest of this document depends on:
+
+- **Critical / personal data stays on `gpunvdgtx1060`.** This is the only host where state can't simply disappear. Personal cloud (Immich), config snapshots, and anything irreplaceable should bind against the **critical tier** (`storage2-bulk-pv`, see [Kubernetes storage](#kubernetes-storage) below).
+- **Bulk / non-critical / reproducible data goes on the borrowed hosts.** Media libraries (Plex/Jellyfin, *arr stack), large model caches, and anything that can be re-downloaded land on the **bulk tier** (`storage1-bulk-pv` on node6, 10 TB).
+- **`node6` is the "big storage server, non-critical" role.** It was previously the `storage1` Proxmox host; same physical machine (192.168.1.106) re-joined to Proxmox under the new name. The Kubernetes PV/StorageClass names (`storage1-bulk-pv`, `nfs-storage1`) were kept so existing bindings continue to resolve.
+- **Workload placement is best-effort today.** Pods that handle critical state should prefer a `nodeSelector`/affinity pinning them to permanent hardware once the cluster has a control-plane / worker on `gpunvdgtx1060` — for now the cluster just survives a host loss by re-scheduling, and the storage tier choice is the load-bearing safeguard.
 
 **IP convention:**
 
@@ -133,20 +146,26 @@ Beyond each host's default `local` (Directory, /var/lib/vz) and `local-lvm` (LVM
 
 | Host         | Storage name        | Type         | Size       | Purpose                                                         |
 |--------------|---------------------|--------------|------------|-----------------------------------------------------------------|
-| `largegpu`   | `local-lvm`         | LVM-thin     | 794 GB     | Windows VM (~635 GB) + Talos `gpu-2` (~159 GB), 80/20 split     |
-| `largegpu`   | `largegpu-hdd`      | Directory    | 1.83 TB    | ISOs, templates, backups (slow HDD, low-churn data)             |
-| `gpunvdgtx1060` | `gpu1-extra`     | LVM-thin     | 912 GB     | Spare capacity for additional VMs on the gpu1 host              |
-| `storage1`   | `storage1-bulk` (NFS) | NTFS via `ntfs3` driver, NFSv4 export | 9.1 TB | Media/bulk storage for K8s workloads (preserves existing NTFS data) |
+| `largegpu`      | `local-lvm`           | LVM-thin     | 794 GB     | Windows VM (~635 GB) + Talos `gpu-2` (~159 GB), 80/20 split             |
+| `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | ISOs, templates, backups (slow HDD, low-churn data)                    |
+| `gpunvdgtx1060` | `gpu1-extra`          | LVM-thin     | 912 GB     | Spare capacity for additional VMs + carved LV for `storage2-bulk` NFS  |
+| `gpunvdgtx1060` | `storage2-bulk` (NFS) | ext4 LV on `gpu1-extra`, NFSv4 export | 800 GB | **Critical tier** — Immich, personal data (only permanent host)        |
+| `node6`         | `storage1-bulk` (NFS) | NTFS via `ntfs3` driver, NFSv4 export | 10 TB  | **Bulk tier** — media for K8s workloads (host is borrowed, see [Node ownership](#node-ownership-and-permanence)) |
 
 ### Kubernetes storage
 
-The `storage1-bulk` NFS share is exposed to the cluster as a static `PersistentVolume` + `StorageClass` in [`kubernetes/system/storage/storage1-bulk.yaml`](../kubernetes/system/storage/storage1-bulk.yaml):
+Two static NFS-backed `PersistentVolume`s are exposed to the cluster, one per tier (see [Node ownership and permanence](#node-ownership-and-permanence) for why two tiers exist):
 
-- `PV` capacity: 9 Ti, `ReadWriteMany`, `nfs-storage1` storage class, `Retain` reclaim policy.
-- Pods bind by creating a PVC against `storageClassName: nfs-storage1` and (optionally) pinning `volumeName: storage1-bulk-pv`.
-- Mounted with `nfsvers=4.2,hard` for media workloads (Plex/Jellyfin, *arr stack).
+| PV name             | StorageClass     | Backed by                                       | Size   | Tier — use case                                                                            |
+|---------------------|------------------|-------------------------------------------------|--------|--------------------------------------------------------------------------------------------|
+| `storage1-bulk-pv`  | `nfs-storage1`   | `node6:/mnt/data10tb` (NTFS via `ntfs3`)        | 9 Ti   | **Bulk** — media (Plex/Jellyfin, *arr), model caches, anything reproducible                |
+| `storage2-bulk-pv`  | `nfs-storage2`   | `gpunvdgtx1060:/mnt/storage2-bulk` (ext4 on LVM-thin) | 800 Gi | **Critical** — Immich, config snapshots, personal data, anything that must survive a host loss |
 
-To add a workload, drop the PVC into the consuming app's namespace alongside its ArgoCD `Application`. No dynamic provisioner — PVs are static.
+Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`) — each file's header has the one-time host-side setup (mount, exports, `nfs-kernel-server`).
+
+To consume one: create a PVC in the app's namespace with the matching `storageClassName` and pin `volumeName` to the PV name. No dynamic provisioner — PVs are static, so a typo in `storageClassName` will just leave the PVC `Pending` forever rather than silently provisioning somewhere wrong.
+
+> **Picking a tier:** if losing the data is merely inconvenient (re-download / re-rip), use `storage1-bulk-pv`. If losing it is unrecoverable (personal photos, config you don't have a backup of, etc.), use `storage2-bulk-pv`. When in doubt, critical tier — 800 GB on the permanent host is the scarce resource, but it's the one that survives a borrowed-machine return.
 
 ---
 
@@ -195,7 +214,8 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
 │   ├── apps/                             # ArgoCD Application manifests (app of apps)
 │   ├── system/                           # Cluster-wide infrastructure
 │   │   └── storage/
-│   │       └── storage1-bulk.yaml        # NFS PV + StorageClass for media
+│   │       ├── storage1-bulk.yaml        # Bulk tier: NFS PV + SC, 10 TB NTFS on node6
+│   │       └── storage2-bulk.yaml        # Critical tier: NFS PV + SC, 800 GB ext4 on gpunvdgtx1060
 │   └── bootstrap/                        # One-time bootstrap resources
 └── terraform/
     ├── deploy.sh                         # Wrapper: loads .env → runs terragrunt
@@ -241,7 +261,8 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
 | `terraform/modules/stacks/homelab-cluster/modules/proxmox-windows-vm/main.tf` | Windows 11 VM: INSTALL mode (build) or CLONE mode (from template) | Changing Windows VM defaults, drivers |
 | `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/main.tf` | Per-role machine configs, applies them, bootstraps etcd | Changing Talos config patches, cluster topology |
 | `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/talos-gpu-patch.yaml` | NVIDIA extensions, kernel modules, containerd config | Upgrading GPU driver version |
-| `kubernetes/system/storage/storage1-bulk.yaml` | NFS-backed `PersistentVolume` + `StorageClass` for the media share | Resizing, retargeting NFS server |
+| `kubernetes/system/storage/storage1-bulk.yaml` | NFS-backed `PV` + `StorageClass` — bulk tier (10 TB NTFS on node6) | Resizing, retargeting NFS server, host-side export setup |
+| `kubernetes/system/storage/storage2-bulk.yaml` | NFS-backed `PV` + `StorageClass` — critical tier (800 GB ext4 on gpunvdgtx1060) | Resizing the carved LV, host-side export setup |
 | `kubernetes/apps/` | ArgoCD watches this directory for Application manifests | Deploying any new workload |
 | `.github/workflows/terraform-plan.yml` | CI: format check → validate → plan posted to PR | Changing CI behavior |
 | `atlantis.yaml` | Defines which dirs Atlantis watches and apply requirements | Adding environments, changing approval rules |
@@ -398,7 +419,7 @@ via hostpci block             kernel modules loaded:
 **Proxmox side** (handled by `proxmox-vm` / `proxmox-windows-vm`):
 - GPU VMs use `bios = "ovmf"` and `machine = "q35"`.
 - Each GPU's PCI address (e.g. `01:00` for `gpu-1`'s GTX 1060, `08:00` for `gpu-2`/`largegpu-win11`'s RTX 3080) is passed through via `hostpci` blocks.
-- AMD-V (SVM) must be enabled in BIOS on AMD hosts (largegpu, storage1).
+- AMD-V (SVM) must be enabled in BIOS on AMD hosts (largegpu, node6).
 - IOMMU enabled on the host kernel cmdline (`intel_iommu=on` or `amd_iommu=on`); GPU bound to `vfio-pci`.
 
 **Talos side** (handled by `talos-gpu-patch.yaml`):
@@ -517,7 +538,10 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 
 - [ ] Deploy NVIDIA device plugin DaemonSet via ArgoCD (in `kubernetes/system/`)
 - [ ] Deploy ingress controller + cert-manager for TLS termination
-- [ ] Deploy media stack PVC(s) bound to `storage1-bulk-pv`
+- [ ] **Verify NFS export on node6** — `showmount -e 192.168.1.106` should list `/mnt/data10tb`. If not, follow the one-time setup in the [storage1-bulk.yaml](../kubernetes/system/storage/storage1-bulk.yaml) header (install `nfs-kernel-server`, add `/etc/exports` entry, `exportfs -ra`)
+- [ ] Confirm `/mnt/data10tb` is mounted on node6 with the `ntfs3` kernel driver (not the legacy `ntfs-3g` fuse driver — `ntfs3` is faster and is what the architecture assumes)
+- [ ] Deploy media stack PVC(s) bound to `storage1-bulk-pv` (bulk tier)
+- [ ] Deploy Immich + any other personal/critical workloads with PVCs bound to `storage2-bulk-pv` (critical tier) — **never** point critical apps at `storage1-bulk-pv`, node6 is borrowed
 - [ ] Convert the live Windows VM to a template once apps + games are installed; set `template_vm_id` in `config.yml`
 - [ ] Tighten `tfsec` from `soft_fail: true` to blocking once rules are tuned
 - [ ] Switch from `root@pam` password auth to PCI Resource Mappings to allow API tokens back
@@ -534,4 +558,5 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 - **IP addresses use CIDR notation** (`192.168.1.232/24`) in variables. Modules use `split("/", ip)[0]` to extract the bare IP and parse the prefix for routing.
 - **All VMs use `cpu.type = "host"`** — required for GPU passthrough, best performance everywhere else.
 - **The `largegpu` mutex is enforced at runtime, not config time.** Two VMs sharing one GPU = one runs, the other can't start. This lets you flip between them in seconds with no Terraform churn.
-- **Bulk media storage is NTFS+NFS, not Ceph/Longhorn.** The 9 TB drive on storage1 had existing NTFS data worth preserving. Exporting it via the kernel `ntfs3` driver + NFSv4 was simpler than converting (which would require a full copy off + back).
+- **Bulk media storage is NTFS+NFS, not Ceph/Longhorn.** The 10 TB drive on node6 had existing NTFS data worth preserving. Exporting it via the kernel `ntfs3` driver + NFSv4 was simpler than converting (which would require a full copy off + back).
+- **Two storage tiers, split by host permanence — not performance.** Critical/personal data binds against `storage2-bulk-pv` on `gpunvdgtx1060` (the only permanent host). Bulk/reproducible data binds against `storage1-bulk-pv` on node6 (borrowed hardware). The tier names map onto *survivability* of the underlying machine, not on IOPS or media class. See [Node ownership and permanence](#node-ownership-and-permanence).

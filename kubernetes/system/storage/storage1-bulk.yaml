@@ -1,9 +1,39 @@
-# Cluster-scoped NFS PV backed by storage1's 9.3 TB NTFS bulk drive.
+# Cluster-scoped NFS PV backed by node6's 10 TB NTFS bulk drive.
 # Source filesystem is NTFS mounted via the kernel `ntfs3` driver on the
-# Proxmox host, then exported over NFSv4 to the home LAN. RWX so multiple
-# pods (e.g. *arr stack alongside the streaming server) can share the
-# library. PVC lives in the consuming app's namespace — see the example
-# at the bottom.
+# Proxmox host (node6, 192.168.1.106) at /mnt/data10tb, then exported over
+# NFSv4 to the home LAN. RWX so multiple pods (e.g. *arr stack alongside
+# the streaming server) can share the library. PVC lives in the consuming
+# app's namespace — see the example at the bottom.
+#
+# The Proxmox host was previously named `storage1`; it was re-joined to the
+# cluster as `node6`. PV/StorageClass names are kept (`storage1-bulk-pv`,
+# `nfs-storage1`) so any in-cluster PVC bindings continue to resolve.
+#
+# Storage tier: BULK / NON-CRITICAL. node6 is not a permanent host —
+# critical or personal data (Immich, etc.) should target the
+# `storage2-bulk` tier (on gpunvdgtx1060, the only permanent machine).
+#
+# Host-side setup on 192.168.1.106 (node6) — verify before first use:
+#
+#   # 1. Confirm the bulk drive is mounted (NTFS via ntfs3).
+#   mount | grep /mnt/data10tb
+#   #   /dev/sdX1 on /mnt/data10tb type ntfs3 (rw,relatime,uid=0,...)
+#   # If not mounted, add an /etc/fstab entry such as:
+#   #   /dev/disk/by-uuid/<uuid> /mnt/data10tb ntfs3 defaults,nofail,uid=0,gid=0,umask=0022 0 0
+#
+#   # 2. Install + enable the NFS kernel server (Proxmox 9 / Debian 13).
+#   apt update && apt install -y nfs-kernel-server
+#
+#   # 3. Export the share. fsid=1 is a per-export NFSv4 identifier —
+#   #    pick a small int unique within this host's /etc/exports.
+#   echo '/mnt/data10tb 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash,fsid=1)' \
+#     >> /etc/exports
+#   exportfs -ra
+#   systemctl enable --now nfs-kernel-server
+#
+#   # 4. Verify from any cluster node:
+#   #   showmount -e 192.168.1.106
+#   #   mount -t nfs4 192.168.1.106:/mnt/data10tb /mnt/test && umount /mnt/test
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -12,6 +42,7 @@ metadata:
   labels:
     storage: storage1-bulk
     medium: hdd
+    tier: bulk
 spec:
   capacity:
     storage: 9Ti
@@ -23,8 +54,8 @@ spec:
     - nfsvers=4.2
     - hard
   nfs:
-    server: 192.168.1.106 # storage1 Proxmox host (NFS server)
-    path: /mnt/storage1-bulk
+    server: 192.168.1.106 # node6 Proxmox host (NFS server, previously `storage1`)
+    path: /mnt/data10tb
 ---
 # Empty StorageClass so the PV/PVC binding has a name to match on.
 # Not a provisioner — PVs here are statically defined.

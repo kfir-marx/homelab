@@ -30,22 +30,22 @@ control_plane_nodes:
     proxmox_node: "worker1"
     vm_id: 201
     ip_address: "192.168.1.211/24"
-    cores: 4
-    memory_mb: 8192
+    cores: 2
+    memory_mb: 4096
     disk_size_gb: 50
   cp-2:
     proxmox_node: "worker2"
     vm_id: 202
     ip_address: "192.168.1.212/24"
-    cores: 4
-    memory_mb: 8192
+    cores: 2
+    memory_mb: 4096
     disk_size_gb: 50
   cp-3:
     proxmox_node: "worker3"
     vm_id: 203
     ip_address: "192.168.1.213/24"
-    cores: 4
-    memory_mb: 8192
+    cores: 2
+    memory_mb: 4096
     disk_size_gb: 50
 
 # ── Worker nodes (compute) ───────────────────────────────────────────────────
@@ -57,12 +57,18 @@ worker_nodes:
     cores: 8
     memory_mb: 16384
     disk_size_gb: 100
+  # node6 is the bulk-storage host: 10 TB NTFS drive mounted at /mnt/data10tb
+  # and exported over NFSv4 as `storage1-bulk` (see kubernetes/system/storage/
+  # storage1-bulk.yaml). The Proxmox host was previously named `storage1`;
+  # it was re-joined to the cluster as `node6` and the K8s PV/SC names were
+  # kept for compatibility with any existing PVC bindings.
+  # Specs bumped from 4c/10G to 6c/16G to give media/bulk workloads headroom.
   worker-2:
-    proxmox_node: "storage1"
+    proxmox_node: "node6"
     vm_id: 302
     ip_address: "192.168.1.222/24"
-    cores: 4
-    memory_mb: 10240
+    cores: 6
+    memory_mb: 16384
     disk_size_gb: 100
 
 # ── GPU nodes (PCIe passthrough) ─────────────────────────────────────────────
@@ -119,7 +125,8 @@ windows_vms:
     cores: 16
     memory_mb: 61440
     # ~80% of largegpu's NVMe LVM-thin (gpu-2 Talos worker gets the other ~20%).
-    # Plenty for Windows + Steam library; bulk media goes to storage1-bulk NFS.
+    # Plenty for Windows + Steam library; bulk media goes to storage1-bulk NFS
+    # (on node6, the bulk-storage host — 10 TB NTFS over NFSv4).
     disk_size_gb: 635
     windows_iso: "Win11_25H2_EnglishInternational_x64_v2.iso"
     virtio_iso: "virtio-win.iso"

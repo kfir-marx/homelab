@@ -1,7 +1,16 @@
 # Cluster-scoped NFS PV backed by gpunvdgtx1060's gpu1-extra LVM-thin
 # pool. Carved out + ext4-formatted on the host, then exported over
-# NFSv4 to the home LAN. Replaces storage1-bulk for any workload that
-# was depending on it while the storage1 host is down.
+# NFSv4 to the home LAN.
+#
+# Storage tier: CRITICAL / PERSONAL. gpunvdgtx1060 is the only permanent
+# host in the fleet — all other Proxmox nodes (incl. node6 which backs
+# storage1-bulk) are borrowed hardware that may be reclaimed at any
+# time. Anything we can't afford to lose — personal cloud (Immich),
+# config snapshots, important app state — should bind here, not to
+# storage1-bulk. Bulk media and reproducible data go to storage1-bulk.
+#
+# Originally spun up as a fallback while storage1 (now node6) was down;
+# kept as the canonical critical-data tier going forward.
 #
 # Host-side setup on 192.168.1.105 (gpunvdgtx1060) — one-time:
 #
@@ -38,6 +47,7 @@ metadata:
   labels:
     storage: storage2-bulk
     medium: ssd
+    tier: critical
 spec:
   capacity:
     storage: 800Gi
