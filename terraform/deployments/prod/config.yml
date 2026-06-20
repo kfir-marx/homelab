@@ -49,37 +49,47 @@ control_plane_nodes:
     disk_size_gb: 50
 
 # ── Worker nodes (compute) ───────────────────────────────────────────────────
+# Each worker takes ~all of its dedicated Proxmox host: full core count, RAM
+# minus ~2 GB headroom for the Proxmox host itself. Host specs come from the
+# Proxmox API (`pvesh get /nodes`). CPU overcommit isn't an issue here — each
+# worker is the only K8s VM on its host — so we use the full physical core
+# count.
 worker_nodes:
+  # worker4 host: 12 cores / 31 GiB physical.
+  # VM gets all 12 cores + 28 GiB (leaves ~3 GB for Proxmox).
   worker-1:
     proxmox_node: "worker4"
     vm_id: 301
     ip_address: "192.168.1.221/24"
-    cores: 8
-    memory_mb: 16384
+    cores: 12
+    memory_mb: 28672
     disk_size_gb: 100
-  # node6 is the bulk-storage host: 10 TB NTFS drive mounted at /mnt/data10tb
-  # and exported over NFSv4 as `storage1-bulk` (see kubernetes/system/storage/
-  # storage1-bulk.yaml). The Proxmox host was previously named `storage1`;
-  # it was re-joined to the cluster as `node6` and the K8s PV/SC names were
-  # kept for compatibility with any existing PVC bindings.
-  # Specs bumped from 4c/10G to 6c/16G to give media/bulk workloads headroom.
+  # node6 (formerly `storage1`) host: 12 cores / 15.5 GiB physical, plus the
+  # 10 TB NTFS bulk drive at /mnt/data10tb exported over NFSv4 as `storage1-bulk`
+  # (see kubernetes/system/storage/storage1-bulk.yaml). PV/SC names kept on
+  # the K8s side so existing PVC bindings continue to resolve.
+  # VM gets all 12 cores + 13 GiB (leaves ~2.5 GB for Proxmox + NFS server).
   worker-2:
     proxmox_node: "node6"
     vm_id: 302
     ip_address: "192.168.1.222/24"
-    cores: 6
-    memory_mb: 16384
+    cores: 12
+    memory_mb: 13312
     disk_size_gb: 100
 
 # ── GPU nodes (PCIe passthrough) ─────────────────────────────────────────────
 gpu_nodes:
-  # GTX 1060 host — laptop-class CoffeeLake + 16 GiB RAM, ~100 GB disk.
+  # GTX 1060 host (gpunvdgtx1060): 12 cores / 15.5 GiB physical.
+  # This is the only permanent host in the fleet — also runs the storage2-bulk
+  # NFS server (carved out of gpu1-extra LVM-thin) for the critical/personal
+  # data tier (see docs/architecture.md → Node ownership).
+  # VM gets all 12 cores + 13 GiB (leaves ~2.5 GB for Proxmox + NFS server).
   gpu-1:
     proxmox_node: "gpunvdgtx1060"
     vm_id: 401
     ip_address: "192.168.1.231/24"
-    cores: 8
-    memory_mb: 12288
+    cores: 12
+    memory_mb: 13312
     disk_size_gb: 100
     pci_devices:
       - id: "01:00"
