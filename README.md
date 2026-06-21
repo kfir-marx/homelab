@@ -19,3 +19,7 @@ Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 6-nod
 ├── .github/workflows/     # CI: lint, validate, security scan, plan
 └── atlantis.yaml          # PR-driven terraform plan/apply
 ```
+
+## Instructions for Agent
+The credentials you need are in this file ".env"
+The kubeconfig to access the kubernetes cluster is in this file "kubeconfig.yaml"

@@ -21,6 +21,7 @@ override.tf.json
 *.key
 talosconfig
 kubeconfig
+kubeconfig.yaml
 
 # OS
 .DS_Store
