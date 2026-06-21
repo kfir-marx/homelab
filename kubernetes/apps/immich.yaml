@@ -1,0 +1,46 @@
+# Immich — self-hosted photo & video backup ("private Google Photos").
+# All persistent state lands on the CRITICAL tier (storage2-bulk-pv,
+# NFSv4 on gpunvdgtx1060) because the photo library and Postgres are
+# irreplaceable personal data — see docs/architecture.md "Node ownership
+# and permanence" for why critical state must not touch borrowed hosts.
+#
+# Public exposure: configure a Cloudflare Tunnel ingress rule in the
+# Cloudflare dashboard pointing at
+#   http://immich-server.immich.svc.cluster.local:2283
+# (same pattern as headscale). Or reach it over the Headscale VPN at the
+# in-cluster Service address — no public exposure needed for personal use.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: immich
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/immich
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: immich
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  # The Postgres password Secret is created out-of-band so it never lands
+  # in Git (this repo is public). Provision once with:
+  #   kubectl -n immich create secret generic immich-postgres \
+  #     --from-literal=password="$(openssl rand -base64 32)"
+  # ArgoCD will keep the rest of the resources in sync but leave the
+  # Secret's data field alone.
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: immich-postgres
+      jsonPointers:
+        - /data

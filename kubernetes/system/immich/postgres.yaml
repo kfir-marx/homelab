@@ -1,0 +1,115 @@
+# Immich-flavoured Postgres 14 with the VectorChord + pgvecto.rs
+# extensions baked in. Immich requires this exact extension stack for
+# CLIP-based smart search & face recognition — stock Postgres won't do.
+# Pin the tag explicitly; "release" floats and would silently break
+# replicas on restart.
+#
+# Single replica StatefulSet — the NFS-backed PVC is RWO and Postgres
+# only safely tolerates one writer regardless. If we ever outgrow this
+# the right move is Patroni + local disks, not more replicas on NFS.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-postgres
+  namespace: immich
+  labels:
+    app: immich
+    component: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: immich
+    component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: immich-postgres
+  namespace: immich
+  labels:
+    app: immich
+    component: postgres
+spec:
+  serviceName: immich-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich
+      component: postgres
+  template:
+    metadata:
+      labels:
+        app: immich
+        component: postgres
+    spec:
+      securityContext:
+        # uid/gid 999 = postgres user inside the upstream image. Matches
+        # the chown done in storage.yaml's host-side setup.
+        fsGroup: 999
+        runAsUser: 999
+        runAsGroup: 999
+      containers:
+        - name: postgres
+          image: ghcr.io/immich-app/postgres:14-vectorchord0.3.0-pgvectors0.2.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_DB
+              value: immich
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: immich-postgres
+                  key: password
+            - name: POSTGRES_INITDB_ARGS
+              value: "--data-checksums"
+            # PGDATA is a SUBDIRECTORY of the mount, not the mount root,
+            # because NFS exports often expose a lost+found / metadata
+            # dir at the root that confuses initdb.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+                - -d
+                - immich
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+                - -d
+                - immich
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: immich-postgres-data

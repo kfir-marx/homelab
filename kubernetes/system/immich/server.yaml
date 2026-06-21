@@ -1,0 +1,111 @@
+# immich-server — the web UI + API. Single replica because:
+#   1. Library is NFS-RWX, so multi-replica is technically possible,
+#      but Immich's microservices worker reads/writes the same upload
+#      tree and an inotify-coordinated pair on NFS just creates write
+#      races for no throughput win at homelab scale.
+#   2. Pinning to one pod also keeps the in-process job worker simple.
+# If load ever demands it, split server (web/api) from microservices
+# worker into separate Deployments per the upstream split.
+#
+# Pin the image tag explicitly — "release" floats and breaks GitOps
+# rollback. Bump this line to upgrade Immich.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-server
+  namespace: immich
+  labels:
+    app: immich
+    component: server
+spec:
+  type: ClusterIP
+  selector:
+    app: immich
+    component: server
+  ports:
+    - name: http
+      port: 2283
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-server
+  namespace: immich
+  labels:
+    app: immich
+    component: server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: immich
+      component: server
+  template:
+    metadata:
+      labels:
+        app: immich
+        component: server
+    spec:
+      containers:
+        - name: immich-server
+          image: ghcr.io/immich-app/immich-server:v1.123.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              value: UTC
+            - name: NODE_ENV
+              value: production
+            - name: UPLOAD_LOCATION
+              value: /usr/src/app/upload
+            - name: DB_HOSTNAME
+              value: immich-postgres
+            - name: DB_USERNAME
+              value: postgres
+            - name: DB_DATABASE_NAME
+              value: immich
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: immich-postgres
+                  key: password
+            - name: REDIS_HOSTNAME
+              value: immich-redis
+            - name: IMMICH_MACHINE_LEARNING_URL
+              value: http://immich-machine-learning:3003
+          ports:
+            - name: http
+              containerPort: 2283
+              protocol: TCP
+          volumeMounts:
+            - name: library
+              mountPath: /usr/src/app/upload
+          readinessProbe:
+            httpGet:
+              path: /api/server/ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /api/server/ping
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: library
+          persistentVolumeClaim:
+            claimName: immich-library

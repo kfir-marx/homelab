@@ -1,0 +1,92 @@
+# immich-machine-learning — runs CLIP (smart search) + facial
+# recognition models. CPU-only image; switch to the `-cuda` or
+# `-openvino` variant + add a GPU toleration if you want to push it
+# onto gpu-1 or gpu-2. For now, CPU on a regular worker is fine for a
+# personal-scale library; first-time indexing is the only slow part.
+#
+# Models are downloaded on first use into /cache (emptyDir). If you'd
+# rather not re-download on every pod restart, swap to a small PVC.
+# Current call: keep it simple — the model files are ~600 MB total and
+# only fetched once per pod lifetime.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-machine-learning
+  namespace: immich
+  labels:
+    app: immich
+    component: machine-learning
+spec:
+  type: ClusterIP
+  selector:
+    app: immich
+    component: machine-learning
+  ports:
+    - name: http
+      port: 3003
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-machine-learning
+  namespace: immich
+  labels:
+    app: immich
+    component: machine-learning
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: immich
+      component: machine-learning
+  template:
+    metadata:
+      labels:
+        app: immich
+        component: machine-learning
+    spec:
+      containers:
+        - name: immich-machine-learning
+          image: ghcr.io/immich-app/immich-machine-learning:v1.123.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              value: UTC
+            - name: MACHINE_LEARNING_CACHE_FOLDER
+              value: /cache
+          ports:
+            - name: http
+              containerPort: 3003
+              protocol: TCP
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+      volumes:
+        - name: cache
+          emptyDir: {}

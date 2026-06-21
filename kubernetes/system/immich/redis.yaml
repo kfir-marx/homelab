@@ -1,0 +1,78 @@
+# Redis — Immich uses it as a BullMQ job queue + cache. State is
+# rebuildable from Postgres on restart, so emptyDir is fine. No PV
+# wanted: any NFS hop here would tax storage2-bulk for no durability
+# win, and a restart wiping the queue just re-enqueues pending jobs.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-redis
+  namespace: immich
+  labels:
+    app: immich
+    component: redis
+spec:
+  type: ClusterIP
+  selector:
+    app: immich
+    component: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-redis
+  namespace: immich
+  labels:
+    app: immich
+    component: redis
+spec:
+  replicas: 1
+  strategy:
+    # Redis is stateful-ish (queue can drop in-flight jobs on a hard
+    # cut); Recreate avoids two replicas briefly racing on the same
+    # client connections during a rollout.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: immich
+      component: redis
+  template:
+    metadata:
+      labels:
+        app: immich
+        component: redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+      containers:
+        - name: redis
+          image: docker.io/redis:6.2-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

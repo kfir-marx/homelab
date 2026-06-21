@@ -1,0 +1,104 @@
+# Two static NFS PVs carved out of the CRITICAL tier (storage2-bulk on
+# gpunvdgtx1060, 192.168.1.105 — the only permanent host in the fleet).
+# Separate PVs (not a single shared one) so:
+#   - Postgres gets RWO single-writer semantics (NFS + RWX + a DB is a
+#     foot-gun; NFSv4 file locking with one writer is OK)
+#   - A future PVC delete on the library can't blow away the DB
+#   - Each has its own claimRef hard-binding so neither volume can be
+#     grabbed by an unrelated nfs-storage2 PVC in another namespace
+#
+# Host-side setup on 192.168.1.105 — one-time, before ArgoCD syncs:
+#
+#   ssh root@192.168.1.105 <<'EOF'
+#   mkdir -p /mnt/storage2-bulk/immich/library
+#   mkdir -p /mnt/storage2-bulk/immich/postgres
+#   # The upstream immich-server image runs as uid/gid 0 by default;
+#   # the postgres image runs as uid 999 (postgres). Both need to write
+#   # their respective subdirs. Letting NFS root_squash off (which the
+#   # storage2-bulk export already does, no_root_squash) is enough for
+#   # the server; the postgres subdir needs ownership swapped.
+#   chown -R 999:999 /mnt/storage2-bulk/immich/postgres
+#   chmod 700 /mnt/storage2-bulk/immich/postgres
+#   EOF
+#
+# NFS-backed Postgres is a known tradeoff: fsync over NFSv4 is slower
+# than local disk, and on host loss the WAL may have unflushed writes.
+# For a homelab photo backup the durability cost is acceptable; the
+# critical-tier survivability requirement (data must outlive any
+# borrowed-host return) trumps the IOPS hit.
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: immich-library-pv
+  labels:
+    app: immich
+    component: library
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: immich
+    name: immich-library
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/immich/library
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-library
+  namespace: immich
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 500Gi
+  volumeName: immich-library-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: immich-postgres-pv
+  labels:
+    app: immich
+    component: postgres
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: immich
+    name: immich-postgres-data
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/immich/postgres
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-postgres-data
+  namespace: immich
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: immich-postgres-pv
