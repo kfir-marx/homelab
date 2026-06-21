@@ -25,19 +25,22 @@ Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 7-nod
 │     Proxmox VE 9 cluster         │   │   Kubernetes cluster         │
 │                                  │   │   (Talos Linux v1.9.5)       │
 │  worker1       ── cp-1      (CP) │   │                              │
-│  worker2       ── cp-2      (CP) │   │  ArgoCD ─► apps/             │
-│  worker3       ── cp-3      (CP) │   │            system/storage/   │
-│  worker4       ── worker-1  (W)  │   │            system/...        │
-│  node6         ── worker-2  (W)  │   │            bootstrap/        │
+│                ── worker-3  (W)  │   │  ArgoCD ─► apps/             │
+│  worker2       ── cp-2      (CP) │   │            system/storage/   │
+│                ── worker-4  (W)  │   │            system/...        │
+│  worker3       ── cp-3      (CP) │   │            bootstrap/        │
+│                ── worker-5  (W)  │   │                              │
+│  worker4       ── worker-1  (W)  │   │  GPU nodes tainted with      │
+│  node6         ── worker-2  (W)  │   │  nvidia.com/gpu=NoSchedule   │
 │                ── (NFS export of │   │                              │
-│                   storage1-bulk) │   │  GPU nodes tainted with      │
-│  gpunvdgtx1060 ── gpu-1     (G)  │   │  nvidia.com/gpu=NoSchedule   │
-│                ── (NFS export of │   │                              │
-│                   storage2-bulk) │   │  NFS PVs (static, RWX):      │
-│  largegpu      ── gpu-2     (G) ─┼───┤   bulk     → node6 10 TB     │
-│                ── largegpu-win11 │   │              /mnt/data10tb   │
-│                   (Windows)      │   │   critical → gtx1060 800 GB  │
-│                ── ⚡ runtime mutex│   │              /mnt/storage2…  │
+│                   storage1-bulk) │   │  NFS PVs (static, RWX):      │
+│  gpunvdgtx1060 ── gpu-1     (G)  │   │   bulk     → node6 10 TB     │
+│                ── (NFS export of │   │              /mnt/data10tb   │
+│                   storage2-bulk) │   │   critical → gtx1060 800 GB  │
+│  largegpu      ── gpu-2     (G)  │   │              /mnt/storage2…  │
+│                ── largegpu-win11 │   │                              │
+│                   (Windows)      │   │                              │
+│                ── ⚡ runtime mutex│   │                              │
 │                   (start-time)   │   │                              │
 └──────────────────────────────────┘   └──────────────────────────────┘
 ```
@@ -47,11 +50,14 @@ Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 7-nod
 | Proxmox host       | Mgmt IP          | VM name           | VM IP            | Role                                   | Key specs (prod defaults)                  |
 |--------------------|------------------|-------------------|------------------|----------------------------------------|--------------------------------------------|
 | `worker1`          | `192.168.1.101`  | `cp-1`            | `192.168.1.211`  | Control plane                          | 4 cores, 8 GiB RAM, 50 GB disk             |
+| `worker1`          | `192.168.1.101`  | `worker-3`        | `192.168.1.223`  | Compute worker (colocated with `cp-1`) | 8 cores, 20 GiB RAM, 100 GB disk           |
 | `worker2`          | `192.168.1.102`  | `cp-2`            | `192.168.1.212`  | Control plane                          | 4 cores, 8 GiB RAM, 50 GB disk             |
+| `worker2`          | `192.168.1.102`  | `worker-4`        | `192.168.1.224`  | Compute worker (colocated with `cp-2`) | 8 cores, 20 GiB RAM, 100 GB disk           |
 | `worker3`          | `192.168.1.103`  | `cp-3`            | `192.168.1.213`  | Control plane                          | 4 cores, 8 GiB RAM, 50 GB disk             |
-| `worker4`          | `192.168.1.104`  | `worker-1`        | `192.168.1.221`  | Compute worker                         | 8 cores, 16 GiB RAM, 100 GB disk           |
-| `node6`            | `192.168.1.106`  | `worker-2`        | `192.168.1.222`  | Compute worker + NFS server (bulk tier) | 6 cores, 16 GiB RAM, 100 GB disk           |
-| `gpunvdgtx1060`    | `192.168.1.105`  | `gpu-1`           | `192.168.1.231`  | GPU worker (GTX 1060) + NFS server (critical tier) | 8 cores, 12 GiB RAM, 100 GB disk, PCIe GPU |
+| `worker3`          | `192.168.1.103`  | `worker-5`        | `192.168.1.225`  | Compute worker (colocated with `cp-3`) | 8 cores, 20 GiB RAM, 100 GB disk           |
+| `worker4`          | `192.168.1.104`  | `worker-1`        | `192.168.1.221`  | Compute worker (dedicated host)        | 12 cores, 28 GiB RAM, 100 GB disk          |
+| `node6`            | `192.168.1.106`  | `worker-2`        | `192.168.1.222`  | Compute worker + NFS server (bulk tier) | 12 cores, 13 GiB RAM, 100 GB disk          |
+| `gpunvdgtx1060`    | `192.168.1.105`  | `gpu-1`           | `192.168.1.231`  | GPU worker (GTX 1060) + NFS server (critical tier) | 12 cores, 13 GiB RAM, 100 GB disk, PCIe GPU |
 | `largegpu`         | `192.168.1.107`  | `gpu-2`           | `192.168.1.232`  | GPU worker (RTX 3080) — ⚡ runtime mutex | 16 cores, 60 GiB RAM, 159 GB disk, PCIe GPU |
 | `largegpu`         | `192.168.1.107`  | `largegpu-win11`  | DHCP             | Windows 11 gaming VM — ⚡ runtime mutex  | 16 cores, 60 GiB RAM, 635 GB disk, PCIe GPU + USB |
 
@@ -73,7 +79,7 @@ Practical consequences that the rest of this document depends on:
 | Range              | Use                                  |
 |--------------------|--------------------------------------|
 | `192.168.1.101–199` | Physical Proxmox hosts              |
-| `192.168.1.200–299` | VMs (CPs 211-213, workers 221-222, GPU workers 231-232) |
+| `192.168.1.200–299` | VMs (CPs 211-213, workers 221-225, GPU workers 231-232) |
 
 **Why VMs live on the home subnet, not an isolated `10.x` block:** every Proxmox host's `vmbr0` is already bridged to the home LAN, so VMs on `192.168.1.x` are L2-reachable from any device on the network with zero routing config. Mac, kubectl, talosctl, and any future Proxmox host you add work out of the box. Make sure your router's DHCP pool excludes the static range you reserve for VMs.
 
@@ -89,7 +95,7 @@ All node specs, IPs, and PCI/USB device IDs are defined as YAML in [`terraform/d
 | Bridge           | `vmbr0`                         |
 | DNS              | `1.1.1.1`, `8.8.8.8`            |
 | CP node IPs      | `192.168.1.211-213/24`          |
-| Worker IPs       | `192.168.1.221-222/24`          |
+| Worker IPs       | `192.168.1.221-225/24`          |
 | GPU node IPs     | `192.168.1.231` (gpu-1), `192.168.1.232` (gpu-2) |
 
 The control-plane VIP is managed by Talos's built-in VIP mechanism — no external load balancer needed. Each control-plane node's network interface includes a `vip` block pointing at the shared VIP.
@@ -224,7 +230,7 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
     │   ├── merge_configs.sh              # Hierarchical YAML deep-merge
     │   ├── config.yml                    # Global defaults
     │   ├── prod/
-    │   │   ├── config.yml                # Prod: 3 CP + 2 W + 2 GPU + 1 Windows
+    │   │   ├── config.yml                # Prod: 3 CP + 5 W + 2 GPU + 1 Windows
     │   │   └── homelab-cluster/
     │   │       └── terragrunt.hcl        # Just `include "root"`; module auto-detected
     │   └── staging/
@@ -560,3 +566,4 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 - **The `largegpu` mutex is enforced at runtime, not config time.** Two VMs sharing one GPU = one runs, the other can't start. This lets you flip between them in seconds with no Terraform churn.
 - **Bulk media storage is NTFS+NFS, not Ceph/Longhorn.** The 10 TB drive on node6 had existing NTFS data worth preserving. Exporting it via the kernel `ntfs3` driver + NFSv4 was simpler than converting (which would require a full copy off + back).
 - **Two storage tiers, split by host permanence — not performance.** Critical/personal data binds against `storage2-bulk-pv` on `gpunvdgtx1060` (the only permanent host). Bulk/reproducible data binds against `storage1-bulk-pv` on node6 (borrowed hardware). The tier names map onto *survivability* of the underlying machine, not on IOPS or media class. See [Node ownership and permanence](#node-ownership-and-permanence).
+- **CP hosts double as worker hosts.** Each of `worker1/2/3` (12c/31 GiB i7-10750H) runs both a CP (4c/8 GiB) and a colocated worker — `worker-3/4/5` (8c/20 GiB each), leaving ~3 GiB for Proxmox. Recaptures ~24 cores / 60 GiB of compute that would otherwise sit idle on the CP laptops. Tradeoff: under heavy worker load, etcd can see fsync stalls on the same host — acceptable in a homelab where the outage cost is low. If the cluster ever needs to be production-grade, peel `worker-3/4/5` off and let the CPs run quiet again.

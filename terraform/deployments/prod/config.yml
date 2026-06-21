@@ -25,35 +25,44 @@ network_gateway: "192.168.1.1"
 argocd_target_revision: "main"
 
 # ── Control-plane nodes (3x HA across worker1-3 Proxmox hosts) ──────────────
+# 4c/8GiB each — modest bump from the bare 2c/4GiB minimum to give etcd +
+# kube-apiserver breathing room now that workers (worker-3/4/5) share these
+# hosts. Plenty for a 7-node cluster.
 control_plane_nodes:
   cp-1:
     proxmox_node: "worker1"
     vm_id: 201
     ip_address: "192.168.1.211/24"
-    cores: 2
-    memory_mb: 4096
+    cores: 4
+    memory_mb: 8192
     disk_size_gb: 50
   cp-2:
     proxmox_node: "worker2"
     vm_id: 202
     ip_address: "192.168.1.212/24"
-    cores: 2
-    memory_mb: 4096
+    cores: 4
+    memory_mb: 8192
     disk_size_gb: 50
   cp-3:
     proxmox_node: "worker3"
     vm_id: 203
     ip_address: "192.168.1.213/24"
-    cores: 2
-    memory_mb: 4096
+    cores: 4
+    memory_mb: 8192
     disk_size_gb: 50
 
 # ── Worker nodes (compute) ───────────────────────────────────────────────────
-# Each worker takes ~all of its dedicated Proxmox host: full core count, RAM
-# minus ~2 GB headroom for the Proxmox host itself. Host specs come from the
-# Proxmox API (`pvesh get /nodes`). CPU overcommit isn't an issue here — each
-# worker is the only K8s VM on its host — so we use the full physical core
-# count.
+# Two patterns here:
+#   1. Dedicated-host workers (worker-1 on worker4, worker-2 on node6) — one
+#      worker = the whole Proxmox host. Full cores, RAM minus ~2-3 GiB for
+#      Proxmox.
+#   2. Colocated workers (worker-3/4/5 on worker1/2/3) — share the host with
+#      a control-plane VM. CP gets 4c/8GiB; worker takes 8c/20GiB; ~3 GiB
+#      stays with Proxmox. Trade-off: CP etcd can see fsync stalls under
+#      heavy worker load — acceptable in a homelab where the outage cost is
+#      low. Recaptures ~24c/60GiB across the three CP hosts that would
+#      otherwise sit idle.
+# Host specs come from the Proxmox API (`pvesh get /nodes`).
 worker_nodes:
   # worker4 host: 12 cores / 31 GiB physical.
   # VM gets all 12 cores + 28 GiB (leaves ~3 GB for Proxmox).
@@ -75,6 +84,33 @@ worker_nodes:
     ip_address: "192.168.1.222/24"
     cores: 12
     memory_mb: 13312
+    disk_size_gb: 100
+  # worker1 host: 12 cores / 31 GiB physical, shares with cp-1.
+  # Worker gets 8c/20 GiB; cp-1 gets 4c/8 GiB; ~3 GiB Proxmox.
+  worker-3:
+    proxmox_node: "worker1"
+    vm_id: 303
+    ip_address: "192.168.1.223/24"
+    cores: 8
+    memory_mb: 20480
+    disk_size_gb: 100
+  # worker2 host: 12 cores / 31 GiB physical, shares with cp-2.
+  # Worker gets 8c/20 GiB; cp-2 gets 4c/8 GiB; ~3 GiB Proxmox.
+  worker-4:
+    proxmox_node: "worker2"
+    vm_id: 304
+    ip_address: "192.168.1.224/24"
+    cores: 8
+    memory_mb: 20480
+    disk_size_gb: 100
+  # worker3 host: 12 cores / 31 GiB physical, shares with cp-3.
+  # Worker gets 8c/20 GiB; cp-3 gets 4c/8 GiB; ~3 GiB Proxmox.
+  worker-5:
+    proxmox_node: "worker3"
+    vm_id: 305
+    ip_address: "192.168.1.225/24"
+    cores: 8
+    memory_mb: 20480
     disk_size_gb: 100
 
 # ── GPU nodes (PCIe passthrough) ─────────────────────────────────────────────
