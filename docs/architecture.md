@@ -1,6 +1,8 @@
 # Homelab — GitOps Kubernetes on Proxmox (with a side of Windows gaming)
 
-Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 7-node Proxmox hypervisor fleet, with an optional Windows 11 gaming VM that shares the RTX 3080 with the GPU Kubernetes worker. Infrastructure is provisioned with Terraform (orchestrated by Terragrunt) using **S3 + DynamoDB remote state with IAM role assumption**; in-cluster workloads are managed by ArgoCD. No SSH, no manual `kubectl apply` — everything flows through Git.
+GitOps-driven Kubernetes architecture designed to run Talos Linux on a 3-node Proxmox hypervisor fleet, with an optional Windows 11 gaming VM that shares the RTX 3080 with the GPU Kubernetes worker. Infrastructure is provisioned with Terraform (orchestrated by Terragrunt) using **S3 + DynamoDB remote state with IAM role assumption**; in-cluster workloads are managed by ArgoCD. No SSH, no manual `kubectl apply` — everything flows through Git.
+
+> **Capacity transition:** the former `worker1`–`worker4` laptop hosts were returned to their owner and are no longer part of the homelab. The physical inventory below is current, but the VM topology is not: Terraform still needs to be resized and remapped onto the three remaining hosts. In particular, the former control-plane VMs were all placed on returned laptops, so the documented cluster should not be considered deployable until that work is complete.
 
 ---
 
@@ -23,67 +25,71 @@ Fully automated, GitOps-driven Kubernetes cluster running Talos Linux on a 7-nod
              ▼                                  ▼
 ┌──────────────────────────────────┐   ┌──────────────────────────────┐
 │     Proxmox VE 9 cluster         │   │   Kubernetes cluster         │
-│                                  │   │   (Talos Linux v1.9.5)       │
-│  worker1       ── cp-1      (CP) │   │                              │
-│                ── worker-3  (W)  │   │  ArgoCD ─► apps/             │
-│  worker2       ── cp-2      (CP) │   │            system/storage/   │
-│                ── worker-4  (W)  │   │            system/...        │
-│  worker3       ── cp-3      (CP) │   │            bootstrap/        │
-│                ── worker-5  (W)  │   │                              │
-│  worker4       ── worker-1  (W)  │   │  GPU nodes tainted with      │
-│  smallgpu         ── worker-2  (W)  │   │  nvidia.com/gpu=NoSchedule   │
-│                ── (NFS export of │   │                              │
-│                   storage1-bulk) │   │  NFS PVs (static, RWX):      │
-│  gpunvdgtx1060 ── gpu-1     (G)  │   │   bulk     → smallgpu 10 TB     │
-│                ── (NFS export of │   │              /mnt/data10tb   │
-│                   storage2-bulk) │   │   critical → gtx1060 800 GB  │
-│  largegpu      ── gpu-2     (G)  │   │              /mnt/storage2…  │
-│                ── largegpu-win11 │   │                              │
-│                   (Windows)      │   │                              │
-│                ── ⚡ runtime mutex│   │                              │
+│     (3 physical hosts)           │   │   (Talos Linux v1.9.5)       │
+│                                  │   │                              │
+│  smallgpu      ── 10 TB bulk NFS │   │  VM topology pending resize  │
+│                ── RTX 2060       │   │  and Terraform remapping     │
+│                                  │   │                              │
+│  gpunvdgtx1060 ── 800 GB critical│   │  Planned GPU nodes use       │
+│                   NFS            │   │  nvidia.com/gpu=NoSchedule   │
+│                ── GTX 1060       │   │                              │
+│                                  │   │  NFS PVs (static, RWX):      │
+│  largegpu      ── RTX 3080       │   │   bulk     → smallgpu        │
+│                ── Talos GPU VM / │   │              /mnt/data10tb   │
+│                   Windows VM     │   │   critical → gpunvdgtx1060   │
+│                ── ⚡ runtime mutex│   │              /mnt/storage2…  │
 │                   (start-time)   │   │                              │
 └──────────────────────────────────┘   └──────────────────────────────┘
 ```
 
 ### Physical nodes (Proxmox hosts)
 
-| Proxmox host       | Mgmt IP          | VM name           | VM IP            | Role                                   | Key specs (prod defaults)                  |
-|--------------------|------------------|-------------------|------------------|----------------------------------------|--------------------------------------------|
-| `worker1`          | `192.168.1.101`  | `cp-1`            | `192.168.1.211`  | Control plane                          | 4 cores, 8 GiB RAM, 50 GB disk             |
-| `worker1`          | `192.168.1.101`  | `worker-3`        | `192.168.1.223`  | Compute worker (colocated with `cp-1`) | 8 cores, 20 GiB RAM, 100 GB disk           |
-| `worker2`          | `192.168.1.102`  | `cp-2`            | `192.168.1.212`  | Control plane                          | 4 cores, 8 GiB RAM, 50 GB disk             |
-| `worker2`          | `192.168.1.102`  | `worker-4`        | `192.168.1.224`  | Compute worker (colocated with `cp-2`) | 8 cores, 20 GiB RAM, 100 GB disk           |
-| `worker3`          | `192.168.1.103`  | `cp-3`            | `192.168.1.213`  | Control plane                          | 4 cores, 8 GiB RAM, 50 GB disk             |
-| `worker3`          | `192.168.1.103`  | `worker-5`        | `192.168.1.225`  | Compute worker (colocated with `cp-3`) | 8 cores, 20 GiB RAM, 100 GB disk           |
-| `worker4`          | `192.168.1.104`  | `worker-1`        | `192.168.1.221`  | Compute worker (dedicated host)        | 12 cores, 28 GiB RAM, 100 GB disk          |
-| `smallgpu`            | `192.168.1.106`  | `worker-2`        | `192.168.1.222`  | Compute worker + NFS server (bulk tier) | 12 cores, 13 GiB RAM, 100 GB disk          |
-| `gpunvdgtx1060`    | `192.168.1.105`  | `gpu-1`           | `192.168.1.231`  | GPU worker (GTX 1060) + NFS server (critical tier) | 12 cores, 13 GiB RAM, 100 GB disk, PCIe GPU |
-| `largegpu`         | `192.168.1.107`  | `gpu-2`           | `192.168.1.232`  | GPU worker (RTX 3080) — ⚡ runtime mutex | 16 cores, 60 GiB RAM, 159 GB disk, PCIe GPU |
-| `largegpu`         | `192.168.1.107`  | `largegpu-win11`  | DHCP             | Windows 11 gaming VM — ⚡ runtime mutex  | 16 cores, 60 GiB RAM, 635 GB disk, PCIe GPU + USB |
+| Proxmox host    | Mgmt IP         | CPU                             | Installed RAM              | GPU                          | Primary role |
+|-----------------|-----------------|---------------------------------|----------------------------|------------------------------|--------------|
+| `gpunvdgtx1060` | `192.168.1.105` | Intel Core i7-8750H, 6c/12t     | 15.46 GiB (2×8 GB DDR4-2667) | GeForce GTX 1060 Mobile     | Permanent host, GPU compute, critical NFS |
+| `smallgpu`      | `192.168.1.106` | AMD Ryzen 5 3600, 6c/12t        | 15.55 GiB (1×16 GB DDR4-2133) | GeForce RTX 2060            | Compute/GPU capacity, bulk NFS |
+| `largegpu`      | `192.168.1.107` | AMD Ryzen 7 5800X, 8c/16t       | 62.70 GiB (2×32 GB DDR4-2400) | GeForce RTX 3080 LHR        | GPU compute / Windows gaming runtime mutex |
 
-The cluster VIP is `192.168.1.210` — control-plane Talos VIP, also the Kubernetes API endpoint.
+| Proxmox host    | Fast/system disk                         | Additional disk                         | Motherboard                       | Virtualization |
+|-----------------|------------------------------------------|-----------------------------------------|-----------------------------------|----------------|
+| `gpunvdgtx1060` | 238.5 GB Intel SSDPEKKW256G8 NVMe        | 931.5 GB Samsung SSD 860 EVO SATA SSD   | CFL Sienta_CFS                    | Intel VT-x     |
+| `smallgpu`      | 476.9 GB XPG SPECTRIX S40G NVMe          | 9.1 TB Toshiba MG06ACA10TE SATA HDD     | ASUS PRIME B450M-A                | AMD-V          |
+| `largegpu`      | 931.5 GB Samsung SSD 980 NVMe             | 1.8 TB WD20EZBX SATA HDD                | ASUS TUF GAMING X570-PLUS         | AMD-V          |
+
+The remaining fleet has 20 physical CPU cores / 40 threads and 93.71 GiB of installed RAM. These are host totals, not safe VM allocations; the replacement control-plane and worker sizing must leave capacity for Proxmox and the NFS services.
+
+The reserved cluster VIP is `192.168.1.210` — the Talos control-plane VIP and Kubernetes API endpoint once the replacement control-plane topology is deployed.
+
+### VM topology transition
+
+The old VM placement is intentionally not reproduced here because it depended on the returned laptops:
+
+- `cp-1`, `cp-2`, and `cp-3` were hosted by `worker1`, `worker2`, and `worker3`.
+- `worker-1`, `worker-3`, `worker-4`, and `worker-5` were hosted by `worker4`, `worker1`, `worker2`, and `worker3`.
+- `smallgpu` is the new Proxmox hostname for the host formerly named `node6`; Terraform still uses `node6` and must be changed before the next apply.
+- The replacement control-plane, worker, GPU, and Windows VM allocations are pending a lower-capacity redesign in `terraform/deployments/prod/config.yml`.
 
 ### Node ownership and permanence
 
-Only **`gpunvdgtx1060`** (the GTX 1060 host) is permanently owned hardware. Every other Proxmox host in the table above — `worker1–4`, `smallgpu`, and `largegpu` — is borrowed: some belong to the current employer, some belong to a friend who may eventually ask them back. They're available for now, but the cluster has to assume any one of them could leave on short notice.
+Only **`gpunvdgtx1060`** (the GTX 1060 host) is permanently owned hardware. `smallgpu` and `largegpu` are borrowed from a friend who may eventually ask for them back. The four employer-owned laptops (`worker1`–`worker4`) have been returned and are retired from this architecture.
 
 Practical consequences that the rest of this document depends on:
 
 - **Critical / personal data stays on `gpunvdgtx1060`.** This is the only host where state can't simply disappear. Personal cloud (Immich), config snapshots, and anything irreplaceable should bind against the **critical tier** (`storage2-bulk-pv`, see [Kubernetes storage](#kubernetes-storage) below).
-- **Bulk / non-critical / reproducible data goes on the borrowed hosts.** Media libraries (Plex/Jellyfin, *arr stack), large model caches, and anything that can be re-downloaded land on the **bulk tier** (`storage1-bulk-pv` on smallgpu, 10 TB).
-- **`smallgpu` is the "big storage server, non-critical" role.** It was previously the `storage1` Proxmox host; same physical machine (192.168.1.106) re-joined to Proxmox under the new name. The Kubernetes PV/StorageClass names (`storage1-bulk-pv`, `nfs-storage1`) were kept so existing bindings continue to resolve.
-- **Workload placement is best-effort today.** Pods that handle critical state should prefer a `nodeSelector`/affinity pinning them to permanent hardware once the cluster has a control-plane / worker on `gpunvdgtx1060` — for now the cluster just survives a host loss by re-scheduling, and the storage tier choice is the load-bearing safeguard.
+- **Bulk / non-critical / reproducible data goes on the borrowed hosts.** Media libraries (Plex/Jellyfin, *arr stack), large model caches, and anything that can be re-downloaded land on the **bulk tier** (`storage1-bulk-pv` on `smallgpu`, 10 TB).
+- **`smallgpu` is the "big storage server, non-critical" role.** This is the physical host previously named `node6` (and before that `storage1`) at `192.168.1.106`. The Kubernetes PV/StorageClass names (`storage1-bulk-pv`, `nfs-storage1`) remain unchanged so existing bindings continue to resolve.
+- **Failure tolerance must be revisited with the VM redesign.** The smaller three-host fleet has much less spare compute, and two hosts are borrowed. Critical pods should be placed on `gpunvdgtx1060` where practical, but storage placement and workload placement protect against different failures and are not substitutes for backups.
 
 **IP convention:**
 
 | Range              | Use                                  |
 |--------------------|--------------------------------------|
 | `192.168.1.101–199` | Physical Proxmox hosts              |
-| `192.168.1.200–299` | VMs (CPs 211-213, workers 221-225, GPU workers 231-232) |
+| `192.168.1.200–299` | VMs (role-specific address pools; assignments pending) |
 
 **Why VMs live on the home subnet, not an isolated `10.x` block:** every Proxmox host's `vmbr0` is already bridged to the home LAN, so VMs on `192.168.1.x` are L2-reachable from any device on the network with zero routing config. Mac, kubectl, talosctl, and any future Proxmox host you add work out of the box. Make sure your router's DHCP pool excludes the static range you reserve for VMs.
 
-All node specs, IPs, and PCI/USB device IDs are defined as YAML in [`terraform/deployments/<env>/config.yml`](../terraform/deployments/) and consumed via Terragrunt's hierarchical config-merging in [`root.hcl`](../terraform/deployments/root.hcl).
+VM specs, IPs, and PCI/USB device IDs are normally defined as YAML in [`terraform/deployments/<env>/config.yml`](../terraform/deployments/) and consumed via Terragrunt's hierarchical config-merging in [`root.hcl`](../terraform/deployments/root.hcl). During this transition, the physical inventory above is authoritative and the production YAML remains stale until the VM redesign.
 
 ### Network defaults
 
@@ -94,11 +100,11 @@ All node specs, IPs, and PCI/USB device IDs are defined as YAML in [`terraform/d
 | Gateway          | `192.168.1.1` (home router)     |
 | Bridge           | `vmbr0`                         |
 | DNS              | `1.1.1.1`, `8.8.8.8`            |
-| CP node IPs      | `192.168.1.211-213/24`          |
-| Worker IPs       | `192.168.1.221-225/24`          |
-| GPU node IPs     | `192.168.1.231` (gpu-1), `192.168.1.232` (gpu-2) |
+| CP node IPs      | Reserved pool: `192.168.1.211-213/24`; assignments pending |
+| Worker IPs       | Reserved pool: `192.168.1.221-225/24`; assignments pending |
+| GPU node IPs     | Reserved pool: `192.168.1.231-232/24`; assignments pending |
 
-The control-plane VIP is managed by Talos's built-in VIP mechanism — no external load balancer needed. Each control-plane node's network interface includes a `vip` block pointing at the shared VIP.
+The control-plane VIP is managed by Talos's built-in VIP mechanism — no external load balancer is needed. The replacement control-plane nodes will each need a network-interface `vip` block pointing at the shared VIP.
 
 ---
 
@@ -116,9 +122,9 @@ qm shutdown 402 && qm start 502
 qm shutdown 502 && qm start 402
 ```
 
-Resource allocation reflects this mutex:
+The current Terraform values reflect the old, larger fleet and are retained here only as transition context:
 
-- Both VMs get the **full host CPU and RAM** (16 vCPUs, 60 GiB) — there's only ever one running, so leaving headroom on the idle one would be wasted capacity.
+- Both VMs currently request 16 vCPUs and 60 GiB RAM. This must be reconsidered if replacement control-plane or worker VMs are colocated on `largegpu`.
 - The largegpu host's 794 GB local NVMe LVM-thin is split ~80/20 — Windows gets `disk_size_gb: 635` for games, gpu-2 gets `disk_size_gb: 159` for the Talos rootfs.
 - `on_boot = true` for the Talos GPU worker (auto-start on Proxmox boot); `on_boot = false` for the Windows VM (manual).
 
@@ -156,7 +162,7 @@ Beyond each host's default `local` (Directory, /var/lib/vz) and `local-lvm` (LVM
 | `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | ISOs, templates, backups (slow HDD, low-churn data)                    |
 | `gpunvdgtx1060` | `gpu1-extra`          | LVM-thin     | 912 GB     | Spare capacity for additional VMs + carved LV for `storage2-bulk` NFS  |
 | `gpunvdgtx1060` | `storage2-bulk` (NFS) | ext4 LV on `gpu1-extra`, NFSv4 export | 800 GB | **Critical tier** — Immich, personal data (only permanent host)        |
-| `smallgpu`         | `storage1-bulk` (NFS) | NTFS via `ntfs3` driver, NFSv4 export | 10 TB  | **Bulk tier** — media for K8s workloads (host is borrowed, see [Node ownership](#node-ownership-and-permanence)) |
+| `smallgpu`      | `storage1-bulk` (NFS) | NTFS via `ntfs3` driver, NFSv4 export | 10 TB  | **Bulk tier** — media for K8s workloads (host is borrowed, see [Node ownership](#node-ownership-and-permanence)) |
 
 ### Kubernetes storage
 
@@ -179,8 +185,8 @@ To consume one: create a PVC in the app's namespace with the matching `storageCl
 
 | Layer              | Tool / Version                                  | Purpose                                                  |
 |--------------------|-------------------------------------------------|----------------------------------------------------------|
-| Hypervisor         | Proxmox VE 9 (Trixie)                           | Runs all VMs across 7 physical hosts                     |
-| APT repo           | `pve-no-subscription` (deb822 format)           | Enabled on all 7 nodes; enterprise repo disabled         |
+| Hypervisor         | Proxmox VE 9 (Trixie)                           | VM capacity across 3 physical hosts                      |
+| APT repo           | `pve-no-subscription` (deb822 format)           | Enabled on all 3 nodes; enterprise repo disabled         |
 | Node OS (K8s)      | Talos Linux `v1.9.5`                            | Immutable, API-driven Linux — no SSH, no shell           |
 | Node OS (gaming)   | Windows 11 25H2 + virtio drivers (0.1.271)      | One VM, GPU-passthrough'd, manual start                  |
 | VM provisioning    | Terraform + `bpg/proxmox` ~> 0.105.0            | Creates QEMU VMs with PCIe + USB passthrough             |
@@ -230,7 +236,7 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
     │   ├── merge_configs.sh              # Hierarchical YAML deep-merge
     │   ├── config.yml                    # Global defaults
     │   ├── prod/
-    │   │   ├── config.yml                # Prod: 3 CP + 5 W + 2 GPU + 1 Windows
+    │   │   ├── config.yml                # Prod VM topology (pending resize for 3-host fleet)
     │   │   └── homelab-cluster/
     │   │       └── terragrunt.hcl        # Just `include "root"`; module auto-detected
     │   └── staging/
@@ -505,7 +511,7 @@ The root app's `repoURL` is set in [`terraform/deployments/config.yml`](../terra
 
 ```bash
 # 1. Populate .env at the repo root:
-#      PROXMOX_API_URL=https://192.168.1.101:8006
+#      PROXMOX_API_URL=https://192.168.1.105:8006
 #      PROXMOX_SSH_PASSWORD="..."
 #      AWS_IAM_ROLE=arn:aws:iam::<acct>:role/TerragruntExecutionRole
 #      AWS_ACCESS_KEY_ID=...
@@ -566,4 +572,4 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 - **The `largegpu` mutex is enforced at runtime, not config time.** Two VMs sharing one GPU = one runs, the other can't start. This lets you flip between them in seconds with no Terraform churn.
 - **Bulk media storage is NTFS+NFS, not Ceph/Longhorn.** The 10 TB drive on smallgpu had existing NTFS data worth preserving. Exporting it via the kernel `ntfs3` driver + NFSv4 was simpler than converting (which would require a full copy off + back).
 - **Two storage tiers, split by host permanence — not performance.** Critical/personal data binds against `storage2-bulk-pv` on `gpunvdgtx1060` (the only permanent host). Bulk/reproducible data binds against `storage1-bulk-pv` on smallgpu (borrowed hardware). The tier names map onto *survivability* of the underlying machine, not on IOPS or media class. See [Node ownership and permanence](#node-ownership-and-permanence).
-- **CP hosts double as worker hosts.** Each of `worker1/2/3` (12c/31 GiB i7-10750H) runs both a CP (4c/8 GiB) and a colocated worker — `worker-3/4/5` (8c/20 GiB each), leaving ~3 GiB for Proxmox. Recaptures ~24 cores / 60 GiB of compute that would otherwise sit idle on the CP laptops. Tradeoff: under heavy worker load, etcd can see fsync stalls on the same host — acceptable in a homelab where the outage cost is low. If the cluster ever needs to be production-grade, peel `worker-3/4/5` off and let the CPs run quiet again.
+- **VM sizing must fit the remaining hardware.** The former laptop-based 3-control-plane/5-worker layout is retired. Its replacement must fit within 20 physical cores / 40 threads and 93.71 GiB RAM across the three remaining hosts while preserving Proxmox and NFS headroom.
