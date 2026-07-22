@@ -3,7 +3,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 variable "proxmox_api_url" {
-  description = "Proxmox VE API endpoint (e.g. https://192.168.1.101:8006)"
+  description = "Proxmox VE API endpoint (e.g. https://192.168.1.105:8006)"
   type        = string
 }
 

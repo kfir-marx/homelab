@@ -1,7 +1,7 @@
 # Tailscale subnet router — bridges the WireGuard mesh to 192.168.1.0/24.
 # Without this, a remote Tailscale client reaches Headscale-registered
 # peers only; advertising the LAN as a route is what lets you hit
-# Proxmox (192.168.1.101) and other LAN hosts from outside.
+# Proxmox (192.168.1.105) and other LAN hosts from outside.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

@@ -176,10 +176,10 @@ tailscale status
 # Expect 'k8s-router' listed, with 'offers routes: 192.168.1.0/24'
 
 # Can you ping a LAN host?
-ping 192.168.1.101
+ping 192.168.1.105
 
 # Open the Proxmox UI:
-open https://192.168.1.101:8006
+open https://192.168.1.105:8006
 ```
 
 Cert warning is expected (Proxmox's self-signed cert). Same one you see on the LAN today.
@@ -191,7 +191,7 @@ Cert warning is expected (Proxmox's self-signed cert). Same one you see on the L
 | Symptom | Likely cause | Where to look |
 |---|---|---|
 | `tailscale up` hangs at "waiting for login" | Wrong `server_url` in headscale config — must exactly match what the client uses | `kubectl -n headscale logs <pod>` — look for `Mismatched server_url` |
-| Client connects but can't ping 192.168.1.101 | Routes not approved, or `--accept-routes` missing on client | `headscale routes list` + `tailscale status` |
+| Client connects but can't ping 192.168.1.105 | Routes not approved, or `--accept-routes` missing on client | `headscale routes list` + `tailscale status` |
 | cloudflared healthy in dashboard but `https://admin.547600.xyz/health` returns 502 | Public Hostname target wrong | Cloudflare dashboard → tunnel → Public Hostname → service should be `http://headscale.headscale.svc.cluster.local:8080` |
 | Headscale pod CrashLoopBackOff on first start | `/mnt/storage2-bulk/headscale` doesn't exist or is owned by root | SSH gpunvdgtx1060, `ls -ln /mnt/storage2-bulk/headscale` — must be 1000:1000 |
 | Router pod logs `Tailscale Funnel ... is not available with your current plan` | Harmless — Funnel is a Tailscale-SaaS-only feature, Headscale ignores it |  |
