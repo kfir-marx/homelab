@@ -2,7 +2,7 @@
 
 GitOps-driven Kubernetes architecture designed to run Talos Linux on a 3-node Proxmox hypervisor fleet, with an optional Windows 11 gaming VM that shares the RTX 3080 with the GPU Kubernetes worker. Infrastructure is provisioned with Terraform (orchestrated by Terragrunt) using **S3 + DynamoDB remote state with IAM role assumption**; in-cluster workloads are managed by ArgoCD. No SSH, no manual `kubectl apply` — everything flows through Git.
 
-> **Capacity transition:** the former `worker1`–`worker4` laptop hosts were returned to their owner and are no longer part of the homelab. The physical inventory below is current, but the VM topology is not: Terraform still needs to be resized and remapped onto the three remaining hosts. In particular, the former control-plane VMs were all placed on returned laptops, so the documented cluster should not be considered deployable until that work is complete.
+> **Capacity transition (reviewed 2026-07-22):** the former `worker1`–`worker4` laptop hosts were returned and are no longer part of the homelab. Production is now configured with one `2 vCPU / 4 GiB` control plane, one general worker, and three GPU workers across the remaining hosts. This is intentionally not control-plane HA; return to three `2 vCPU / 4 GiB` control planes only when each physical host has enough memory headroom. See [Capacity decision and target topology](#capacity-decision-and-target-topology).
 
 ---
 
@@ -27,12 +27,14 @@ GitOps-driven Kubernetes architecture designed to run Talos Linux on a 3-node Pr
 │     Proxmox VE 9 cluster         │   │   Kubernetes cluster         │
 │     (3 physical hosts)           │   │   (Talos Linux v1.9.5)       │
 │                                  │   │                              │
-│  smallgpu      ── 10 TB bulk NFS │   │  VM topology pending resize  │
-│                ── RTX 2060       │   │  and Terraform remapping     │
+│  smallgpu      ── 10 TB bulk disk│   │  Start: 1 small control plane│
+│                ── RTX 2060       │   │  and right-sized workers     │
 │                                  │   │                              │
-│  gpunvdgtx1060 ── 800 GB critical│   │  Planned GPU nodes use       │
-│                   NFS            │   │  nvidia.com/gpu=NoSchedule   │
-│                ── GTX 1060       │   │                              │
+│  gpunvdgtx1060 ── 800 GB critical│   │  HA later: 3 control planes  │
+│                   NFS            │   │  at 2 vCPU / 4 GiB each      │
+│                ── VM 100 personal│   │                              │
+│                   workstation    │   │  GPU nodes are tainted       │
+│                ── GTX 1060       │   │  nvidia.com/gpu=NoSchedule   │
 │                                  │   │  NFS PVs (static, RWX):      │
 │  largegpu      ── RTX 3080       │   │   bulk     → smallgpu        │
 │                ── Talos GPU VM / │   │              /mnt/data10tb   │
@@ -46,8 +48,8 @@ GitOps-driven Kubernetes architecture designed to run Talos Linux on a 3-node Pr
 
 | Proxmox host    | Mgmt IP         | CPU                             | Installed RAM              | GPU                          | Primary role |
 |-----------------|-----------------|---------------------------------|----------------------------|------------------------------|--------------|
-| `gpunvdgtx1060` | `192.168.1.105` | Intel Core i7-8750H, 6c/12t     | 15.46 GiB (2×8 GB DDR4-2667) | GeForce GTX 1060 Mobile     | Permanent host, GPU compute, critical NFS |
-| `smallgpu`      | `192.168.1.106` | AMD Ryzen 5 3600, 6c/12t        | 15.55 GiB (1×16 GB DDR4-2133) | GeForce RTX 2060            | Compute/GPU capacity, bulk NFS |
+| `gpunvdgtx1060` | `192.168.1.105` | Intel Core i7-8750H, 6c/12t     | 15.46 GiB (2×8 GB DDR4-2667) | GeForce GTX 1060 Mobile     | Old gaming laptop: personal workstation VM, critical NFS; K8s only after capacity is freed |
+| `smallgpu`      | `192.168.1.106` | AMD Ryzen 5 3600, 6c/12t        | 15.55 GiB (1×16 GB DDR4-2133) | GeForce RTX 2060            | Compute/GPU capacity, 10 TB bulk disk; NFS setup pending |
 | `largegpu`      | `192.168.1.107` | AMD Ryzen 7 5800X, 8c/16t       | 62.70 GiB (2×32 GB DDR4-2400) | GeForce RTX 3080 LHR        | GPU compute / Windows gaming runtime mutex |
 
 | Proxmox host    | Fast/system disk                         | Additional disk                         | Motherboard                       | Virtualization |
@@ -56,18 +58,58 @@ GitOps-driven Kubernetes architecture designed to run Talos Linux on a 3-node Pr
 | `smallgpu`      | 476.9 GB XPG SPECTRIX S40G NVMe          | 9.1 TB Toshiba MG06ACA10TE SATA HDD     | ASUS PRIME B450M-A                | AMD-V          |
 | `largegpu`      | 931.5 GB Samsung SSD 980 NVMe             | 1.8 TB WD20EZBX SATA HDD                | ASUS TUF GAMING X570-PLUS         | AMD-V          |
 
-The remaining fleet has 20 physical CPU cores / 40 threads and 93.71 GiB of installed RAM. These are host totals, not safe VM allocations; the replacement control-plane and worker sizing must leave capacity for Proxmox and the NFS services.
+The remaining fleet has 20 physical CPU cores / 40 threads and 93.71 GiB of installed RAM. These are host totals, not safe VM allocations. Capacity is also unevenly distributed: 62.70 GiB is in `largegpu`, while each of the other two hosts has only about 15.5 GiB. RAM and failure-domain placement, rather than aggregate CPU, are the limiting factors.
 
 The reserved cluster VIP is `192.168.1.210` — the Talos control-plane VIP and Kubernetes API endpoint once the replacement control-plane topology is deployed.
 
-### VM topology transition
+### Live capacity snapshot (2026-07-22)
+
+This snapshot was read from the Proxmox API at `192.168.1.105`; it is operational evidence, not Terraform desired state.
+
+| Host | Live state | Existing VM allocation | Capacity consequence |
+|------|------------|------------------------|----------------------|
+| `gpunvdgtx1060` | Online; 15.46 GiB RAM | VM `100`, the personal workstation: running, 6 vCPU, fixed 10 GiB RAM, 100 GiB disk | A 3 GiB GPU worker requires workstation ballooning (8–10 GiB) or a small fixed reduction |
+| `largegpu` | Online; 62.70 GiB RAM | Windows VMs `502` and `101`: stopped; each configured for 16 vCPU, 60 GiB RAM, 635 GiB disk and RTX 3080 passthrough | Main available compute while Windows is stopped; starting either Windows VM consumes essentially the whole host |
+| `smallgpu` | Online; 15.55 GiB RAM, 13.53 GiB free | No VMs at review time | Hosts the `2 vCPU / 4 GiB` control plane, `4 vCPU / 4 GiB` general worker, and `4 vCPU / 4 GiB` RTX 2060 worker |
+
+VM `100` is not merely over-provisioned on paper. Proxmox history showed a 9.49 GiB guest-memory peak and a 14.63 GiB whole-host memory peak during the preceding week; at the follow-up review it was using 9.8 GiB and the host had already moved 0.61 GiB into swap. Inside the guest, however, applications used about 6.6 GiB with 2.6 GiB available/reclaimable, which makes an 8–10 GiB balloon range preferable to a fixed 8 GiB reduction.
+
+The critical NFS server is confirmed to run directly on Proxmox: `nfs-kernel-server` is active and enabled, `/mnt/storage2-bulk` is an ext4 mount backed by `/dev/mapper/gpu1--extra-storage2--bulk`, and it is exported read/write to `192.168.1.0/24` with NFSv4 `fsid=10`. TCP 111 and 2049 are listening. A client mount from Talos still needs verification after deployment.
+
+The bulk NFS server on `smallgpu` is **not** configured yet: `nfs-kernel-server` is absent/inactive, `exportfs` is unavailable, and nothing is listening on TCP 2049. The 10 TB disk therefore cannot back `storage1-bulk-pv` until the host-side setup in `kubernetes/system/storage/storage1-bulk.yaml` is completed.
+
+GPU host readiness differs by machine. The laptop GTX 1060 is already bound to `vfio-pci` and exposes `/dev/vfio/2`. The RTX 2060 is isolated in IOMMU group 18, but its GPU, audio, USB, and UCSI functions are still bound to host drivers. Before `gpu-3` can start, bind PCI IDs `10de:1e89`, `10de:10f8`, `10de:1ad8`, and `10de:1ad9` to `vfio-pci`, rebuild the initramfs, and reboot `smallgpu`.
+
+### Capacity decision and target topology
+
+**Yes, downsize the control plane.** Three control-plane VMs at 4 vCPU / 8 GiB each would reserve 24 GiB for a small homelab control plane and no longer fit the actual failure domains. Talos v1.9 lists 2 vCPU / 2 GiB as the control-plane minimum and 4 vCPU / 4 GiB as recommended; the balanced target here is **2 vCPU / 4 GiB, 40–50 GiB disk per control-plane VM**. See the [Talos v1.9 system requirements](https://docs.siderolabs.com/talos/v1.9/getting-started/system-requirements).
+
+The staged design is:
+
+| Stage | Control plane | Workers | Availability trade-off |
+|-------|---------------|---------|------------------------|
+| Constrained / configured | One `2 vCPU / 4 GiB` VM on `smallgpu` | `4 vCPU / 4 GiB` general worker on `smallgpu`; GPU workers: GTX 1060 `2 vCPU / 3 GiB`, RTX 2060 `4 vCPU / 4 GiB`, RTX 3080 `8 vCPU / 32 GiB` | Not control-plane HA. GPU workers are tainted. The GTX 1060 worker depends on workstation ballooning; the RTX 3080 worker stops for Windows |
+| Three-host steady state | Three `2 vCPU / 4 GiB` VMs, exactly one per physical host | Right-size workers independently after observing real usage | Survives one control-plane VM or physical-host failure, but only after `gpunvdgtx1060` has additional RAM or its workstation allocation is materially reduced |
+
+The configured `2 vCPU / 3 GiB` GTX 1060 worker on `gpunvdgtx1060` exists only to expose that PCI GPU to Kubernetes; Proxmox itself serves NFS. Like every GPU worker, it has `nvidia.com/gpu=true:NoSchedule`, so ordinary pods cannot consume its tight memory budget. Before starting it, configure workstation VM `100` with a 10 GiB maximum and 8 GiB balloon minimum (`qm set 100 --memory 10240 --balloon 8192`), or reduce the workstation to 9 GiB fixed. The balloon option preserves the workstation's ability to grow when RAM is available.
+
+The longer-term ways to improve this are:
+
+1. Upgrade the laptop to 32 GiB RAM, then use roughly `4 vCPU / 8 GiB` for the worker while retaining the 10 GiB workstation and at least 4 GiB for Proxmox/NFS.
+2. Use the configured 8–10 GiB balloon range; guest-level measurements support reclaiming cache, but not a permanent reduction much below 9 GiB.
+3. Move the workstation unchanged to `largegpu`, accepting that an owned workstation becomes dependent on borrowed hardware and competes with Windows/GPU runtime capacity.
+4. Make the workstation and GTX 1060 worker mutually exclusive at runtime. This saves RAM but makes that GPU unavailable whenever the workstation is running.
+
+A worker does not need to be on the NFS server to use the important storage. Any worker on `192.168.1.0/24` can mount `192.168.1.105:/mnt/storage2-bulk`. The laptop VM is present because PCI GPU access must be local to a Kubernetes node, not because NFS requires colocation.
+
+### Retired Terraform topology
 
 The old VM placement is intentionally not reproduced here because it depended on the returned laptops:
 
 - `cp-1`, `cp-2`, and `cp-3` were hosted by `worker1`, `worker2`, and `worker3`.
 - `worker-1`, `worker-3`, `worker-4`, and `worker-5` were hosted by `worker4`, `worker1`, `worker2`, and `worker3`.
 - `smallgpu` is the new Proxmox hostname for the host formerly named `node6`; Terraform still uses `node6` and must be changed before the next apply.
-- The replacement control-plane, worker, GPU, and Windows VM allocations are pending a lower-capacity redesign in `terraform/deployments/prod/config.yml`.
+- `terraform/deployments/prod/config.yml` has been remapped to the remaining hosts; the names and placements above are historical context only.
 
 ### Node ownership and permanence
 
@@ -78,7 +120,7 @@ Practical consequences that the rest of this document depends on:
 - **Critical / personal data stays on `gpunvdgtx1060`.** This is the only host where state can't simply disappear. Personal cloud (Immich), config snapshots, and anything irreplaceable should bind against the **critical tier** (`storage2-bulk-pv`, see [Kubernetes storage](#kubernetes-storage) below).
 - **Bulk / non-critical / reproducible data goes on the borrowed hosts.** Media libraries (Plex/Jellyfin, *arr stack), large model caches, and anything that can be re-downloaded land on the **bulk tier** (`storage1-bulk-pv` on `smallgpu`, 10 TB).
 - **`smallgpu` is the "big storage server, non-critical" role.** This is the physical host previously named `node6` (and before that `storage1`) at `192.168.1.106`. The Kubernetes PV/StorageClass names (`storage1-bulk-pv`, `nfs-storage1`) remain unchanged so existing bindings continue to resolve.
-- **Failure tolerance must be revisited with the VM redesign.** The smaller three-host fleet has much less spare compute, and two hosts are borrowed. Critical pods should be placed on `gpunvdgtx1060` where practical, but storage placement and workload placement protect against different failures and are not substitutes for backups.
+- **Failure tolerance must be revisited with the VM redesign.** The smaller three-host fleet has much less spare compute, and two hosts are borrowed. Critical pods may access `gpunvdgtx1060` storage from any LAN-connected worker; they should run locally only after the laptop has enough RAM. Storage placement and workload placement protect against different failures and are not substitutes for backups.
 
 **IP convention:**
 
@@ -89,7 +131,7 @@ Practical consequences that the rest of this document depends on:
 
 **Why VMs live on the home subnet, not an isolated `10.x` block:** every Proxmox host's `vmbr0` is already bridged to the home LAN, so VMs on `192.168.1.x` are L2-reachable from any device on the network with zero routing config. Mac, kubectl, talosctl, and any future Proxmox host you add work out of the box. Make sure your router's DHCP pool excludes the static range you reserve for VMs.
 
-VM specs, IPs, and PCI/USB device IDs are normally defined as YAML in [`terraform/deployments/<env>/config.yml`](../terraform/deployments/) and consumed via Terragrunt's hierarchical config-merging in [`root.hcl`](../terraform/deployments/root.hcl). During this transition, the physical inventory above is authoritative and the production YAML remains stale until the VM redesign.
+VM specs, IPs, and PCI/USB device IDs are defined as YAML in [`terraform/deployments/<env>/config.yml`](../terraform/deployments/) and consumed via Terragrunt's hierarchical config-merging in [`root.hcl`](../terraform/deployments/root.hcl). The production YAML now implements the constrained topology described above.
 
 ### Network defaults
 
@@ -110,7 +152,7 @@ The control-plane VIP is managed by Talos's built-in VIP mechanism — no extern
 
 ## ⚡ The `largegpu` runtime mutex (Talos GPU worker ↔ Windows VM)
 
-Both `gpu-2` (Talos K8s GPU worker) and `largegpu-win11` (Windows gaming VM) are defined as Terraform-managed VMs on the same Proxmox host (`largegpu`), and **both have the RTX 3080 (`0000:08:00.0`) configured for PCIe passthrough**. Terraform creates both at apply time — there is no config-time mutex.
+Both `gpu-2` (Talos K8s GPU worker) and `largegpu-win11` (Windows gaming VM) are defined in Terraform for the same Proxmox host (`largegpu`), and **both have the RTX 3080 (`0000:08:00.0`) configured for PCIe passthrough**. Terraform would create both at apply time — there is no config-time mutex. In the 2026-07-22 live snapshot, no Talos `gpu-2` VM existed; Windows VM `502` and its copy `101` existed but were stopped.
 
 The exclusivity is enforced at **VM start time** by Proxmox itself: the GPU can only be bound to one running VM. To switch between them:
 
@@ -122,9 +164,9 @@ qm shutdown 402 && qm start 502
 qm shutdown 502 && qm start 402
 ```
 
-The current Terraform values reflect the old, larger fleet and are retained here only as transition context:
+The configured runtime allocation is:
 
-- Both VMs currently request 16 vCPUs and 60 GiB RAM. This must be reconsidered if replacement control-plane or worker VMs are colocated on `largegpu`.
+- `gpu-2` requests 8 vCPUs and 32 GiB RAM; the Windows VM requests 16 vCPUs and 60 GiB RAM. They remain mutually exclusive because they share the RTX 3080, so the Windows allocation can still use essentially the whole host when `gpu-2` is stopped.
 - The largegpu host's 794 GB local NVMe LVM-thin is split ~80/20 — Windows gets `disk_size_gb: 635` for games, gpu-2 gets `disk_size_gb: 159` for the Talos rootfs.
 - `on_boot = true` for the Talos GPU worker (auto-start on Proxmox boot); `on_boot = false` for the Windows VM (manual).
 
@@ -162,11 +204,11 @@ Beyond each host's default `local` (Directory, /var/lib/vz) and `local-lvm` (LVM
 | `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | ISOs, templates, backups (slow HDD, low-churn data)                    |
 | `gpunvdgtx1060` | `gpu1-extra`          | LVM-thin     | 912 GB     | Spare capacity for additional VMs + carved LV for `storage2-bulk` NFS  |
 | `gpunvdgtx1060` | `storage2-bulk` (NFS) | ext4 LV on `gpu1-extra`, NFSv4 export | 800 GB | **Critical tier** — Immich, personal data (only permanent host)        |
-| `smallgpu`      | `storage1-bulk` (NFS) | NTFS via `ntfs3` driver, NFSv4 export | 10 TB  | **Bulk tier** — media for K8s workloads (host is borrowed, see [Node ownership](#node-ownership-and-permanence)) |
+| `smallgpu`      | `storage1-bulk` (planned NFS) | 10 TB disk; mount/export setup pending | 10 TB  | **Bulk tier** — unavailable until host-side NFS setup is completed |
 
 ### Kubernetes storage
 
-Two static NFS-backed `PersistentVolume`s are exposed to the cluster, one per tier (see [Node ownership and permanence](#node-ownership-and-permanence) for why two tiers exist):
+Two static NFS-backed `PersistentVolume`s are declared, one per tier (see [Node ownership and permanence](#node-ownership-and-permanence) for why two tiers exist). The critical tier is live; the bulk PV remains unavailable until `smallgpu` exports its disk:
 
 | PV name             | StorageClass     | Backed by                                       | Size   | Tier — use case                                                                            |
 |---------------------|------------------|-------------------------------------------------|--------|--------------------------------------------------------------------------------------------|
@@ -236,7 +278,7 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
     │   ├── merge_configs.sh              # Hierarchical YAML deep-merge
     │   ├── config.yml                    # Global defaults
     │   ├── prod/
-    │   │   ├── config.yml                # Prod VM topology (pending resize for 3-host fleet)
+    │   │   ├── config.yml                # Prod VM topology for the current 3-host fleet
     │   │   └── homelab-cluster/
     │   │       └── terragrunt.hcl        # Just `include "root"`; module auto-detected
     │   └── staging/
@@ -430,7 +472,7 @@ via hostpci block             kernel modules loaded:
 
 **Proxmox side** (handled by `proxmox-vm` / `proxmox-windows-vm`):
 - GPU VMs use `bios = "ovmf"` and `machine = "q35"`.
-- Each GPU's PCI address (e.g. `01:00` for `gpu-1`'s GTX 1060, `08:00` for `gpu-2`/`largegpu-win11`'s RTX 3080) is passed through via `hostpci` blocks.
+- Each GPU's PCI address (`01:00` for `gpu-1`'s GTX 1060, `08:00` for `gpu-2`/Windows's RTX 3080, and `09:00` for `gpu-3`'s RTX 2060) is passed through via `hostpci` blocks.
 - AMD-V (SVM) must be enabled in BIOS on AMD hosts (largegpu, smallgpu).
 - IOMMU enabled on the host kernel cmdline (`intel_iommu=on` or `amd_iommu=on`); GPU bound to `vfio-pci`.
 
@@ -549,8 +591,11 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 ### Post-deploy checklist
 
 - [ ] Deploy NVIDIA device plugin DaemonSet via ArgoCD (in `kubernetes/system/`)
+- [ ] Prepare `smallgpu` RTX 2060 passthrough — bind all four `09:00.x` functions to `vfio-pci`, rebuild initramfs, reboot, and verify `/dev/vfio/18` before starting VM `403`
 - [ ] Deploy ingress controller + cert-manager for TLS termination
 - [ ] **Verify NFS export on smallgpu** — `showmount -e 192.168.1.106` should list `/mnt/data10tb`. If not, follow the one-time setup in the [storage1-bulk.yaml](../kubernetes/system/storage/storage1-bulk.yaml) header (install `nfs-kernel-server`, add `/etc/exports` entry, `exportfs -ra`)
+- [x] **Verify the critical NFS server on Proxmox** — daemon active/enabled, ext4 backing mount present, export restricted to `192.168.1.0/24`, and TCP 2049 listening on 2026-07-22
+- [ ] **Verify the critical NFS export from Talos** — a worker must successfully mount `192.168.1.105:/mnt/storage2-bulk` before critical workloads are deployed
 - [ ] Confirm `/mnt/data10tb` is mounted on smallgpu with the `ntfs3` kernel driver (not the legacy `ntfs-3g` fuse driver — `ntfs3` is faster and is what the architecture assumes)
 - [ ] Deploy media stack PVC(s) bound to `storage1-bulk-pv` (bulk tier)
 - [ ] Deploy Immich + any other personal/critical workloads with PVCs bound to `storage2-bulk-pv` (critical tier) — **never** point critical apps at `storage1-bulk-pv`, smallgpu is borrowed
@@ -570,6 +615,6 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 - **IP addresses use CIDR notation** (`192.168.1.232/24`) in variables. Modules use `split("/", ip)[0]` to extract the bare IP and parse the prefix for routing.
 - **All VMs use `cpu.type = "host"`** — required for GPU passthrough, best performance everywhere else.
 - **The `largegpu` mutex is enforced at runtime, not config time.** Two VMs sharing one GPU = one runs, the other can't start. This lets you flip between them in seconds with no Terraform churn.
-- **Bulk media storage is NTFS+NFS, not Ceph/Longhorn.** The 10 TB drive on smallgpu had existing NTFS data worth preserving. Exporting it via the kernel `ntfs3` driver + NFSv4 was simpler than converting (which would require a full copy off + back).
+- **Bulk media storage is planned as NTFS+NFS, not Ceph/Longhorn.** The 10 TB drive on smallgpu has existing NTFS data worth preserving. The manifests assume the kernel `ntfs3` driver + NFSv4, but the host mount/export still needs to be configured.
 - **Two storage tiers, split by host permanence — not performance.** Critical/personal data binds against `storage2-bulk-pv` on `gpunvdgtx1060` (the only permanent host). Bulk/reproducible data binds against `storage1-bulk-pv` on smallgpu (borrowed hardware). The tier names map onto *survivability* of the underlying machine, not on IOPS or media class. See [Node ownership and permanence](#node-ownership-and-permanence).
-- **VM sizing must fit the remaining hardware.** The former laptop-based 3-control-plane/5-worker layout is retired. Its replacement must fit within 20 physical cores / 40 threads and 93.71 GiB RAM across the three remaining hosts while preserving Proxmox and NFS headroom.
+- **VM sizing follows per-host headroom, not fleet totals.** Production uses one `2 vCPU / 4 GiB` control plane, one general worker, and three tainted GPU workers. The `2 vCPU / 3 GiB` GTX 1060 worker requires VM `100` ballooning because the laptop has only 15.46 GiB total; `smallgpu` reserves 12 GiB across its CP, general worker, and RTX 2060 worker.
