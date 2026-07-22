@@ -51,9 +51,9 @@ load_secrets() {
   set +a
 
   # Construct the Proxmox API token expected by root.hcl:
-  #   PROXMOX_APITOKEN_ID  = root@pam!claude-token
+  #   PROXMOX_APITOKEN_ID  = root@pam!ai-agent-token
   #   PROXMOX_APITOKEN_SECRET = <uuid>
-  #   → PROXMOX_API_TOKEN  = root@pam!claude-token=<uuid>
+  #   → PROXMOX_API_TOKEN  = root@pam!ai-agent-token=<uuid>
   export PROXMOX_API_TOKEN="${PROXMOX_APITOKEN_ID}=${PROXMOX_APITOKEN_SECRET}"
 }
 
