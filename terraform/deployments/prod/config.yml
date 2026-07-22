@@ -2,7 +2,7 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  Production environment                                                    ║
 # ║                                                                            ║
-# ║  1 CP + 1 general worker + 3 GPU workers on 192.168.1.0/24.               ║
+# ║  1 control plane + 3 GPU workers on the home LAN (192.168.1.0/24).        ║
 # ║  Sized for the three remaining hosts and the existing workstation VM.     ║
 # ║                                                                            ║
 # ║  IP convention (matches the rest of the homelab):                          ║
@@ -26,9 +26,9 @@ network_gateway: "192.168.1.1"
 argocd_target_revision: "main"
 
 # ── Control-plane node (single-node control plane; intentionally not HA) ─────
-# smallgpu is back online and has 15.5 GiB RAM. The CP gets 2c/4GiB and shares
-# the host with one 4 GiB general worker and one 4 GiB GPU worker, leaving
-# ~3.5 GiB physical RAM for Proxmox + the planned bulk NFS service. Return to
+# smallgpu is back online and has 15.5 GiB RAM. The CP gets 2c/4GiB and the
+# RTX 2060 worker gets 10c/8GiB, leaving ~3.5 GiB physical RAM for Proxmox,
+# QEMU overhead, and the planned bulk NFS service. Return to
 # 3 CPs only after gpunvdgtx1060 can host one without squeezing its workstation
 # and NFS.
 control_plane_nodes:
@@ -40,20 +40,10 @@ control_plane_nodes:
     memory_mb: 4096
     disk_size_gb: 50
 
-# ── Worker nodes ──────────────────────────────────────────────────────────────
-# Critical NFS runs directly on gpunvdgtx1060's Proxmox host; Kubernetes does
-# not need a storage-local general worker. This VM carries ordinary workloads.
-worker_nodes:
-  # smallgpu: CP (4 GiB) + general worker (4 GiB) + RTX 2060 worker (4 GiB)
-  # leaves ~3.5 GiB for Proxmox, QEMU overhead, and the planned bulk NFS.
-  # Keep requests realistic and grow only after measuring host pressure.
-  worker-general:
-    proxmox_node: "smallgpu"
-    vm_id: 302
-    ip_address: "192.168.1.222/24"
-    cores: 4
-    memory_mb: 4096
-    disk_size_gb: 100
+# ── General workers ───────────────────────────────────────────────────────────
+# None: gpu-3 is a mixed general+GPU worker in one VM. NFS runs on the Proxmox
+# hosts and does not require a colocated general Kubernetes worker.
+worker_nodes: {}
 
 # ── GPU nodes (PCIe passthrough; automatically tainted NoSchedule) ───────────
 gpu_nodes:
@@ -68,7 +58,8 @@ gpu_nodes:
     ip_address: "192.168.1.231/24"
     cores: 2
     memory_mb: 3072
-    disk_size_gb: 50
+    # Retain the existing 100 GiB disk; Proxmox cannot safely shrink it in place.
+    disk_size_gb: 100
     pci_devices:
       - id: "01:00"
         pcie: true
@@ -89,8 +80,9 @@ gpu_nodes:
         pcie: true
 
   # smallgpu: RTX 2060 at 09:00; GPU, audio, USB, and UCSI functions share
-  # IOMMU group 18 and are passed through together. CP + general worker + this
-  # VM reserve 12 GiB total, leaving ~3.5 GiB for Proxmox and planned bulk NFS.
+  # IOMMU group 18 and are passed through together. CP + this VM reserve 12 GiB
+  # total, leaving ~3.5 GiB for Proxmox, QEMU overhead, and planned bulk NFS.
+  # Unlike gpu-1/gpu-2, this node is not tainted: it also runs ordinary pods.
   # Host prerequisite before apply/start: bind PCI IDs 10de:1e89, 10de:10f8,
   # 10de:1ad8, and 10de:1ad9 to vfio-pci, rebuild initramfs, and reboot
   # smallgpu. They are currently bound to host drivers, so passthrough will fail.
@@ -98,9 +90,10 @@ gpu_nodes:
     proxmox_node: "smallgpu"
     vm_id: 403
     ip_address: "192.168.1.233/24"
-    cores: 4
-    memory_mb: 4096
+    cores: 10
+    memory_mb: 8192
     disk_size_gb: 100
+    dedicated: false
     pci_devices:
       - id: "09:00"
         pcie: true

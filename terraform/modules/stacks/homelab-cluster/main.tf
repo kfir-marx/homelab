@@ -24,10 +24,6 @@ locals {
   # Using .zst (not .xz): bpg/proxmox v0.105 only knows how to decompress
   # gz/zst/bz2. The factory serves both — zst gives the smallest download.
   talos_image_url = "https://factory.talos.dev/image/${var.talos_schematic_id}/${var.talos_version}/nocloud-amd64.raw.zst"
-
-  # Routing: derive subnet prefix and gateway host from the first CP node
-  vm_subnet_prefix     = split("/", values(var.control_plane_nodes)[0].ip_address)[1]
-  gateway_proxmox_node = values(var.control_plane_nodes)[0].proxmox_node
 }
 
 resource "proxmox_virtual_environment_download_file" "talos_image" {
@@ -50,12 +46,12 @@ module "control_plane_vms" {
   source   = "./modules/proxmox-vm"
   for_each = var.control_plane_nodes
 
-  hostname     = each.key
-  proxmox_node = each.value.proxmox_node
-  vm_id        = each.value.vm_id
-  cores        = each.value.cores
-  memory_mb    = each.value.memory_mb
-  disk_size_gb = each.value.disk_size_gb
+  hostname      = each.key
+  proxmox_node  = each.value.proxmox_node
+  vm_id         = each.value.vm_id
+  cores         = each.value.cores
+  memory_mb     = each.value.memory_mb
+  disk_size_gb  = each.value.disk_size_gb
   ip_address    = each.value.ip_address
   gateway       = var.network_gateway
   bridge        = var.network_bridge
@@ -131,52 +127,6 @@ module "windows_vms" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 1b. Proxmox host routing — enables IP forwarding and assigns the VM subnet
-#     gateway IP so that machines outside the Proxmox bridge can reach VMs.
-#     Only runs when proxmox_node_ips is populated.
-# ──────────────────────────────────────────────────────────────────────────────
-
-resource "terraform_data" "proxmox_ip_forwarding" {
-  for_each = var.proxmox_node_ips
-
-  triggers_replace = [each.value]
-
-  provisioner "remote-exec" {
-    connection {
-      type     = "ssh"
-      host     = each.value
-      user     = "root"
-      password = var.proxmox_ssh_password
-    }
-
-    inline = [
-      "echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-ip-forward.conf",
-      "sysctl -w net.ipv4.ip_forward=1 > /dev/null",
-    ]
-  }
-}
-
-resource "terraform_data" "proxmox_subnet_gateway" {
-  count = length(var.proxmox_node_ips) > 0 ? 1 : 0
-
-  triggers_replace = [var.network_gateway, var.network_bridge]
-
-  provisioner "remote-exec" {
-    connection {
-      type     = "ssh"
-      host     = var.proxmox_node_ips[local.gateway_proxmox_node]
-      user     = "root"
-      password = var.proxmox_ssh_password
-    }
-
-    inline = [
-      "ip addr show dev ${var.network_bridge} | grep -q '${var.network_gateway}/' || ip addr add ${var.network_gateway}/${local.vm_subnet_prefix} dev ${var.network_bridge}",
-      "printf 'auto ${var.network_bridge}:1\\niface ${var.network_bridge}:1 inet static\\n    address ${var.network_gateway}/${local.vm_subnet_prefix}\\n' > /etc/network/interfaces.d/vm-subnet-gw",
-    ]
-  }
-}
-
-# ──────────────────────────────────────────────────────────────────────────────
 # 2. Talos cluster — generates configs, applies them, bootstraps etcd
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -206,6 +156,7 @@ module "talos_cluster" {
     for name, node in var.gpu_nodes : name => {
       ip_address = node.ip_address
       gpu        = true
+      dedicated  = node.dedicated
     }
   }
 
@@ -213,7 +164,6 @@ module "talos_cluster" {
     module.control_plane_vms,
     module.worker_vms,
     module.gpu_vms,
-    terraform_data.proxmox_subnet_gateway,
   ]
 }
 

@@ -53,8 +53,8 @@ variable "template_vm_id" {
     empty install VM. When null (default), runs INSTALL mode and attaches
     the Windows ISO so you can do a one-time install.
   EOT
-  type    = number
-  default = null
+  type        = number
+  default     = null
 }
 
 variable "full_clone" {
@@ -203,8 +203,8 @@ resource "proxmox_virtual_environment_vm" "this" {
   dynamic "efi_disk" {
     for_each = local.is_install_mode ? [1] : []
     content {
-      datastore_id     = var.datastore_id
-      type             = "4m"
+      datastore_id      = var.datastore_id
+      type              = "4m"
       pre_enrolled_keys = true # Microsoft Secure Boot keys baked in
     }
   }

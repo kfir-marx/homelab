@@ -56,6 +56,7 @@ variable "gpu_worker_nodes" {
   type = map(object({
     ip_address = string
     gpu        = bool
+    dedicated  = bool
   }))
   default = {}
 }
@@ -173,14 +174,14 @@ data "talos_machine_configuration" "gpu_worker" {
     yamlencode({
       machine = {
         nodeLabels = {
-          "node.kubernetes.io/gpu"      = "true"
-          "nvidia.com/gpu.present"      = "true"
-          "homelab.dev/role"            = "gpu-worker"
-          "homelab.dev/gpu-node"        = each.key
+          "node.kubernetes.io/gpu" = "true"
+          "nvidia.com/gpu.present" = "true"
+          "homelab.dev/role"       = "gpu-worker"
+          "homelab.dev/gpu-node"   = each.key
         }
-        nodeTaints = {
+        nodeTaints = each.value.dedicated ? {
           "nvidia.com/gpu" = "true:NoSchedule"
-        }
+        } : {}
       }
     }),
   ]

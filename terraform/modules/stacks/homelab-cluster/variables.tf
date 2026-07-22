@@ -21,16 +21,6 @@ variable "proxmox_ssh_password" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Proxmox node management IPs (for host-level configuration via SSH)
-# ──────────────────────────────────────────────────────────────────────────────
-
-variable "proxmox_node_ips" {
-  description = "Map of Proxmox node names to their management IPs (enables routing setup)"
-  type        = map(string)
-  default     = {}
-}
-
-# ──────────────────────────────────────────────────────────────────────────────
 # Cluster-wide settings
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -151,6 +141,7 @@ variable "gpu_nodes" {
     cores        = number
     memory_mb    = number
     disk_size_gb = number
+    dedicated    = optional(bool, true)
     pci_devices = list(object({
       id   = string
       pcie = bool

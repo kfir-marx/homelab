@@ -13,10 +13,9 @@ cluster_vip: "10.0.20.100"
 # ── Network ──────────────────────────────────────────────────────────────────
 network_gateway: "10.0.20.1"
 
-# ── Proxmox node management IPs (for host routing setup) ────────────────────
-proxmox_node_ips:
-  worker1: "192.168.1.105"
-  worker2: "192.168.1.102"   # TODO: verify this IP
+# Physical-host routing is not managed by Terraform. If this isolated staging
+# subnet is revived on joined hosts, declare forwarding and bridge addresses in
+# Ansible before planning its VMs. The worker1/worker2 placement below is legacy.
 
 # ── ArgoCD ───────────────────────────────────────────────────────────────────
 argocd_target_revision: "staging"
