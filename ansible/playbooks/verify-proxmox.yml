@@ -11,6 +11,76 @@
         - verify
 
   tasks:
+    - name: Verify Proxmox guest shutdown orchestration is enabled
+      ansible.builtin.command: systemctl is-enabled pve-guests.service
+      register: verified_pve_guests_enabled
+      changed_when: false
+      check_mode: false
+      when: inventory_hostname in groups.get('nut_servers', [])
+      tags:
+        - nut
+        - verify
+
+    - name: Require Proxmox guest shutdown orchestration
+      ansible.builtin.assert:
+        that:
+          - verified_pve_guests_enabled.stdout == 'enabled'
+        fail_msg: >-
+          pve-guests.service is not enabled; a host poweroff may not gracefully
+          stop its guests.
+      when: inventory_hostname in groups.get('nut_servers', [])
+      tags:
+        - nut
+        - verify
+
+    - name: Read NUT service state
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - nut-server.service
+          - nut-monitor.service
+      register: verified_nut_services
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: inventory_hostname in groups.get('nut_servers', [])
+      tags:
+        - nut
+        - verify
+
+    - name: Read live UPS status from NUT
+      ansible.builtin.command:
+        argv:
+          - upsc
+          - "{{ nut_ups_name | default('ups') }}@localhost"
+          - ups.status
+      register: verified_nut_ups_status
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: inventory_hostname in groups.get('nut_servers', [])
+      tags:
+        - nut
+        - verify
+
+    - name: Require a responsive online or on-battery UPS
+      ansible.builtin.assert:
+        that:
+          - >-
+            verified_nut_services.stdout_lines
+            | select('equalto', 'active')
+            | list
+            | length == 2
+          - verified_nut_ups_status.stdout is search('(^| )(OL|OB)( |$)')
+        fail_msg: >-
+          NUT is not healthy: service states={{ verified_nut_services.stdout_lines }},
+          UPS status={{ verified_nut_ups_status.stdout | default('unavailable') }}.
+      when: inventory_hostname in groups.get('nut_servers', [])
+      tags:
+        - nut
+        - verify
+
     - name: Read active NFS exports
       ansible.builtin.command: exportfs -v
       register: active_nfs_exports

@@ -17,3 +17,7 @@ proxmox_base_packages:
 # both this global approval and the per-workstation approval when applicable.
 proxmox_reboot_approved: false
 proxmox_workstation_reboot_approved: false
+
+# NUT listens on localhost only, but its monitor protocol still requires a
+# credential. Export this alongside PROXMOX_SSH_PASSWORD; never commit it.
+nut_monitor_password: "{{ lookup('ansible.builtin.env', 'NUT_MONITOR_PASSWORD') }}"

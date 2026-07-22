@@ -1,6 +1,12 @@
 ---
 proxmox_expected_hostname: largegpu
 
+# Connect this host's UPS USB data cable, then replace both empty values with
+# the four-digit lowercase IDs reported by `lsusb`. The NUT role deliberately
+# refuses to make changes until exactly one matching device is attached.
+nut_ups_usb_vendorid: ""
+nut_ups_usb_productid: ""
+
 vfio_passthrough_bootloader: grub
 vfio_passthrough_iommu_parameters:
   - amd_iommu=on

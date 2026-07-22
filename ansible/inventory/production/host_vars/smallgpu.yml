@@ -4,6 +4,12 @@ proxmox_base_extra_packages:
   # Diagnostics only; the actual mount uses the in-kernel ntfs3 driver.
   - ntfs-3g
 
+# Connect this host's UPS USB data cable, then replace both empty values with
+# the four-digit lowercase IDs reported by `lsusb`. The NUT role deliberately
+# refuses to make changes until exactly one matching device is attached.
+nut_ups_usb_vendorid: ""
+nut_ups_usb_productid: ""
+
 nfs_server_mounts:
   - name: storage1-bulk
     uuid: 44BA5D2BBA5D1B2E

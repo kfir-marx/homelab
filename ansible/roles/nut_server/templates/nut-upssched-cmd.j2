@@ -1,0 +1,13 @@
+#!/bin/sh
+# Managed by Ansible: nut_server
+set -eu
+
+case "${1:-}" in
+  on-battery)
+    logger -t nut-upssched "Utility power absent for {{ nut_shutdown_delay_seconds }} seconds; initiating graceful shutdown"
+    /usr/sbin/upsmon -c fsd
+    ;;
+  *)
+    logger -t nut-upssched "Ignoring unknown scheduler event: ${1:-missing}"
+    ;;
+esac

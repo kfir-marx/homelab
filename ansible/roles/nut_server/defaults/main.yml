@@ -1,0 +1,16 @@
+---
+nut_ups_name: ups
+nut_ups_description: "UPS protecting {{ inventory_hostname }}"
+nut_ups_driver: usbhid-ups
+nut_ups_port: auto
+nut_ups_usb_vendorid: ""
+nut_ups_usb_productid: ""
+nut_ups_usb_serial: ""
+nut_ups_driver_options: {}
+
+# ONLINE before expiry cancels this timer. LOWBATT remains an immediate NUT
+# safety shutdown even when it occurs before the timer expires.
+nut_shutdown_delay_seconds: 30
+nut_upsmon_final_delay_seconds: 5
+nut_upsmon_deadtime_seconds: 15
+nut_upsmon_poll_frequency_seconds: 5

@@ -1,0 +1,143 @@
+---
+- name: Validate NUT configuration inputs
+  ansible.builtin.assert:
+    that:
+      - nut_ups_name is match('^[a-zA-Z0-9_-]+$')
+      - nut_ups_driver is match('^[a-zA-Z0-9_-]+$')
+      - nut_ups_driver_options is mapping
+      - nut_ups_usb_vendorid is match('^[0-9a-fA-F]{4}$')
+      - nut_ups_usb_productid is match('^[0-9a-fA-F]{4}$')
+      - (nut_shutdown_delay_seconds | int) >= 1
+      - (nut_upsmon_final_delay_seconds | int) >= 0
+      - nut_monitor_password | length >= 16
+      - nut_monitor_password is match('^[a-zA-Z0-9_.~-]+$')
+    fail_msg: >-
+      NUT requires a directly attached UPS, explicit four-digit USB vendor/product
+      IDs, and NUT_MONITOR_PASSWORD (at least 16 URL-safe characters). See the
+      host vars and ansible/README.md.
+
+- name: Require exactly one attached UPS matching the declared USB identity
+  ansible.builtin.shell: |
+    set -euo pipefail
+    matches=0
+    for device_path in /sys/bus/usb/devices/*; do
+      [ -f "${device_path}/idVendor" ] || continue
+      [ "$(cat "${device_path}/idVendor")" = {{ nut_ups_usb_vendorid | lower | quote }} ] || continue
+      [ "$(cat "${device_path}/idProduct")" = {{ nut_ups_usb_productid | lower | quote }} ] || continue
+      {% if nut_ups_usb_serial | length > 0 %}
+      [ -f "${device_path}/serial" ] || continue
+      [ "$(cat "${device_path}/serial")" = {{ nut_ups_usb_serial | quote }} ] || continue
+      {% endif %}
+      matches=$((matches + 1))
+    done
+    if [ "${matches}" -ne 1 ]; then
+      printf 'Expected exactly one USB UPS matching %s:%s, found %s\n' \
+        {{ nut_ups_usb_vendorid | lower | quote }} \
+        {{ nut_ups_usb_productid | lower | quote }} \
+        "${matches}" >&2
+      exit 1
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  check_mode: false
+
+- name: Verify Proxmox guest shutdown orchestration is enabled
+  ansible.builtin.command: systemctl is-enabled pve-guests.service
+  register: nut_pve_guests_enabled
+  changed_when: false
+  check_mode: false
+  failed_when: nut_pve_guests_enabled.stdout != 'enabled'
+
+- name: Install NUT without upgrading the host
+  ansible.builtin.apt:
+    name:
+      - nut-client
+      - nut-server
+    state: present
+    update_cache: false
+
+- name: Configure NUT operating mode
+  ansible.builtin.template:
+    src: nut.conf.j2
+    dest: /etc/nut/nut.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Restart NUT server
+    - Restart NUT monitor
+
+- name: Configure the local UPS driver
+  ansible.builtin.template:
+    src: ups.conf.j2
+    dest: /etc/nut/ups.conf
+    owner: root
+    group: nut
+    mode: "0640"
+  notify: Restart NUT server
+
+- name: Restrict the NUT data server to localhost
+  ansible.builtin.template:
+    src: upsd.conf.j2
+    dest: /etc/nut/upsd.conf
+    owner: root
+    group: nut
+    mode: "0640"
+  notify: Restart NUT server
+
+- name: Configure the NUT monitor account
+  ansible.builtin.template:
+    src: upsd.users.j2
+    dest: /etc/nut/upsd.users
+    owner: root
+    group: nut
+    mode: "0640"
+  no_log: true
+  diff: false
+  notify:
+    - Restart NUT server
+    - Restart NUT monitor
+
+- name: Configure NUT host shutdown monitoring
+  ansible.builtin.template:
+    src: upsmon.conf.j2
+    dest: /etc/nut/upsmon.conf
+    owner: root
+    group: nut
+    mode: "0640"
+  no_log: true
+  diff: false
+  notify: Restart NUT monitor
+
+- name: Configure the 30-second outage scheduler
+  ansible.builtin.template:
+    src: upssched.conf.j2
+    dest: /etc/nut/upssched.conf
+    owner: root
+    group: nut
+    mode: "0640"
+  notify: Restart NUT monitor
+
+- name: Install the NUT scheduler command handler
+  ansible.builtin.template:
+    src: nut-upssched-cmd.j2
+    dest: /usr/local/sbin/nut-upssched-cmd
+    owner: root
+    group: nut
+    mode: "0750"
+  notify: Restart NUT monitor
+
+- name: Enable and start the NUT data server
+  ansible.builtin.systemd_service:
+    name: nut-server.service
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Enable and start the NUT shutdown monitor
+  ansible.builtin.systemd_service:
+    name: nut-monitor.service
+    enabled: true
+    state: started
+  when: not ansible_check_mode

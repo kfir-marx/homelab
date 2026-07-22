@@ -1,0 +1,7 @@
+# Managed by Ansible: nut_server
+CMDSCRIPT /usr/local/sbin/nut-upssched-cmd
+PIPEFN /run/nut/upssched.pipe
+LOCKFN /run/nut/upssched.lock
+
+AT ONBATT * START-TIMER on-battery {{ nut_shutdown_delay_seconds }}
+AT ONLINE * CANCEL-TIMER on-battery

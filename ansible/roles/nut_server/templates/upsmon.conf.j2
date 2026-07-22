@@ -1,0 +1,21 @@
+# Managed by Ansible: nut_server
+RUN_AS_USER nut
+MONITOR {{ nut_ups_name }}@localhost 1 upsmon {{ nut_monitor_password }} primary
+MINSUPPLIES 1
+
+SHUTDOWNCMD "/sbin/shutdown -h now"
+NOTIFYCMD /usr/sbin/upssched
+POWERDOWNFLAG /etc/killpower
+
+POLLFREQ {{ nut_upsmon_poll_frequency_seconds }}
+POLLFREQALERT {{ nut_upsmon_poll_frequency_seconds }}
+HOSTSYNC 15
+DEADTIME {{ nut_upsmon_deadtime_seconds }}
+FINALDELAY {{ nut_upsmon_final_delay_seconds }}
+
+NOTIFYFLAG ONLINE SYSLOG+WALL+EXEC
+NOTIFYFLAG ONBATT SYSLOG+WALL+EXEC
+NOTIFYFLAG LOWBATT SYSLOG+WALL
+NOTIFYFLAG FSD SYSLOG+WALL
+NOTIFYFLAG COMMBAD SYSLOG+WALL
+NOTIFYFLAG COMMOK SYSLOG+WALL

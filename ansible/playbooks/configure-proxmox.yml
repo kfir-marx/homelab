@@ -19,6 +19,10 @@
       when: inventory_hostname in groups.get('nfs_servers', [])
       tags:
         - nfs
+    - role: nut_server
+      when: inventory_hostname in groups.get('nut_servers', [])
+      tags:
+        - nut
     - role: vfio_passthrough
       when: inventory_hostname in groups.get('vfio_hosts', [])
       tags:
