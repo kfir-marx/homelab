@@ -52,17 +52,18 @@ gpu_nodes:
   # GPU to Kubernetes. VM 100 remains a 10 GiB workstation. Before starting
   # this 3 GiB worker, enable virtio ballooning on VM 100 with an 8 GiB minimum
   # (`qm set 100 --memory 10240 --balloon 8192`) or set VM 100 to 9 GiB fixed.
-  gpu-1:
-    proxmox_node: "gpunvdgtx1060"
-    vm_id: 401
-    ip_address: "192.168.1.231/24"
-    cores: 2
-    memory_mb: 3072
-    # Retain the existing 100 GiB disk; Proxmox cannot safely shrink it in place.
-    disk_size_gb: 100
-    pci_devices:
-      - id: "01:00"
-        pcie: true
+  # commented out because the 1060 is now used only for the workstation VM 100.
+  # gpu-1:
+  #   proxmox_node: "gpunvdgtx1060"
+  #   vm_id: 401
+  #   ip_address: "192.168.1.231/24"
+  #   cores: 2
+  #   memory_mb: 3072
+  #   # Retain the existing 100 GiB disk; Proxmox cannot safely shrink it in place.
+  #   disk_size_gb: 100
+  #   pci_devices:
+  #     - id: "01:00"
+  #       pcie: true
 
   # largegpu: Ryzen 7 5800X (8c/16t), 62.7 GiB RAM, RTX 3080 at 08:00.
   # The Talos GPU VM is reduced to 8c/32GiB: ample initial GPU capacity without
