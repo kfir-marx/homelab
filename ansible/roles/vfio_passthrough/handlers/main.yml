@@ -1,0 +1,15 @@
+---
+- name: Rebuild initramfs
+  ansible.builtin.command: update-initramfs -u -k all
+  changed_when: true
+  listen: Rebuild initramfs
+
+- name: Update GRUB
+  ansible.builtin.command: update-grub
+  changed_when: true
+  listen: Update GRUB
+
+- name: Mark VFIO reboot required
+  ansible.builtin.set_fact:
+    vfio_passthrough_reboot_required: true
+  listen: Mark VFIO reboot required

@@ -1,0 +1,19 @@
+---
+ansible_user: root
+# Leave PROXMOX_SSH_PASSWORD unset when SSH keys or --ask-pass are used.
+ansible_password: "{{ lookup('ansible.builtin.env', 'PROXMOX_SSH_PASSWORD') }}"
+
+proxmox_expected_cluster_name: HomeLab-Cluster
+proxmox_expected_major_version: 9
+proxmox_repositories_debian_suite: trixie
+proxmox_repositories_has_subscription: false
+proxmox_repositories_ceph_enabled: false
+
+proxmox_base_packages:
+  - initramfs-tools
+  - pciutils
+
+# configure-proxmox.yml never reboots. The separate reboot playbook requires
+# both this global approval and the per-workstation approval when applicable.
+proxmox_reboot_approved: false
+proxmox_workstation_reboot_approved: false

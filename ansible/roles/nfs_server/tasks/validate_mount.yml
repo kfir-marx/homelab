@@ -1,0 +1,124 @@
+---
+- name: Read current mount state - {{ nfs_mount.name }}
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --raw
+      - --mountpoint
+      - "{{ nfs_mount.mount_point }}"
+      - --output
+      - UUID,TARGET,FSTYPE,OPTIONS
+  register: nfs_server_current_mount
+  changed_when: false
+  failed_when: nfs_server_current_mount.rc not in [0, 1]
+  check_mode: false
+
+- name: Validate existing mount - {{ nfs_mount.name }}
+  ansible.builtin.assert:
+    that:
+      - nfs_mount.uuid in nfs_server_current_mount.stdout
+      - nfs_mount.mount_point in nfs_server_current_mount.stdout
+      - nfs_mount.filesystem in nfs_server_current_mount.stdout
+      - nfs_server_current_mount.stdout is search('(^|[, ])rw([, ]|$)')
+      - nfs_server_current_mount.stdout is not search('(^|[, ])force([, ]|$)')
+    fail_msg: >-
+      {{ nfs_mount.mount_point }} is mounted with unexpected UUID, filesystem,
+      read-only state, or unsafe force option. Ansible will not modify fstab or exports.
+  when: nfs_server_current_mount.rc == 0
+
+- name: Probe unmounted NTFS metadata without repairing it
+  ansible.builtin.command:
+    argv:
+      - ntfsfix
+      - --no-action
+      - "/dev/disk/by-uuid/{{ nfs_mount.uuid }}"
+  register: nfs_server_ntfs_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - nfs_server_current_mount.rc == 1
+    - nfs_mount.filesystem == 'ntfs3'
+
+- name: Refuse dirty, hibernated, or otherwise unsafe NTFS volumes
+  ansible.builtin.assert:
+    that:
+      - nfs_server_ntfs_probe.rc == 0
+      - >-
+        (nfs_server_ntfs_probe.stdout ~ nfs_server_ntfs_probe.stderr) is not
+        search('(?i)dirty|unclean|hibernat|refus|failed|corrupt')
+    fail_msg: >-
+      NTFS safety probe failed for UUID {{ nfs_mount.uuid }}. Clean it with
+      Windows chkdsk /f, disable Fast Startup, and fully shut Windows down.
+      This role never force-mounts and never runs ntfsfix -d.
+  when:
+    - nfs_server_current_mount.rc == 1
+    - nfs_mount.filesystem == 'ntfs3'
+
+- name: Test a normal read/write mount before persistent changes
+  when:
+    - nfs_server_current_mount.rc == 1
+    - not ansible_check_mode
+  block:
+    - name: Create temporary mount validation directory
+      ansible.builtin.file:
+        path: "/run/ansible-nfs-preflight-{{ nfs_mount.name }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Temporarily mount filesystem read/write without force
+      ansible.builtin.command:
+        argv:
+          - mount
+          - --types
+          - "{{ nfs_mount.filesystem }}"
+          - --options
+          - "rw,{{ nfs_mount.mount_options }}"
+          - "/dev/disk/by-uuid/{{ nfs_mount.uuid }}"
+          - "/run/ansible-nfs-preflight-{{ nfs_mount.name }}"
+      changed_when: true
+
+    - name: Verify temporary mount is read/write
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - --noheadings
+          - --raw
+          - --mountpoint
+          - "/run/ansible-nfs-preflight-{{ nfs_mount.name }}"
+          - --output
+          - OPTIONS
+      register: nfs_server_temporary_mount
+      changed_when: false
+      failed_when: >-
+        nfs_server_temporary_mount.rc != 0 or
+        not (nfs_server_temporary_mount.stdout is search('(^|,)rw(,|$)'))
+      check_mode: false
+
+  always:
+    - name: Check temporary validation mount
+      ansible.builtin.command:
+        argv:
+          - mountpoint
+          - --quiet
+          - "/run/ansible-nfs-preflight-{{ nfs_mount.name }}"
+      register: nfs_server_temporary_mountpoint
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Unmount temporary validation mount
+      ansible.builtin.command:
+        argv:
+          - umount
+          - "/run/ansible-nfs-preflight-{{ nfs_mount.name }}"
+      when: nfs_server_temporary_mountpoint.rc == 0
+      changed_when: true
+
+    - name: Remove temporary mount validation directory
+      ansible.builtin.file:
+        path: "/run/ansible-nfs-preflight-{{ nfs_mount.name }}"
+        state: absent

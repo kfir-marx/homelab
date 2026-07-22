@@ -1,0 +1,115 @@
+---
+- name: Validate VFIO declarations
+  ansible.builtin.assert:
+    that:
+      - vfio_passthrough_devices | length > 0
+      - vfio_passthrough_expected_group_members | length >= vfio_passthrough_devices | length
+      - vfio_passthrough_iommu_group is number
+      - vfio_passthrough_bootloader in ['grub']
+      - item.address is match('^[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\\.[0-7]$')
+      - item.id is match('^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$')
+    fail_msg: "Invalid VFIO device declaration: {{ item }}"
+  loop: "{{ vfio_passthrough_devices }}"
+  loop_control:
+    label: "{{ item.address }} ({{ item.id }})"
+
+- name: Install VFIO modules-load configuration
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/homelab-vfio.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible role vfio_passthrough.
+      {% for module in vfio_passthrough_modules %}
+      {{ module }}
+      {% endfor %}
+  notify:
+    - Rebuild initramfs
+    - Mark VFIO reboot required
+
+- name: Install VFIO PCI ID binding configuration
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/homelab-vfio.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible role vfio_passthrough.
+      options vfio-pci ids={{ vfio_passthrough_devices | map(attribute='id') | join(',') }} disable_vga=1
+      softdep nouveau pre: vfio-pci
+      softdep nvidia pre: vfio-pci
+  notify:
+    - Rebuild initramfs
+    - Mark VFIO reboot required
+
+- name: Install passthrough driver blacklist
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/homelab-gpu-blacklist.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible role vfio_passthrough.
+      {% for module in vfio_passthrough_blacklist_modules %}
+      blacklist {{ module }}
+      {% endfor %}
+      options nouveau modeset=0
+  notify:
+    - Rebuild initramfs
+    - Mark VFIO reboot required
+
+- name: Configure IOMMU kernel parameters for GRUB
+  ansible.builtin.copy:
+    dest: /etc/default/grub.d/99-homelab-vfio.cfg
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible role vfio_passthrough.
+      GRUB_CMDLINE_LINUX_DEFAULT="${GRUB_CMDLINE_LINUX_DEFAULT} {{ vfio_passthrough_iommu_parameters | join(' ') }}"
+  when: vfio_passthrough_bootloader == 'grub'
+  notify:
+    - Update GRUB
+    - Mark VFIO reboot required
+
+- name: Apply VFIO boot artifact updates before verification
+  ansible.builtin.meta: flush_handlers
+
+- name: Read active driver for each passthrough device
+  ansible.builtin.shell: |
+    set -euo pipefail
+    device_path=/sys/bus/pci/devices/0000:{{ item.address }}
+    if [ -L "${device_path}/driver" ]; then
+      basename "$(readlink -f "${device_path}/driver")"
+    else
+      printf 'unbound\n'
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ vfio_passthrough_devices }}"
+  loop_control:
+    label: "{{ item.address }}"
+  register: vfio_passthrough_current_drivers
+  changed_when: false
+  check_mode: false
+
+- name: Record whether a VFIO reboot is still required
+  ansible.builtin.set_fact:
+    vfio_passthrough_reboot_required: >-
+      {{
+        (vfio_passthrough_reboot_required | default(false) | bool)
+        or
+        ((vfio_passthrough_current_drivers.results
+          | rejectattr('stdout', 'equalto', 'vfio-pci')
+          | list
+          | length) > 0)
+      }}
+
+- name: Show devices that will bind to vfio-pci after reboot
+  ansible.builtin.debug:
+    msg: "{{ item.item.address }} currently uses {{ item.stdout }}; configured target is vfio-pci"
+  loop: "{{ vfio_passthrough_current_drivers.results }}"
+  loop_control:
+    label: "{{ item.item.address }}"
+  when: item.stdout != 'vfio-pci'

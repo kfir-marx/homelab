@@ -1,0 +1,19 @@
+---
+proxmox_expected_hostname: largegpu
+
+vfio_passthrough_bootloader: grub
+vfio_passthrough_iommu_parameters:
+  - amd_iommu=on
+  - iommu=pt
+vfio_passthrough_iommu_group: 21
+# Read from the live host on 2026-07-22 before being declared here.
+vfio_passthrough_devices:
+  - address: "08:00.0"
+    id: 10de:2216
+  - address: "08:00.1"
+    id: 10de:1aef
+vfio_passthrough_expected_group_members:
+  - address: "08:00.0"
+    id: 10de:2216
+  - address: "08:00.1"
+    id: 10de:1aef

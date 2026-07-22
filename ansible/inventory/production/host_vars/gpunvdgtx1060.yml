@@ -1,0 +1,34 @@
+---
+proxmox_expected_hostname: gpunvdgtx1060
+proxmox_sensitive_workstation_host: true
+
+nfs_server_mounts:
+  - name: storage2-bulk
+    uuid: 07445d19-37d4-4353-af1a-9511fb9c74e9
+    mount_point: /mnt/storage2-bulk
+    filesystem: ext4
+    mount_options: defaults,nofail
+    dump: 0
+    passno: 2
+nfs_server_exports:
+  - path: /mnt/storage2-bulk
+    client: 192.168.1.0/24
+    options: rw,sync,no_subtree_check,no_root_squash,fsid=10
+
+vfio_passthrough_bootloader: grub
+vfio_passthrough_iommu_parameters:
+  - intel_iommu=on
+  - iommu=pt
+vfio_passthrough_iommu_group: 2
+vfio_passthrough_devices:
+  - address: "01:00.0"
+    id: 10de:1c20
+  - address: "01:00.1"
+    id: 10de:10f1
+vfio_passthrough_expected_group_members:
+  - address: "00:01.0"
+    id: 8086:1901
+  - address: "01:00.0"
+    id: 10de:1c20
+  - address: "01:00.1"
+    id: 10de:10f1

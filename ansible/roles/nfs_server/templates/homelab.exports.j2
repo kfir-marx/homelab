@@ -1,0 +1,5 @@
+# Managed by Ansible role nfs_server. Manual edits will be replaced.
+{% for export in nfs_server_exports %}
+{{ export.path }} {{ export.client }}({{ export.options }})
+{% endfor %}
+

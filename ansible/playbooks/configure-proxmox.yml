@@ -1,0 +1,38 @@
+---
+- name: Configure joined Proxmox cluster hosts
+  hosts: proxmox_hosts
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - role: proxmox_preflight
+      tags:
+        - always
+        - verify
+    - role: proxmox_repositories
+      tags:
+        - repositories
+    - role: proxmox_base
+      tags:
+        - packages
+    - role: nfs_server
+      when: inventory_hostname in groups.get('nfs_servers', [])
+      tags:
+        - nfs
+    - role: vfio_passthrough
+      when: inventory_hostname in groups.get('vfio_hosts', [])
+      tags:
+        - vfio
+
+  post_tasks:
+    - name: Report hosts that still require a reboot for VFIO
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Check mode predicts VFIO configuration changes' if ansible_check_mode
+             else 'VFIO configuration is staged or a declared device is not bound to vfio-pci' }}.
+          Use playbooks/reboot-proxmox.yml only after workload shutdown and
+          explicit approval.
+      when: vfio_passthrough_reboot_required | default(false) | bool
+      tags:
+        - vfio
+        - verify

@@ -1,0 +1,4 @@
+---
+proxmox_repositories_has_subscription: false
+proxmox_repositories_ceph_enabled: false
+proxmox_repositories_debian_suite: trixie

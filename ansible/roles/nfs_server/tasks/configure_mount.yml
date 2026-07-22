@@ -1,0 +1,31 @@
+---
+- name: Check whether the managed filesystem is already mounted - {{ nfs_mount.name }}
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --mountpoint
+      - "{{ nfs_mount.mount_point }}"
+  register: nfs_server_configure_mount_state
+  changed_when: false
+  failed_when: nfs_server_configure_mount_state.rc not in [0, 1]
+  check_mode: false
+
+- name: Create the unmounted filesystem's mount point - {{ nfs_mount.name }}
+  ansible.builtin.file:
+    path: "{{ nfs_mount.mount_point }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: nfs_server_configure_mount_state.rc == 1
+
+- name: Mount from the managed fstab entry - {{ nfs_mount.name }}
+  ansible.builtin.command:
+    argv:
+      - mount
+      - "{{ nfs_mount.mount_point }}"
+  when:
+    - nfs_server_configure_mount_state.rc == 1
+    - not ansible_check_mode
+  changed_when: true

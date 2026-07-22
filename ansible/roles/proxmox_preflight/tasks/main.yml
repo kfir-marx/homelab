@@ -1,0 +1,137 @@
+---
+- name: Verify inventory hostname matches the live host
+  ansible.builtin.assert:
+    that:
+      - proxmox_expected_hostname is defined
+      - ansible_facts.hostname == proxmox_expected_hostname
+      - inventory_hostname == proxmox_expected_hostname
+    fail_msg: >-
+      Inventory host {{ inventory_hostname }} resolved to {{ ansible_facts.hostname }};
+      expected {{ proxmox_expected_hostname | default('an explicitly declared hostname') }}.
+
+- name: Read Proxmox version
+  ansible.builtin.command: pveversion
+  register: proxmox_preflight_version
+  changed_when: false
+  check_mode: false
+
+- name: Verify Proxmox major version
+  ansible.builtin.assert:
+    that:
+      - >-
+        proxmox_preflight_version.stdout is
+        match('^pve-manager/' ~ (proxmox_expected_major_version | string) ~ '\\.')
+    fail_msg: >-
+      Expected Proxmox VE {{ proxmox_expected_major_version }}.x, got
+      {{ proxmox_preflight_version.stdout }}.
+
+- name: Read Proxmox cluster status
+  ansible.builtin.command: pvecm status
+  register: proxmox_preflight_cluster
+  changed_when: false
+  check_mode: false
+
+- name: Verify cluster membership and quorum
+  ansible.builtin.assert:
+    that:
+      - >-
+        proxmox_preflight_cluster.stdout is
+        search('(?m)^Name:\\s+' ~ (proxmox_expected_cluster_name | regex_escape) ~ '\\s*$')
+      - proxmox_preflight_cluster.stdout is search('(?m)^Quorate:\\s+Yes\\s*$')
+    fail_msg: >-
+      Host is not a quorate member of {{ proxmox_expected_cluster_name }}.
+      This playbook never creates or modifies cluster membership.
+
+- name: Validate declared filesystem UUIDs
+  ansible.builtin.shell: |
+    set -euo pipefail
+    device_path=/dev/disk/by-uuid/{{ item.uuid | quote }}
+    if [ ! -e "${device_path}" ]; then
+      printf 'Missing filesystem UUID %s\n' {{ item.uuid | quote }} >&2
+      exit 1
+    fi
+    actual_uuid="$(blkid -s UUID -o value "${device_path}")"
+    actual_type="$(blkid -s TYPE -o value "${device_path}")"
+    if [ "${actual_uuid}" != {{ item.uuid | quote }} ]; then
+      printf 'UUID mismatch: expected %s, got %s\n' {{ item.uuid | quote }} "${actual_uuid}" >&2
+      exit 1
+    fi
+    if [ "${actual_type}" != {{ item.device_filesystem | default(item.filesystem) | quote }} ]; then
+      printf 'Filesystem mismatch for %s: expected %s, got %s\n' \
+        {{ item.uuid | quote }} \
+        {{ item.device_filesystem | default(item.filesystem) | quote }} \
+        "${actual_type}" >&2
+      exit 1
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ nfs_server_mounts | default([]) }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.uuid }})"
+  changed_when: false
+  check_mode: false
+
+- name: Validate PCI IDs and complete IOMMU group membership
+  ansible.builtin.shell: |
+    set -euo pipefail
+    group_path=/sys/kernel/iommu_groups/{{ vfio_passthrough_iommu_group }}
+    if [ ! -d "${group_path}/devices" ]; then
+      printf 'IOMMU group %s does not exist\n' {{ vfio_passthrough_iommu_group | quote }} >&2
+      exit 1
+    fi
+
+    expected_members="$(printf '%s\n' \
+      {% for member in vfio_passthrough_expected_group_members %}{{ member.address | quote }} {% endfor %} \
+      | sort)"
+    actual_members="$(find "${group_path}/devices" -mindepth 1 -maxdepth 1 \
+      -printf '%f\n' | sed 's/^0000://' | sort)"
+    if [ "${actual_members}" != "${expected_members}" ]; then
+      printf 'IOMMU group %s membership mismatch\nExpected:\n%s\nActual:\n%s\n' \
+        {{ vfio_passthrough_iommu_group | quote }} "${expected_members}" "${actual_members}" >&2
+      exit 1
+    fi
+
+    {% for member in vfio_passthrough_expected_group_members %}
+    device_path=/sys/bus/pci/devices/0000:{{ member.address }}
+    actual_vendor="$(tr -d '\n' < "${device_path}/vendor" | sed 's/^0x//')"
+    actual_device="$(tr -d '\n' < "${device_path}/device" | sed 's/^0x//')"
+    actual_id="${actual_vendor}:${actual_device}"
+    if [ "${actual_id}" != {{ member.id | quote }} ]; then
+      printf 'PCI ID mismatch for %s: expected %s, got %s\n' \
+        {{ member.address | quote }} {{ member.id | quote }} "${actual_id}" >&2
+      exit 1
+    fi
+    actual_group="$(basename "$(readlink -f "${device_path}/iommu_group")")"
+    if [ "${actual_group}" != {{ vfio_passthrough_iommu_group | quote }} ]; then
+      printf 'IOMMU group mismatch for %s: expected %s, got %s\n' \
+        {{ member.address | quote }} {{ vfio_passthrough_iommu_group | quote }} "${actual_group}" >&2
+      exit 1
+    fi
+    {% endfor %}
+  args:
+    executable: /bin/bash
+  changed_when: false
+  check_mode: false
+  when: vfio_passthrough_devices | default([]) | length > 0
+
+- name: Refuse VFIO changes while a matching GPU is assigned to a running VM
+  ansible.builtin.shell: |
+    set -euo pipefail
+    conflict=0
+    while read -r vmid _ status _; do
+      [ "${vmid}" = VMID ] && continue
+      [ "${status}" = running ] || continue
+      config="$(qm config "${vmid}")"
+      {% for device in vfio_passthrough_devices | default([]) %}
+      if grep -Eq '^hostpci[0-9]+:.*(0000:)?{{ device.address[0:5] | regex_escape }}([,;]|$)' <<< "${config}"; then
+        printf 'VM %s is running with PCI slot {{ device.address[0:5] }}\n' "${vmid}" >&2
+        conflict=1
+      fi
+      {% endfor %}
+    done < <(qm list)
+    exit "${conflict}"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  check_mode: false
+  when: vfio_passthrough_devices | default([]) | length > 0

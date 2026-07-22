@@ -1,0 +1,5 @@
+---
+proxmox_base_packages:
+  - initramfs-tools
+  - pciutils
+proxmox_base_extra_packages: []

@@ -1,0 +1,17 @@
+---
+- name: Build required Proxmox host package list
+  ansible.builtin.set_fact:
+    proxmox_base_required_packages: >-
+      {{
+        (proxmox_base_packages
+        + proxmox_base_extra_packages
+        + (['nfs-kernel-server'] if inventory_hostname in groups.get('nfs_servers', []) else []))
+        | unique
+        | list
+      }}
+
+- name: Install required Proxmox host packages without upgrading the host
+  ansible.builtin.apt:
+    name: "{{ proxmox_base_required_packages }}"
+    state: present
+    update_cache: false

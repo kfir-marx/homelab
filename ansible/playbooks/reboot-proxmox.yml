@@ -1,0 +1,29 @@
+---
+- name: Explicitly reboot Proxmox hosts one at a time
+  hosts: proxmox_hosts
+  gather_facts: false
+  serial: 1
+
+  pre_tasks:
+    - name: Require explicit reboot approval
+      ansible.builtin.assert:
+        that:
+          - proxmox_reboot_approved | bool
+        fail_msg: >-
+          Reboot denied. Re-run with -e proxmox_reboot_approved=true after
+          confirming that affected VMs and users can be interrupted.
+
+    - name: Require separate approval for the workstation host
+      ansible.builtin.assert:
+        that:
+          - proxmox_workstation_reboot_approved | bool
+        fail_msg: >-
+          This host runs workstation VM 100. Confirm the user is logged out and
+          re-run with -e proxmox_workstation_reboot_approved=true.
+      when: proxmox_sensitive_workstation_host | default(false) | bool
+
+  tasks:
+    - name: Reboot the approved Proxmox host
+      ansible.builtin.reboot:
+        msg: Reboot initiated by the homelab Ansible reboot playbook
+        reboot_timeout: 900

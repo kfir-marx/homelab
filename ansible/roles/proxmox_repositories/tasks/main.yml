@@ -1,0 +1,95 @@
+---
+- name: Validate repository policy variables
+  ansible.builtin.assert:
+    that:
+      - proxmox_repositories_debian_suite == 'trixie'
+      - proxmox_expected_major_version | int == 9
+    fail_msg: This role currently manages only Proxmox VE 9 on Debian Trixie.
+
+- name: Find active Proxmox enterprise repository files
+  ansible.builtin.find:
+    paths: /etc/apt/sources.list.d
+    patterns:
+      - pve-enterprise.list
+      - pve-enterprise.sources
+    file_type: file
+  register: proxmox_repositories_active_pve_enterprise
+  when: not proxmox_repositories_has_subscription | bool
+
+- name: Disable Proxmox enterprise repository files
+  ansible.builtin.command:
+    argv:
+      - mv
+      - "{{ item.path }}"
+      - "{{ item.path }}.disabled"
+    creates: "{{ item.path }}.disabled"
+    removes: "{{ item.path }}"
+  loop: "{{ proxmox_repositories_active_pve_enterprise.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  notify: Update APT cache
+
+- name: Remove active Proxmox enterprise files after preserving them
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ proxmox_repositories_active_pve_enterprise.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  notify: Update APT cache
+
+- name: Check standard Ceph enterprise repository files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/apt/sources.list.d/ceph.list
+    - /etc/apt/sources.list.d/ceph.sources
+  register: proxmox_repositories_active_ceph_enterprise
+  when: not proxmox_repositories_ceph_enabled | bool
+
+- name: Disable Ceph enterprise repository files
+  ansible.builtin.command:
+    argv:
+      - mv
+      - "{{ item.item }}"
+      - "{{ item.item }}.disabled"
+    creates: "{{ item.item }}.disabled"
+    removes: "{{ item.item }}"
+  loop: "{{ proxmox_repositories_active_ceph_enterprise.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists | default(false)
+  notify: Update APT cache
+
+- name: Remove active Ceph enterprise files after preserving them
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: absent
+  loop: "{{ proxmox_repositories_active_ceph_enterprise.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists | default(false)
+  notify: Update APT cache
+
+- name: Configure Proxmox no-subscription deb822 repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/pve-no-subscription.sources
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      Types: deb
+      URIs: http://download.proxmox.com/debian/pve
+      Suites: {{ proxmox_repositories_debian_suite }}
+      Components: pve-no-subscription
+      Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+  notify: Update APT cache
+
+- name: Remove legacy Proxmox no-subscription list repository
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-no-subscription.list
+    state: absent
+  notify: Update APT cache
+
+- name: Apply repository cache update before package roles
+  ansible.builtin.meta: flush_handlers

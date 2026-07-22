@@ -1,0 +1,43 @@
+---
+proxmox_expected_hostname: smallgpu
+proxmox_base_extra_packages:
+  # Diagnostics only; the actual mount uses the in-kernel ntfs3 driver.
+  - ntfs-3g
+
+nfs_server_mounts:
+  - name: storage1-bulk
+    uuid: 44BA5D2BBA5D1B2E
+    mount_point: /mnt/data10tb
+    device_filesystem: ntfs
+    filesystem: ntfs3
+    mount_options: defaults,nofail,uid=0,gid=0,umask=0000
+    dump: 0
+    passno: 0
+nfs_server_exports:
+  - path: /mnt/data10tb
+    client: 192.168.1.0/24
+    options: rw,sync,no_subtree_check,no_root_squash,fsid=1
+
+vfio_passthrough_bootloader: grub
+vfio_passthrough_iommu_parameters:
+  - amd_iommu=on
+  - iommu=pt
+vfio_passthrough_iommu_group: 18
+vfio_passthrough_devices:
+  - address: "09:00.0"
+    id: 10de:1e89
+  - address: "09:00.1"
+    id: 10de:10f8
+  - address: "09:00.2"
+    id: 10de:1ad8
+  - address: "09:00.3"
+    id: 10de:1ad9
+vfio_passthrough_expected_group_members:
+  - address: "09:00.0"
+    id: 10de:1e89
+  - address: "09:00.1"
+    id: 10de:10f8
+  - address: "09:00.2"
+    id: 10de:1ad8
+  - address: "09:00.3"
+    id: 10de:1ad9

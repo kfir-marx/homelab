@@ -1,0 +1,16 @@
+---
+vfio_passthrough_devices: []
+vfio_passthrough_expected_group_members: []
+vfio_passthrough_iommu_parameters:
+  - iommu=pt
+vfio_passthrough_bootloader: grub
+vfio_passthrough_modules:
+  - vfio
+  - vfio_iommu_type1
+  - vfio_pci
+vfio_passthrough_blacklist_modules:
+  - nouveau
+  - nvidia
+  - nvidia_drm
+  - nvidia_modeset
+  - nvidia_uvm

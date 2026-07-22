@@ -1,0 +1,129 @@
+---
+- name: Validate NFS mount declarations
+  ansible.builtin.assert:
+    that:
+      - item.name | length > 0
+      - item.uuid | length > 0
+      - item.mount_point is match('^/mnt/')
+      - item.filesystem in ['ext4', 'ntfs3']
+      - "'force' not in item.mount_options.split(',')"
+    fail_msg: "Invalid or unsafe NFS mount declaration: {{ item }}"
+  loop: "{{ nfs_server_mounts }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Validate NFS export declarations
+  ansible.builtin.assert:
+    that:
+      - item.path in (nfs_server_mounts | map(attribute='mount_point') | list)
+      - item.client is match('^[0-9./]+$')
+      - "'rw' in item.options.split(',')"
+      - "'no_root_squash' in item.options.split(',')"
+      - item.options is search('(^|,)fsid=[0-9]+(,|$)')
+    fail_msg: "Invalid NFS export declaration: {{ item }}"
+  loop: "{{ nfs_server_exports }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Preflight each NFS filesystem before persistent changes
+  ansible.builtin.include_tasks: validate_mount.yml
+  loop: "{{ nfs_server_mounts }}"
+  loop_control:
+    loop_var: nfs_mount
+    label: "{{ nfs_mount.name }}"
+
+- name: Manage declared NFS filesystem entries in fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: "^\\s*\\S+\\s+{{ item.mount_point | regex_escape }}\\s+"
+    line: >-
+      UUID={{ item.uuid }} {{ item.mount_point }} {{ item.filesystem }}
+      {{ item.mount_options }} {{ item.dump | default(0) }} {{ item.passno | default(0) }}
+    owner: root
+    group: root
+    mode: "0644"
+    create: false
+    backup: true
+  loop: "{{ nfs_server_mounts }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Mount declared NFS backing filesystems when needed
+  ansible.builtin.include_tasks: configure_mount.yml
+  loop: "{{ nfs_server_mounts }}"
+  loop_control:
+    loop_var: nfs_mount
+    label: "{{ nfs_mount.mount_point }}"
+
+- name: Verify final NFS backing mount state
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --raw
+      - --mountpoint
+      - "{{ item.mount_point }}"
+      - --output
+      - UUID,TARGET,FSTYPE,OPTIONS
+  loop: "{{ nfs_server_mounts }}"
+  loop_control:
+    label: "{{ item.mount_point }}"
+  register: nfs_server_final_mounts
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Assert final NFS backing mounts are read/write and exact
+  ansible.builtin.assert:
+    that:
+      - item.item.uuid in item.stdout
+      - item.item.mount_point in item.stdout
+      - item.item.filesystem in item.stdout
+      - item.stdout is search('(^|[, ])rw([, ]|$)')
+      - item.stdout is not search('(^|[, ])force([, ]|$)')
+  loop: "{{ nfs_server_final_mounts.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.mount_point }}"
+  when: not ansible_check_mode
+
+- name: Ensure exports include directory exists
+  ansible.builtin.file:
+    path: "{{ nfs_server_exports_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Ansible-managed NFS exports
+  ansible.builtin.template:
+    src: homelab.exports.j2
+    dest: "{{ nfs_server_exports_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  notify:
+    - Validate NFS exports
+    - Restart NFS server
+
+- name: Remove migrated export entries from the legacy exports file
+  ansible.builtin.lineinfile:
+    path: /etc/exports
+    regexp: "^\\s*{{ item.path | regex_escape }}\\s+"
+    state: absent
+    backup: true
+  loop: "{{ nfs_server_exports }}"
+  loop_control:
+    label: "{{ item.path }}"
+  notify:
+    - Validate NFS exports
+    - Restart NFS server
+
+- name: Enable and start the NFS kernel server
+  ansible.builtin.service:
+    name: nfs-kernel-server
+    enabled: true
+    state: started
+
+- name: Validate export changes before leaving the host
+  ansible.builtin.meta: flush_handlers

@@ -1,0 +1,101 @@
+---
+- name: Verify Proxmox host configuration without changing it
+  hosts: proxmox_hosts
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - role: proxmox_preflight
+      tags:
+        - always
+        - verify
+
+  tasks:
+    - name: Read active NFS exports
+      ansible.builtin.command: exportfs -v
+      register: active_nfs_exports
+      changed_when: false
+      check_mode: false
+      when: inventory_hostname in groups.get('nfs_servers', [])
+      tags:
+        - nfs
+        - verify
+
+    - name: Verify declared NFS exports are active
+      ansible.builtin.assert:
+        that:
+          - item.path in active_nfs_exports.stdout
+          - item.client in active_nfs_exports.stdout
+        fail_msg: "NFS export {{ item.path }} for {{ item.client }} is not active"
+      loop: "{{ nfs_server_exports | default([]) }}"
+      when: inventory_hostname in groups.get('nfs_servers', [])
+      tags:
+        - nfs
+        - verify
+
+    - name: Read current VFIO device bindings
+      ansible.builtin.shell: |
+        set -o pipefail
+        for address in {% for device in vfio_passthrough_devices %}{{ device.address | quote }} {% endfor %}; do
+          device_path="/sys/bus/pci/devices/0000:${address}"
+          if [ -L "${device_path}/driver" ]; then
+            driver="$(basename "$(readlink -f "${device_path}/driver")")"
+          else
+            driver=unbound
+          fi
+          printf '%s=%s\n' "${address}" "${driver}"
+        done
+      args:
+        executable: /bin/bash
+      register: verified_vfio_bindings
+      changed_when: false
+      check_mode: false
+      when: inventory_hostname in groups.get('vfio_hosts', [])
+      tags:
+        - vfio
+        - verify
+
+    - name: Show current VFIO device bindings
+      ansible.builtin.debug:
+        var: verified_vfio_bindings.stdout_lines
+      when: inventory_hostname in groups.get('vfio_hosts', [])
+      tags:
+        - vfio
+        - verify
+
+    - name: Require every passthrough device to use vfio-pci
+      ansible.builtin.assert:
+        that:
+          - (item.address ~ '=vfio-pci') in verified_vfio_bindings.stdout_lines
+        fail_msg: >-
+          {{ item.address }} is not bound to vfio-pci. Run the VFIO role, arrange
+          workload downtime, explicitly reboot the host, and verify again.
+      loop: "{{ vfio_passthrough_devices | default([]) }}"
+      loop_control:
+        label: "{{ item.address }}"
+      when: inventory_hostname in groups.get('vfio_hosts', [])
+      tags:
+        - vfio
+        - verify
+
+    - name: Check expected VFIO group device
+      ansible.builtin.stat:
+        path: "/dev/vfio/{{ vfio_passthrough_iommu_group }}"
+      register: verified_vfio_group_device
+      when: inventory_hostname in groups.get('vfio_hosts', [])
+      tags:
+        - vfio
+        - verify
+
+    - name: Require expected VFIO group device
+      ansible.builtin.assert:
+        that:
+          - verified_vfio_group_device.stat.exists
+          - verified_vfio_group_device.stat.ischr | default(false)
+        fail_msg: >-
+          /dev/vfio/{{ vfio_passthrough_iommu_group }} is absent; the declared
+          group is not ready for passthrough.
+      when: inventory_hostname in groups.get('vfio_hosts', [])
+      tags:
+        - vfio
+        - verify
