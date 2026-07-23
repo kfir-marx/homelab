@@ -16,6 +16,9 @@ nfs_server_exports:
     options: rw,sync,no_subtree_check,no_root_squash,fsid=10
 
 vfio_passthrough_bootloader: grub
+# The GTX 1060 is reserved for workstation VM 100, not Kubernetes. Keeping the
+# host in vfio_hosts prepares the device for workstation passthrough; the VFIO
+# preflight will refuse changes if VM 100 is running with this slot attached.
 vfio_passthrough_iommu_parameters:
   - intel_iommu=on
   - iommu=pt

@@ -2,7 +2,7 @@
 
 GitOps-driven Kubernetes architecture designed to run Talos Linux on a 3-node Proxmox hypervisor fleet, with an optional Windows 11 gaming VM that shares the RTX 3080 with the GPU Kubernetes worker. Physical host configuration is applied over SSH by Ansible; infrastructure is provisioned with Terraform (orchestrated by Terragrunt) using **S3 + DynamoDB remote state with IAM role assumption**; in-cluster workloads are managed by ArgoCD. Host and cluster changes are declared in Git rather than maintained as undocumented commands.
 
-> **Capacity transition (reviewed 2026-07-22):** the former `worker1`–`worker4` laptop hosts were returned and are no longer part of the homelab. Production is now configured with one `2 vCPU / 4 GiB` control plane and three GPU workers; the RTX 2060 VM also carries ordinary workloads. This is intentionally not control-plane HA; return to three `2 vCPU / 4 GiB` control planes only when each physical host has enough memory headroom. See [Capacity decision and target topology](#capacity-decision-and-target-topology).
+> **Capacity transition (reviewed 2026-07-22):** the former `worker1`–`worker4` laptop hosts were returned and are no longer part of the homelab. Production is now configured with one `2 vCPU / 4 GiB` control plane and two GPU workers; the RTX 2060 VM also carries ordinary workloads. The GTX 1060 host is reserved for workstation VM `100` and critical NFS. This is intentionally not control-plane HA; return to three `2 vCPU / 4 GiB` control planes only when each physical host has enough memory headroom. See [Capacity decision and target topology](#capacity-decision-and-target-topology).
 
 ---
 
@@ -49,7 +49,7 @@ GitOps-driven Kubernetes architecture designed to run Talos Linux on a 3-node Pr
 
 | Proxmox host    | Mgmt IP         | CPU                             | Installed RAM              | GPU                          | Primary role |
 |-----------------|-----------------|---------------------------------|----------------------------|------------------------------|--------------|
-| `gpunvdgtx1060` | `192.168.1.105` | Intel Core i7-8750H, 6c/12t     | 15.46 GiB (2×8 GB DDR4-2667) | GeForce GTX 1060 Mobile     | Old gaming laptop: personal workstation VM, critical NFS; K8s only after capacity is freed |
+| `gpunvdgtx1060` | `192.168.1.105` | Intel Core i7-8750H, 6c/12t     | 15.46 GiB (2×8 GB DDR4-2667) | GeForce GTX 1060 Mobile     | Personal workstation VM and critical NFS; no Kubernetes worker |
 | `smallgpu`      | `192.168.1.106` | AMD Ryzen 5 3600, 6c/12t        | 15.55 GiB (1×16 GB DDR4-2133) | GeForce RTX 2060            | Compute/GPU capacity and 10 TB bulk NFS |
 | `largegpu`      | `192.168.1.107` | AMD Ryzen 7 5800X, 8c/16t       | 62.70 GiB (2×32 GB DDR4-2400) | GeForce RTX 3080 LHR        | GPU compute / Windows gaming runtime mutex |
 
@@ -69,17 +69,17 @@ This snapshot was read from the Proxmox API at `192.168.1.105`; it is operationa
 
 | Host | Live state | Existing VM allocation | Capacity consequence |
 |------|------------|------------------------|----------------------|
-| `gpunvdgtx1060` | Online; 15.46 GiB RAM | VM `100`, the personal workstation: running, 6 vCPU, fixed 10 GiB RAM, 100 GiB disk | A 3 GiB GPU worker requires workstation ballooning (8–10 GiB) or a small fixed reduction |
+| `gpunvdgtx1060` | Online; 15.46 GiB RAM | VM `100`, the personal workstation: running, 10 vCPU, 12 GiB maximum / 8 GiB balloon minimum, 100 GiB disk | Host is dedicated to the workstation and critical NFS; GTX 1060 remains reserved for VM `100` |
 | `largegpu` | Online; 62.70 GiB RAM | Windows VMs `502` and `101`: stopped; each configured for 16 vCPU, 60 GiB RAM, 635 GiB disk and RTX 3080 passthrough | Main available compute while Windows is stopped; starting either Windows VM consumes essentially the whole host |
 | `smallgpu` | Online; 15.55 GiB RAM, 13.53 GiB free | No VMs at review time | Hosts the `2 vCPU / 4 GiB` control plane and mixed-role `10 vCPU / 8 GiB` RTX 2060 worker |
 
-VM `100` is not merely over-provisioned on paper. Proxmox history showed a 9.49 GiB guest-memory peak and a 14.63 GiB whole-host memory peak during the preceding week; at the follow-up review it was using 9.8 GiB and the host had already moved 0.61 GiB into swap. Inside the guest, however, applications used about 6.6 GiB with 2.6 GiB available/reclaimable, which makes an 8–10 GiB balloon range preferable to a fixed 8 GiB reduction.
+VM `100` uses a 12 GiB maximum with an 8 GiB balloon minimum. This lets the workstation consume otherwise-idle capacity while leaving Proxmox, corosync, and critical NFS room to operate. The host had about 3.1 GiB available and no active memory pressure after the change; retaining ballooning is essential because a fixed 12 GiB allocation would leave too little headroom.
 
 The critical NFS server is confirmed to run directly on Proxmox: `nfs-kernel-server` is active and enabled, `/mnt/storage2-bulk` is an ext4 mount backed by `/dev/mapper/gpu1--extra-storage2--bulk`, and it is exported read/write to `192.168.1.0/24` with NFSv4 `fsid=10`. TCP 111 and 2049 are listening. A client mount from Talos still needs verification after deployment.
 
 The live state changed during the 2026-07-22 review: `smallgpu` now has the UUID-based `ntfs3` fstab entry, `/mnt/data10tb` is mounted read/write without a `force` option, and the intended `fsid=1` export is active. Earlier kernel logs recorded a dirty-volume refusal, so Ansible still treats an unmounted dirty or hibernated NTFS filesystem as a hard failure and never clears the flag or force-mounts it. The export still needs an end-to-end mount test from Talos before workloads depend on it.
 
-GPU host readiness differs by machine. The laptop GTX 1060 is already bound to `vfio-pci` and exposes `/dev/vfio/2`. The RTX 2060 is isolated in IOMMU group 18, but its GPU, audio, USB, and UCSI functions are still bound to host drivers. Before `gpu-3` can start, stage PCI IDs `10de:1e89`, `10de:10f8`, `10de:1ad8`, and `10de:1ad9` with the Ansible `vfio_passthrough` role, then explicitly approve a reboot of `smallgpu`. The RTX 3080 functions are `10de:2216` and `10de:1aef` in group 21; VMs `101` and `502` reference it and were both stopped during the read-only check.
+All three GPU hosts now pass VFIO verification. The laptop GTX 1060 is bound to `vfio-pci` and exposes `/dev/vfio/2`; it is reserved for workstation VM `100`, though the live VM did not yet have a `hostpci` entry at verification time. All four RTX 2060 functions (`10de:1e89`, `10de:10f8`, `10de:1ad8`, and `10de:1ad9`) bind to `vfio-pci` in IOMMU group 18 and expose `/dev/vfio/18`. Both RTX 3080 functions (`10de:2216` and `10de:1aef`) bind to `vfio-pci` in group 21 and expose `/dev/vfio/21`; VMs `101` and `502` reference that GPU and remained stopped throughout convergence and reboot.
 
 ### Configuration ownership boundary
 
@@ -99,19 +99,10 @@ The staged design is:
 
 | Stage | Control plane | Workers | Availability trade-off |
 |-------|---------------|---------|------------------------|
-| Constrained / configured | One `2 vCPU / 4 GiB` VM on `smallgpu` | GPU workers: GTX 1060 `2 vCPU / 3 GiB`, mixed-role RTX 2060 `10 vCPU / 8 GiB`, RTX 3080 `8 vCPU / 32 GiB` | Not control-plane HA. GTX 1060/RTX 3080 nodes are tainted; RTX 2060 accepts ordinary pods. The GTX 1060 depends on workstation ballooning; RTX 3080 stops for Windows |
+| Constrained / configured | One `2 vCPU / 4 GiB` VM on `smallgpu` | GPU workers: mixed-role RTX 2060 `10 vCPU / 8 GiB` and RTX 3080 `8 vCPU / 32 GiB` | Not control-plane HA. RTX 2060 accepts ordinary pods; RTX 3080 is tainted and stops for Windows. The GTX 1060 host is reserved for its workstation and NFS |
 | Three-host steady state | Three `2 vCPU / 4 GiB` VMs, exactly one per physical host | Right-size workers independently after observing real usage | Survives one control-plane VM or physical-host failure, but only after `gpunvdgtx1060` has additional RAM or its workstation allocation is materially reduced |
 
-The configured `2 vCPU / 3 GiB` GTX 1060 worker on `gpunvdgtx1060` exists only to expose that PCI GPU to Kubernetes; Proxmox itself serves NFS. Like every GPU worker, it has `nvidia.com/gpu=true:NoSchedule`, so ordinary pods cannot consume its tight memory budget. Before starting it, configure workstation VM `100` with a 10 GiB maximum and 8 GiB balloon minimum (`qm set 100 --memory 10240 --balloon 8192`), or reduce the workstation to 9 GiB fixed. The balloon option preserves the workstation's ability to grow when RAM is available.
-
-The longer-term ways to improve this are:
-
-1. Upgrade the laptop to 32 GiB RAM, then use roughly `4 vCPU / 8 GiB` for the worker while retaining the 10 GiB workstation and at least 4 GiB for Proxmox/NFS.
-2. Use the configured 8–10 GiB balloon range; guest-level measurements support reclaiming cache, but not a permanent reduction much below 9 GiB.
-3. Move the workstation unchanged to `largegpu`, accepting that an owned workstation becomes dependent on borrowed hardware and competes with Windows/GPU runtime capacity.
-4. Make the workstation and GTX 1060 worker mutually exclusive at runtime. This saves RAM but makes that GPU unavailable whenever the workstation is running.
-
-A worker does not need to be on the NFS server to use the important storage. Any worker on `192.168.1.0/24` can mount `192.168.1.105:/mnt/storage2-bulk`. The laptop VM is present because PCI GPU access must be local to a Kubernetes node, not because NFS requires colocation.
+`gpunvdgtx1060` deliberately has no Kubernetes worker. A small CPU-only worker would consume nearly all remaining memory headroom while adding little capacity beyond mixed-role `gpu-3`; a GPU worker would also conflict with the higher-priority workstation. Any LAN-connected worker can still mount `192.168.1.105:/mnt/storage2-bulk`, so critical storage does not require a colocated Kubernetes VM.
 
 ### Retired Terraform topology
 
@@ -155,7 +146,7 @@ VM specs, IPs, and PCI/USB device IDs are defined as YAML in [`terraform/deploym
 | DNS              | `1.1.1.1`, `8.8.8.8`            |
 | CP node IPs      | `cp-1`: `192.168.1.211/24` |
 | Worker IPs       | No separate general worker; `gpu-3` carries ordinary workloads |
-| GPU node IPs     | `gpu-1`–`gpu-3`: `192.168.1.231-233/24` |
+| GPU node IPs     | `gpu-2`: `192.168.1.232/24`; `gpu-3`: `192.168.1.233/24` |
 
 The control-plane VIP is managed by Talos's built-in VIP mechanism — no external load balancer is needed. The replacement control-plane nodes will each need a network-interface `vip` block pointing at the shared VIP.
 
@@ -491,7 +482,7 @@ modules, PCI ID binding, driver blacklists, initramfs update, and verification.
 Terraform's `proxmox-vm` / `proxmox-windows-vm` modules only attach the prepared
 PCI devices to guests:
 - GPU VMs use `bios = "ovmf"` and `machine = "q35"`.
-- Each GPU's PCI address (`01:00` for `gpu-1`'s GTX 1060, `08:00` for `gpu-2`/Windows's RTX 3080, and `09:00` for `gpu-3`'s RTX 2060) is passed through via `hostpci` blocks.
+- Kubernetes GPU PCI addresses are `08:00` for `gpu-2`/Windows's RTX 3080 and `09:00` for `gpu-3`'s RTX 2060. The GTX 1060 at `01:00` is VFIO-ready but reserved for workstation VM `100`.
 - AMD-V (SVM) must be enabled in BIOS on AMD hosts (largegpu, smallgpu).
 - Ansible stages `intel_iommu=on` or `amd_iommu=on`, verifies the complete IOMMU group, and binds the declared GPU functions to `vfio-pci` after an explicitly approved reboot.
 
@@ -612,7 +603,8 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 - [ ] **Reconcile retired-host Terraform state before apply.** The 2026-07-22 `-refresh=false` plan reports `4 add, 9 change, 20 destroy`, including VMs and Talos images recorded on returned `worker1`–`worker4`, the old `node6` image address, and replacement of `cp-1`. Back up state, verify those remote objects are truly gone, and deliberately remove/import or move only the stale addresses; do not run the plan as an unreviewed destroy operation.
 - [ ] **Plan the single-control-plane rebuild explicitly.** `cp-1` moves from retired `worker1` to `smallgpu`, while the existing bootstrap resource is unchanged because the API endpoint stays `192.168.1.210`. Arrange the Talos bootstrap/recovery step and expected API outage before apply; a replacement VM with no etcd data will not become a working cluster merely because its IP is unchanged.
 - [ ] Deploy NVIDIA device plugin DaemonSet via ArgoCD (in `kubernetes/system/`)
-- [ ] Prepare `smallgpu` RTX 2060 passthrough with `ansible/playbooks/configure-proxmox.yml --limit smallgpu --tags vfio`, explicitly approve the separate reboot play, and verify `/dev/vfio/18` before starting VM `403`
+- [x] Prepare and verify `smallgpu` RTX 2060 passthrough — all four functions use `vfio-pci` and `/dev/vfio/18` exists after the explicitly approved reboot
+- [x] Prepare and verify `largegpu` RTX 3080 passthrough — both functions use `vfio-pci` and `/dev/vfio/21` exists; Windows VMs remained stopped during convergence
 - [ ] Deploy ingress controller + cert-manager for TLS termination
 - [x] **Configure the bulk NTFS export on smallgpu** — UUID-based `ntfs3` mount and `fsid=1` export observed active on 2026-07-22; Ansible now owns and safety-checks this state
 - [x] **Verify the critical NFS server on Proxmox** — daemon active/enabled, ext4 backing mount present, export restricted to `192.168.1.0/24`, and TCP 2049 listening on 2026-07-22
@@ -638,4 +630,4 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 - **The `largegpu` mutex is enforced at runtime, not config time.** Two VMs sharing one GPU = one runs, the other can't start. This lets you flip between them in seconds with no Terraform churn.
 - **Bulk media storage is NTFS+NFS, not Ceph/Longhorn.** The 10 TB drive on smallgpu has existing NTFS data worth preserving. Ansible safety-checks and mounts it with the kernel `ntfs3` driver, then manages its NFSv4 export.
 - **Two storage tiers, split by host permanence — not performance.** Critical/personal data binds against `storage2-bulk-pv` on `gpunvdgtx1060` (the only permanent host). Bulk/reproducible data binds against `storage1-bulk-pv` on smallgpu (borrowed hardware). The tier names map onto *survivability* of the underlying machine, not on IOPS or media class. See [Node ownership and permanence](#node-ownership-and-permanence).
-- **VM sizing follows per-host headroom, not fleet totals.** Production uses one `2 vCPU / 4 GiB` control plane and three GPU workers. The RTX 2060 VM is deliberately untainted so it also runs ordinary pods; `smallgpu` reserves 12 GiB across only two VMs. The `2 vCPU / 3 GiB` GTX 1060 worker requires VM `100` ballooning because the laptop has only 15.46 GiB total.
+- **VM sizing follows per-host headroom, not fleet totals.** Production uses one `2 vCPU / 4 GiB` control plane and two GPU workers. The RTX 2060 VM is deliberately untainted so it also runs ordinary pods; `smallgpu` reserves 12 GiB across only two VMs. `gpunvdgtx1060` runs no Kubernetes VM so workstation VM `100` and critical NFS retain the host's constrained 15.46 GiB capacity.

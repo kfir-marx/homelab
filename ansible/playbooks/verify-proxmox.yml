@@ -6,9 +6,6 @@
 
   roles:
     - role: proxmox_preflight
-      tags:
-        - always
-        - verify
 
   tasks:
     - name: Verify Proxmox guest shutdown orchestration is enabled
@@ -19,7 +16,6 @@
       when: inventory_hostname in groups.get('nut_servers', [])
       tags:
         - nut
-        - verify
 
     - name: Require Proxmox guest shutdown orchestration
       ansible.builtin.assert:
@@ -31,7 +27,6 @@
       when: inventory_hostname in groups.get('nut_servers', [])
       tags:
         - nut
-        - verify
 
     - name: Read NUT service state
       ansible.builtin.command:
@@ -47,7 +42,6 @@
       when: inventory_hostname in groups.get('nut_servers', [])
       tags:
         - nut
-        - verify
 
     - name: Read live UPS status from NUT
       ansible.builtin.command:
@@ -62,16 +56,17 @@
       when: inventory_hostname in groups.get('nut_servers', [])
       tags:
         - nut
-        - verify
 
     - name: Require a responsive online or on-battery UPS
       ansible.builtin.assert:
         that:
+          - verified_nut_services.stdout_lines | first == 'active'
           - >-
-            verified_nut_services.stdout_lines
-            | select('equalto', 'active')
-            | list
-            | length == 2
+            ((nut_automatic_shutdown_enabled | default(true)) | bool
+             and verified_nut_services.stdout_lines | last == 'active')
+            or
+            (not ((nut_automatic_shutdown_enabled | default(true)) | bool)
+             and verified_nut_services.stdout_lines | last != 'active')
           - verified_nut_ups_status.stdout is search('(^| )(OL|OB)( |$)')
         fail_msg: >-
           NUT is not healthy: service states={{ verified_nut_services.stdout_lines }},
@@ -79,7 +74,6 @@
       when: inventory_hostname in groups.get('nut_servers', [])
       tags:
         - nut
-        - verify
 
     - name: Read active NFS exports
       ansible.builtin.command: exportfs -v
@@ -89,7 +83,6 @@
       when: inventory_hostname in groups.get('nfs_servers', [])
       tags:
         - nfs
-        - verify
 
     - name: Verify declared NFS exports are active
       ansible.builtin.assert:
@@ -101,7 +94,6 @@
       when: inventory_hostname in groups.get('nfs_servers', [])
       tags:
         - nfs
-        - verify
 
     - name: Read current VFIO device bindings
       ansible.builtin.shell: |
@@ -123,7 +115,6 @@
       when: inventory_hostname in groups.get('vfio_hosts', [])
       tags:
         - vfio
-        - verify
 
     - name: Show current VFIO device bindings
       ansible.builtin.debug:
@@ -131,7 +122,6 @@
       when: inventory_hostname in groups.get('vfio_hosts', [])
       tags:
         - vfio
-        - verify
 
     - name: Require every passthrough device to use vfio-pci
       ansible.builtin.assert:
@@ -146,7 +136,6 @@
       when: inventory_hostname in groups.get('vfio_hosts', [])
       tags:
         - vfio
-        - verify
 
     - name: Check expected VFIO group device
       ansible.builtin.stat:
@@ -155,7 +144,6 @@
       when: inventory_hostname in groups.get('vfio_hosts', [])
       tags:
         - vfio
-        - verify
 
     - name: Require expected VFIO group device
       ansible.builtin.assert:
@@ -168,4 +156,3 @@
       when: inventory_hostname in groups.get('vfio_hosts', [])
       tags:
         - vfio
-        - verify

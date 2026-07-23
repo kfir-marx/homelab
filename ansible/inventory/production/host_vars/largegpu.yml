@@ -1,9 +1,9 @@
 ---
 proxmox_expected_hostname: largegpu
 
-# Connect this host's UPS USB data cable, then replace both empty values with
-# the four-digit lowercase IDs reported by `lsusb`. The NUT role deliberately
-# refuses to make changes until exactly one matching device is attached.
+# Planned NUT configuration: add this host to nut_servers only after its UPS
+# arrives, connect the USB data cable, and replace both empty values with the
+# four-digit lowercase IDs reported by `lsusb`.
 nut_ups_usb_vendorid: ""
 nut_ups_usb_productid: ""
 

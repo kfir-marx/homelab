@@ -25,11 +25,13 @@ controller environment. Alternatively, leave it unset and use SSH keys or
 `--ask-pass`. Ansible Vault can be used for future per-host secrets. Never add a
 literal password, API token, or vault password to the inventory.
 
-The local-only NUT monitor account also needs `NUT_MONITOR_PASSWORD`. Generate
-a URL-safe value (for example, `openssl rand -hex 24`) and add it to the
-untracked `.env` file. Although the NUT server only listens on `127.0.0.1`, its
-protocol requires this credential. Secret-bearing templates suppress diff and
-task output.
+Automatic host shutdown also needs a local-only NUT monitor account and
+`NUT_MONITOR_PASSWORD`. Generate a URL-safe value (for example,
+`openssl rand -hex 24`) and add it to the untracked `.env` file. Although the
+NUT server only listens on `127.0.0.1`, its shutdown monitor requires this
+credential. Secret-bearing templates suppress diff and task output. A host
+with `nut_automatic_shutdown_enabled: false` runs the driver and local data
+server without the shutdown monitor or its credential.
 
 ## First execution
 
@@ -50,21 +52,30 @@ ansible-playbook playbooks/configure-proxmox.yml --check --diff --tags repositor
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nfs
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nut
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags vfio
-ansible-playbook playbooks/verify-proxmox.yml --limit nut_servers --tags nut,verify
+ansible-playbook playbooks/verify-proxmox.yml --limit nfs_servers --tags nfs
+ansible-playbook playbooks/verify-proxmox.yml --limit nut_servers --tags nut
 ```
 
-Available configuration tags are `repositories`, `packages`, `nfs`, `nut`,
-`vfio`, and `verify`. The always-tagged preflight checks hostname, Proxmox major
-version, quorate cluster membership, filesystem UUID/type, PCI IDs, exact IOMMU
-group membership, and running-VM GPU conflicts before host configuration.
+Available configuration tags are `repositories`, `packages`, `nfs`, `nut`, and
+`vfio`. Common preflight checks (hostname, Proxmox major version, and quorate
+cluster membership) always run. Filesystem checks run only with NFS work, while
+PCI/IOMMU and running-VM conflict checks run only with VFIO work. A
+repository-, package-, NFS-, or NUT-only run is therefore not blocked by a GPU
+legitimately assigned to a running VM.
 
 ## UPS shutdown and recovery
 
-`smallgpu` and `largegpu` use independent standalone NUT instances. Each UPS
-USB data cable must be connected directly to the computer it protects. Identify
-the UPS by unplugging/reconnecting its data cable and comparing `lsusb`, then
-set its four-digit `nut_ups_usb_vendorid` and `nut_ups_usb_productid` in the
-matching host-vars file. Confirm the model is supported by the NUT
+`smallgpu` initially uses a telemetry-only standalone NUT instance because its
+USB data connection is unstable; `nut-monitor.service` remains disabled, so
+NUT cannot shut down the host. After the connection is stable, add
+`NUT_MONITOR_PASSWORD`, set `nut_automatic_shutdown_enabled: true`, converge
+again, and perform the staged outage tests below. `largegpu` remains outside the
+`nut_servers` group until its UPS arrives; add it only after the USB data cable
+is connected and its identity is declared. Each UPS data cable must be
+connected directly to a host-controlled USB port on the computer it protects.
+Identify the UPS by unplugging/reconnecting its data cable and comparing
+`lsusb`, then set its four-digit `nut_ups_usb_vendorid` and
+`nut_ups_usb_productid` in the matching host-vars file. Confirm the model is supported by the NUT
 `usbhid-ups` driver, or override `nut_ups_driver` and
 `nut_ups_driver_options` according to the NUT hardware compatibility list. The
 role makes no changes unless exactly one attached USB device matches the
@@ -97,10 +108,11 @@ ansible-playbook playbooks/configure-proxmox.yml \
 ansible-playbook playbooks/configure-proxmox.yml \
   --diff --limit smallgpu --tags nut
 ansible-playbook playbooks/verify-proxmox.yml \
-  --limit smallgpu --tags nut,verify
+  --limit smallgpu --tags nut
 ```
 
-Repeat for `largegpu`. Verify `upsc ups@localhost ups.status` returns `OL`, and
+Repeat for `largegpu` only after its UPS arrives and the host is added to
+`nut_servers`. Verify `upsc ups@localhost ups.status` returns `OL`, and
 inspect `upscmd -l ups@localhost` without invoking a command. Automatic BIOS
 recovery requires the UPS/driver to support turning its outlets off during the
 final shutdown and restoring them when mains returns. If it cannot power-cycle

@@ -9,12 +9,16 @@
       - nut_ups_usb_productid is match('^[0-9a-fA-F]{4}$')
       - (nut_shutdown_delay_seconds | int) >= 1
       - (nut_upsmon_final_delay_seconds | int) >= 0
-      - nut_monitor_password | length >= 16
-      - nut_monitor_password is match('^[a-zA-Z0-9_.~-]+$')
+      - >-
+        not (nut_automatic_shutdown_enabled | bool)
+        or (nut_monitor_password | length >= 16)
+      - >-
+        not (nut_automatic_shutdown_enabled | bool)
+        or (nut_monitor_password is match('^[a-zA-Z0-9_.~-]+$'))
     fail_msg: >-
       NUT requires a directly attached UPS, explicit four-digit USB vendor/product
-      IDs, and NUT_MONITOR_PASSWORD (at least 16 URL-safe characters). See the
-      host vars and ansible/README.md.
+      IDs, and automatic shutdown additionally requires NUT_MONITOR_PASSWORD
+      (at least 16 URL-safe characters). See the host vars and ansible/README.md.
 
 - name: Require exactly one attached UPS matching the declared USB identity
   ansible.builtin.shell: |
@@ -39,8 +43,12 @@
     fi
   args:
     executable: /bin/bash
+  register: nut_attached_ups_check
   changed_when: false
   check_mode: false
+  retries: 12
+  delay: 2
+  until: nut_attached_ups_check.rc == 0
 
 - name: Verify Proxmox guest shutdown orchestration is enabled
   ansible.builtin.command: systemctl is-enabled pve-guests.service
@@ -98,6 +106,7 @@
   notify:
     - Restart NUT server
     - Restart NUT monitor
+  when: nut_automatic_shutdown_enabled | bool
 
 - name: Configure NUT host shutdown monitoring
   ansible.builtin.template:
@@ -109,6 +118,7 @@
   no_log: true
   diff: false
   notify: Restart NUT monitor
+  when: nut_automatic_shutdown_enabled | bool
 
 - name: Configure the 30-second outage scheduler
   ansible.builtin.template:
@@ -118,6 +128,7 @@
     group: nut
     mode: "0640"
   notify: Restart NUT monitor
+  when: nut_automatic_shutdown_enabled | bool
 
 - name: Install the NUT scheduler command handler
   ansible.builtin.template:
@@ -127,6 +138,7 @@
     group: nut
     mode: "0750"
   notify: Restart NUT monitor
+  when: nut_automatic_shutdown_enabled | bool
 
 - name: Enable and start the NUT data server
   ansible.builtin.systemd_service:
@@ -140,4 +152,15 @@
     name: nut-monitor.service
     enabled: true
     state: started
-  when: not ansible_check_mode
+  when:
+    - not ansible_check_mode
+    - nut_automatic_shutdown_enabled | bool
+
+- name: Disable the NUT shutdown monitor in telemetry-only mode
+  ansible.builtin.systemd_service:
+    name: nut-monitor.service
+    enabled: false
+    state: stopped
+  when:
+    - not ansible_check_mode
+    - not (nut_automatic_shutdown_enabled | bool)

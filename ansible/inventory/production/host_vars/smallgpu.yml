@@ -4,11 +4,14 @@ proxmox_base_extra_packages:
   # Diagnostics only; the actual mount uses the in-kernel ntfs3 driver.
   - ntfs-3g
 
-# Connect this host's UPS USB data cable, then replace both empty values with
-# the four-digit lowercase IDs reported by `lsusb`. The NUT role deliberately
-# refuses to make changes until exactly one matching device is attached.
-nut_ups_usb_vendorid: ""
-nut_ups_usb_productid: ""
+# PPC Offline UPS (Phoenixtec-compatible USB HID power device). Confirmed from
+# the live kernel enumeration on 2026-07-22; NUT's usbhid-ups driver supports
+# this vendor/product pair.
+nut_ups_usb_vendorid: "06da"
+nut_ups_usb_productid: "ffff"
+# Keep the driver/data server active, but do not permit NUT-triggered host
+# shutdown until the UPS USB connection is physically stable.
+nut_automatic_shutdown_enabled: false
 
 nfs_server_mounts:
   - name: storage1-bulk
@@ -28,6 +31,13 @@ vfio_passthrough_bootloader: grub
 vfio_passthrough_iommu_parameters:
   - amd_iommu=on
   - iommu=pt
+# The RTX 2060's USB and UCSI functions are claimed before the normal
+# modules-load stage unless vfio-pci is made a prerequisite for their drivers.
+vfio_passthrough_competing_modules:
+  - nouveau
+  - nvidia
+  - xhci_pci
+  - i2c_nvidia_gpu
 vfio_passthrough_iommu_group: 18
 vfio_passthrough_devices:
   - address: "09:00.0"

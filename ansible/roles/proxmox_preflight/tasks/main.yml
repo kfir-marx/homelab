@@ -8,12 +8,16 @@
     fail_msg: >-
       Inventory host {{ inventory_hostname }} resolved to {{ ansible_facts.hostname }};
       expected {{ proxmox_expected_hostname | default('an explicitly declared hostname') }}.
+  tags:
+    - always
 
 - name: Read Proxmox version
   ansible.builtin.command: pveversion
   register: proxmox_preflight_version
   changed_when: false
   check_mode: false
+  tags:
+    - always
 
 - name: Verify Proxmox major version
   ansible.builtin.assert:
@@ -24,12 +28,16 @@
     fail_msg: >-
       Expected Proxmox VE {{ proxmox_expected_major_version }}.x, got
       {{ proxmox_preflight_version.stdout }}.
+  tags:
+    - always
 
 - name: Read Proxmox cluster status
   ansible.builtin.command: pvecm status
   register: proxmox_preflight_cluster
   changed_when: false
   check_mode: false
+  tags:
+    - always
 
 - name: Verify cluster membership and quorum
   ansible.builtin.assert:
@@ -41,6 +49,8 @@
     fail_msg: >-
       Host is not a quorate member of {{ proxmox_expected_cluster_name }}.
       This playbook never creates or modifies cluster membership.
+  tags:
+    - always
 
 - name: Validate declared filesystem UUIDs
   ansible.builtin.shell: |
@@ -70,6 +80,8 @@
     label: "{{ item.name }} ({{ item.uuid }})"
   changed_when: false
   check_mode: false
+  tags:
+    - nfs
 
 - name: Validate PCI IDs and complete IOMMU group membership
   ansible.builtin.shell: |
@@ -113,6 +125,8 @@
   changed_when: false
   check_mode: false
   when: vfio_passthrough_devices | default([]) | length > 0
+  tags:
+    - vfio
 
 - name: Refuse VFIO changes while a matching GPU is assigned to a running VM
   ansible.builtin.shell: |
@@ -135,3 +149,5 @@
   changed_when: false
   check_mode: false
   when: vfio_passthrough_devices | default([]) | length > 0
+  tags:
+    - vfio

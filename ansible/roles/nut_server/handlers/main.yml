@@ -10,5 +10,7 @@
   ansible.builtin.systemd_service:
     name: nut-monitor.service
     state: restarted
-  when: not ansible_check_mode
+  when:
+    - not ansible_check_mode
+    - nut_automatic_shutdown_enabled | bool
   listen: Restart NUT monitor

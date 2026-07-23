@@ -37,8 +37,9 @@
     content: |
       # Managed by Ansible role vfio_passthrough.
       options vfio-pci ids={{ vfio_passthrough_devices | map(attribute='id') | join(',') }} disable_vga=1
-      softdep nouveau pre: vfio-pci
-      softdep nvidia pre: vfio-pci
+      {% for module in vfio_passthrough_competing_modules %}
+      softdep {{ module }} pre: vfio-pci
+      {% endfor %}
   notify:
     - Rebuild initramfs
     - Mark VFIO reboot required

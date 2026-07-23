@@ -2,7 +2,7 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  Production environment                                                    ║
 # ║                                                                            ║
-# ║  1 control plane + 3 GPU workers on the home LAN (192.168.1.0/24).        ║
+# ║  1 control plane + 2 GPU workers on the home LAN (192.168.1.0/24).        ║
 # ║  Sized for the three remaining hosts and the existing workstation VM.     ║
 # ║                                                                            ║
 # ║  IP convention (matches the rest of the homelab):                          ║
@@ -45,26 +45,10 @@ control_plane_nodes:
 # hosts and does not require a colocated general Kubernetes worker.
 worker_nodes: {}
 
-# ── GPU nodes (PCIe passthrough; automatically tainted NoSchedule) ───────────
+# ── GPU nodes (PCIe passthrough; dedicated nodes are tainted NoSchedule) ─────
+# The GTX 1060 on gpunvdgtx1060 is reserved for workstation VM 100 and is not
+# part of Kubernetes. That host also retains headroom for its critical NFS role.
 gpu_nodes:
-  # gpunvdgtx1060: GTX 1060 Mobile at 01:00 (GPU + audio in IOMMU group 2).
-  # Proxmox itself runs storage2-bulk NFS, so this VM exists only to expose the
-  # GPU to Kubernetes. VM 100 remains a 10 GiB workstation. Before starting
-  # this 3 GiB worker, enable virtio ballooning on VM 100 with an 8 GiB minimum
-  # (`qm set 100 --memory 10240 --balloon 8192`) or set VM 100 to 9 GiB fixed.
-  # commented out because the 1060 is now used only for the workstation VM 100.
-  # gpu-1:
-  #   proxmox_node: "gpunvdgtx1060"
-  #   vm_id: 401
-  #   ip_address: "192.168.1.231/24"
-  #   cores: 2
-  #   memory_mb: 3072
-  #   # Retain the existing 100 GiB disk; Proxmox cannot safely shrink it in place.
-  #   disk_size_gb: 100
-  #   pci_devices:
-  #     - id: "01:00"
-  #       pcie: true
-
   # largegpu: Ryzen 7 5800X (8c/16t), 62.7 GiB RAM, RTX 3080 at 08:00.
   # The Talos GPU VM is reduced to 8c/32GiB: ample initial GPU capacity without
   # reserving the whole host. It remains mutually exclusive with the 60 GiB
@@ -83,10 +67,9 @@ gpu_nodes:
   # smallgpu: RTX 2060 at 09:00; GPU, audio, USB, and UCSI functions share
   # IOMMU group 18 and are passed through together. CP + this VM reserve 12 GiB
   # total, leaving ~3.5 GiB for Proxmox, QEMU overhead, and planned bulk NFS.
-  # Unlike gpu-1/gpu-2, this node is not tainted: it also runs ordinary pods.
-  # Host prerequisite before apply/start: bind PCI IDs 10de:1e89, 10de:10f8,
-  # 10de:1ad8, and 10de:1ad9 to vfio-pci, rebuild initramfs, and reboot
-  # smallgpu. They are currently bound to host drivers, so passthrough will fail.
+  # Unlike gpu-2, this node is not tainted: it also runs ordinary pods.
+  # Host prerequisite verified 2026-07-22: PCI IDs 10de:1e89, 10de:10f8,
+  # 10de:1ad8, and 10de:1ad9 bind to vfio-pci and /dev/vfio/18 exists.
   gpu-3:
     proxmox_node: "smallgpu"
     vm_id: 403

@@ -8,6 +8,12 @@ vfio_passthrough_modules:
   - vfio
   - vfio_iommu_type1
   - vfio_pci
+# Load vfio-pci before drivers that can otherwise claim declared devices during
+# early boot. Hosts with multifunction GPUs may extend this list for their USB
+# and UCSI functions.
+vfio_passthrough_competing_modules:
+  - nouveau
+  - nvidia
 vfio_passthrough_blacklist_modules:
   - nouveau
   - nvidia

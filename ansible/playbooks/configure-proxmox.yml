@@ -6,9 +6,6 @@
 
   roles:
     - role: proxmox_preflight
-      tags:
-        - always
-        - verify
     - role: proxmox_repositories
       tags:
         - repositories
@@ -39,4 +36,3 @@
       when: vfio_passthrough_reboot_required | default(false) | bool
       tags:
         - vfio
-        - verify
