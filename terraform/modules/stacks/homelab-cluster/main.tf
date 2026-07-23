@@ -7,14 +7,10 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 locals {
-  # Talos GPU workers and Windows VMs can coexist on the same Proxmox host.
-  # Both have the same GPU configured for passthrough — Proxmox enforces
-  # exclusivity at *start time*, not at config time, so only one of them
-  # runs at any moment. Toggle by stopping one and starting the other:
+  # The Talos GPU worker and separately-managed Windows workstation use the
+  # same GPU on largegpu. Proxmox enforces exclusivity at start time:
   #   `qm shutdown 402 && qm start 502`   (Talos → Windows)
   #   `qm shutdown 502 && qm start 402`   (Windows → Talos)
-  # Talos GPU VMs auto-start on Proxmox boot (on_boot=true in proxmox-vm);
-  # Windows VMs do not (on_boot=false in proxmox-windows-vm).
   base_image_nodes = distinct(concat(
     [for n in var.control_plane_nodes : n.proxmox_node],
     [for n in var.worker_nodes : n.proxmox_node],
@@ -115,36 +111,6 @@ module "gpu_vms" {
   image_file_id = proxmox_download_file.talos_image["${each.value.proxmox_node}/gpu"].id
 
   pci_devices = each.value.pci_devices
-}
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 1c. Windows VMs — coexist with Talos GPU workers on the same Proxmox host.
-#     Both VMs have the GPU configured for passthrough; only one runs at a
-#     time (Proxmox enforces at start). Use `qm start/shutdown` to switch.
-# ──────────────────────────────────────────────────────────────────────────────
-
-module "windows_vms" {
-  source   = "./modules/proxmox-windows-vm"
-  for_each = var.windows_vms
-
-  hostname     = each.key
-  proxmox_node = each.value.proxmox_node
-  vm_id        = each.value.vm_id
-  cores        = each.value.cores
-  memory_mb    = each.value.memory_mb
-  disk_size_gb = each.value.disk_size_gb
-  bridge       = var.network_bridge
-
-  windows_iso = each.value.windows_iso
-  virtio_iso  = each.value.virtio_iso
-
-  # Clone-mode plumbing: when template_vm_id is set in config.yml, the
-  # module skips ISO/disk/EFI/TPM blocks and clones the named template.
-  template_vm_id = each.value.template_vm_id
-  full_clone     = each.value.full_clone
-
-  pci_devices = each.value.pci_devices
-  usb_devices = each.value.usb_devices
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

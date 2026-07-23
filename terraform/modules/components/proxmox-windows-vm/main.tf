@@ -1,5 +1,5 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
-# ║  Module: proxmox-windows-vm                                                ║
+# ║  Component: proxmox-windows-vm                                             ║
 # ║                                                                            ║
 # ║  Two operating modes, picked by var.template_vm_id:                        ║
 # ║                                                                            ║

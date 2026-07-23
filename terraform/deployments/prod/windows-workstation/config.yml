@@ -1,0 +1,37 @@
+---
+# VM 502 and Talos GPU worker 402 share largegpu's RTX 3080. Only one may run:
+#   Talos → Windows: qm shutdown 402 && qm start 502
+#   Windows → Talos: qm shutdown 502 && qm start 402
+#
+# Template 101 is the retained Windows image. local-lvm has limited free space,
+# so VM 502 must remain a linked LVM-thin clone rather than a full clone.
+windows_vms:
+  largegpu-win11:
+    proxmox_node: "largegpu"
+    vm_id: 502
+    template_vm_id: 101
+    full_clone: false
+
+    cores: 16
+    memory_mb: 61440
+    disk_size_gb: 635
+
+    # Ignored in clone mode, but retained for a future deliberate reinstall.
+    windows_iso: "Win11_25H2_EnglishInternational_x64_v2.iso"
+    virtio_iso: "virtio-win.iso"
+
+    pci_devices:
+      - id: "08:00"
+        pcie: true
+
+    usb_devices:
+      - host: "046d:c077" # Logitech USB Optical Mouse
+        usb3: false
+      - host: "046d:c34b" # Logitech USB Keyboard
+        usb3: false
+      - host: "1-2" # Novalite controller #1 dongle
+        usb3: false
+      - host: "5-3" # Novalite controller #2 dongle
+        usb3: false
+      - host: "33fa:0012" # BARROT Bluetooth adapter
+        usb3: false

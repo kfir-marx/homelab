@@ -12,7 +12,6 @@ permissions:
   pull-requests: write
 
 env:
-  TG_WORK_DIR: terraform/deployments/prod/homelab-cluster
   TF_VERSION: "1.11.4"
   TG_VERSION: "0.63.0"
 
@@ -61,9 +60,15 @@ jobs:
   # Plan (for visibility — Atlantis handles the real apply)
   # ────────────────────────────────────────────────────────────────────────────
   plan:
-    name: "Terraform Plan"
+    name: "Terraform Plan (${{ matrix.stack }})"
     runs-on: ubuntu-latest
     needs: [lint, security]
+    strategy:
+      fail-fast: false
+      matrix:
+        stack:
+          - homelab-cluster
+          - windows-workstation
     steps:
       - uses: actions/checkout@v4
 
@@ -79,7 +84,7 @@ jobs:
 
       - name: Terragrunt Plan
         id: plan
-        working-directory: ${{ env.TG_WORK_DIR }}
+        working-directory: terraform/deployments/prod/${{ matrix.stack }}
         run: terragrunt plan -no-color -input=false 2>&1 | tee plan_output.txt
         continue-on-error: true
         env:
@@ -91,7 +96,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('${{ env.TG_WORK_DIR }}/plan_output.txt', 'utf8');
+            const plan = fs.readFileSync('terraform/deployments/prod/${{ matrix.stack }}/plan_output.txt', 'utf8');
             const truncated = plan.length > 60000
               ? plan.substring(0, 60000) + '\n\n... (truncated)'
               : plan;
@@ -100,7 +105,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `### Terragrunt Plan 📋\n\n<details><summary>Show plan</summary>\n\n\`\`\`hcl\n${truncated}\n\`\`\`\n\n</details>`
+              body: `### Terragrunt Plan: ${{ matrix.stack }} 📋\n\n<details><summary>Show plan</summary>\n\n\`\`\`hcl\n${truncated}\n\`\`\`\n\n</details>`
             });
 
       - name: Fail if plan errored

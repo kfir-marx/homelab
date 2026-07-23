@@ -172,25 +172,25 @@ The configured runtime allocation is:
 - The largegpu host's 794 GB local NVMe LVM-thin is split ~80/20 — Windows gets `disk_size_gb: 635` for games, gpu-2 gets `disk_size_gb: 159` for the Talos rootfs.
 - `on_boot = true` for the Talos GPU worker (auto-start on Proxmox boot); `on_boot = false` for the Windows VM (manual).
 
-### Windows VM lifecycle: install → template → clone
+### Windows VM lifecycle: retained template → linked workstation clone
 
-The Windows VM module operates in two modes, selected by `template_vm_id` in `config.yml`:
+Windows is managed by the independent `windows-workstation` stack and remote
+state. The reusable image is template VM 101; working VM 502 is a linked
+LVM-thin clone (`template_vm_id: 101`, `full_clone: false`). This is required
+because `largegpu` local-lvm has insufficient free physical space for another
+635 GiB full copy.
+
+The shared component still supports two modes:
 
 | Mode      | When                        | What happens                                                                 |
 |-----------|-----------------------------|------------------------------------------------------------------------------|
 | INSTALL   | `template_vm_id: null`      | Empty VM with scsi0 install disk, EFI vars (Secure Boot pre-enrolled), vTPM 2.0, and the Win11 ISO on ide2. One-time use: install Windows + apps + drivers, shut down, snapshot. |
-| CLONE     | `template_vm_id: 9000`      | Clones the named template (a previously-installed-and-snapshotted Windows VM). ~30s. Full clone = independent disk; linked clone (`full_clone: false`) = CoW shared with template. |
+| CLONE     | `template_vm_id: 101`       | Clones the retained template. Full clone = independent disk; linked clone (`full_clone: false`) = LVM-thin copy-on-write. |
 
 `virtio-win.iso` (Fedora's signed driver ISO) must be attached manually on a SATA slot before the first install — `bpg/proxmox` v0.105 only allows one `cdrom` block per VM, and SATA is hot-pluggable (IDE is not).
 
-The intended workflow:
-
-```
-INSTALL once  ──►  install apps + games  ──►  shutdown  ──►  clone in UI to VMID 9000
-                                                            ──►  convert 9000 to template
-                                                            ──►  set template_vm_id: 9000 in config.yml
-                                                            ──►  terraform apply → fresh ~30s clone
-```
+Template 101 must remain stopped. VM 502 is disposable and can be recreated
+from it by applying only the `windows-workstation` stack.
 
 ---
 
@@ -285,26 +285,34 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
     │   ├── config.yml                    # Global defaults
     │   ├── prod/
     │   │   ├── config.yml                # Prod VM topology for the current 3-host fleet
-    │   │   └── homelab-cluster/
-    │   │       └── terragrunt.hcl        # Just `include "root"`; module auto-detected
+    │   │   ├── homelab-cluster/
+    │   │   │   └── terragrunt.hcl        # Talos/Kubernetes state
+    │   │   └── windows-workstation/
+    │   │       ├── config.yml            # Template, VM, PCI and USB mapping
+    │   │       └── terragrunt.hcl        # Independent Windows state
     │   └── staging/
     │       ├── config.yml
     │       └── homelab-cluster/
     │           └── terragrunt.hcl
     └── modules/
+        ├── components/
+        │   └── proxmox-windows-vm/
+        │       └── main.tf               # Windows install + clone component
         └── stacks/
-            └── homelab-cluster/
+            ├── homelab-cluster/
                 ├── main.tf               # VMs → Talos → ArgoCD
                 ├── variables.tf
                 ├── providers.tf          # Proxmox (user/pass) + Talos + Helm
                 └── modules/
                     ├── proxmox-vm/                  # Talos VMs (CP/worker/GPU)
                     │   └── main.tf
-                    ├── proxmox-windows-vm/          # Windows 11 VM (install + clone modes)
-                    │   └── main.tf
                     └── talos-cluster/
                         ├── main.tf                  # Secrets, configs, bootstrap, kubeconfig
                         └── talos-gpu-patch.yaml     # NVIDIA extensions + containerd
+            └── windows-workstation/
+                ├── main.tf                         # Windows VM fan-out
+                ├── providers.tf
+                └── variables.tf
 ```
 
 ### Key file reference
@@ -313,14 +321,16 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
 |------|-------------|--------------|
 | `ansible/inventory/production/` | Physical hosts, NFS mounts/exports, PCI IDs and IOMMU groups | Adding or changing a joined Proxmox host |
 | `ansible/playbooks/configure-proxmox.yml` | Serial, idempotent physical-host convergence | Repositories, packages, NFS, or VFIO host policy |
-| `terraform/deployments/<env>/config.yml` | Per-environment node maps, network, cluster, Windows VM, USB/PCI devices | Adding/removing nodes, changing hardware, mapping USB devices |
+| `terraform/deployments/<env>/config.yml` | Per-environment cluster node maps and network settings | Adding/removing Talos nodes or changing cluster hardware |
+| `terraform/deployments/prod/windows-workstation/config.yml` | Windows template, VM size, and PCI/USB mappings | Changing the workstation or its peripherals |
 | `terraform/deployments/config.yml` | Global defaults shared across all environments | Changing Talos version, default DNS, etc. |
 | `terraform/deployments/root.hcl` | Terragrunt root config: S3 backend, `iam_role` from `AWS_IAM_ROLE`, input plumbing | Switching backends, changing retry policy |
 | `terraform/deployments/<env>/<stack>/terragrunt.hcl` | One-line `include "root"` — stack name auto-derived from dir | Almost never |
 | `terraform/modules/stacks/homelab-cluster/main.tf` | Calls sub-modules: VMs → Talos → ArgoCD bootstrap + root app | Changing orchestration logic |
 | `terraform/modules/stacks/homelab-cluster/providers.tf` | Proxmox (username/password), Talos, Helm provider configs | Auth changes |
 | `terraform/modules/stacks/homelab-cluster/modules/proxmox-vm/main.tf` | One Talos VM (CP/worker/GPU) with conditional PCIe passthrough | Changing Talos VM defaults |
-| `terraform/modules/stacks/homelab-cluster/modules/proxmox-windows-vm/main.tf` | Windows 11 VM: INSTALL mode (build) or CLONE mode (from template) | Changing Windows VM defaults, drivers |
+| `terraform/modules/stacks/windows-workstation/` | Independent Windows stack backed by `prod/windows-workstation.tfstate` | Changing Windows orchestration |
+| `terraform/modules/components/proxmox-windows-vm/main.tf` | Windows 11 VM: INSTALL mode (build) or CLONE mode (from template) | Changing Windows VM defaults or drivers |
 | `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/main.tf` | Per-role machine configs, applies them, bootstraps etcd | Changing Talos config patches, cluster topology |
 | `terraform/modules/stacks/homelab-cluster/talos-images/*.yaml` | Talos Image Factory extensions for base and GPU images | Adding or removing OS-level extensions |
 | `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/talos-gpu-patch.yaml` | NVIDIA kernel modules and containerd config | Changing GPU runtime behavior |
@@ -336,7 +346,8 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
 
 ### Execution flow
 
-`terraform apply` executes a single DAG with explicit `depends_on` ordering:
+The `homelab-cluster` apply executes a single DAG with explicit
+`depends_on` ordering:
 
 ```
 1. talos_image_factory_schematic.this[*]
@@ -347,17 +358,17 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
         ▼
 2. module.control_plane_vms  ─┐
    module.worker_vms          │
-   module.gpu_vms             ├──► 3. module.talos_cluster ──► 4. helm_release.argocd ──► 5. helm_release.argocd_root_app
-   module.windows_vms         │
-                             ─┘
+   module.gpu_vms             └──► 3. module.talos_cluster ──► 4. helm_release.argocd ──► 5. helm_release.argocd_root_app
 ```
 
 **Step 1:** Repo-owned YAML files define separate base and NVIDIA GPU Image Factory profiles. Terraform registers those deterministic schematics, then each Proxmox host downloads the `nocloud-amd64.raw.zst` profiles it needs. The Image Factory selects extension versions compatible with `talos_version`; Proxmox performs the download and `zst` decompression.
 
-**Step 2:** Four parallel module fan-outs:
+**Step 2:** Three parallel Talos VM module fan-outs:
 
 - `control_plane_vms` / `worker_vms` / `gpu_vms` — Talos VMs via `proxmox-vm`.
-- `windows_vms` — Windows VMs via `proxmox-windows-vm` (install or clone mode).
+
+Windows is deliberately absent from this DAG. The `windows-workstation` state
+manages VM 502 independently so workstation drift cannot block cluster changes.
 
 Physical host networking is intentionally absent from the Terraform DAG. Production guests use the existing LAN gateway; any future isolated-subnet forwarding or bridge address belongs in Ansible inventory/roles before its VMs are planned.
 
@@ -508,7 +519,9 @@ PCI devices to guests:
 
 ### GitHub Actions (`.github/workflows/terraform-plan.yml`)
 
-Triggers on PRs to `main` that touch `terraform/**`. Runs three jobs against `terraform/deployments/prod/homelab-cluster` via Terragrunt:
+Triggers on PRs to `main` that touch `terraform/**`. Runs lint and security
+checks, then plans both production stacks through a matrix:
+`homelab-cluster` and `windows-workstation`.
 
 1. **Lint & Format** — `terraform fmt -check -recursive` + `terragrunt hclfmt --terragrunt-check`.
 2. **Security Scan** — `tfsec` via the `aquasecurity/tfsec-action`. Currently `soft_fail: true` (non-blocking) — tighten once rules are tuned.
@@ -520,7 +533,7 @@ The plan job depends on lint + security passing first.
 
 Atlantis provides the PR-driven plan/apply workflow:
 
-- **Watches:** `terraform/deployments/prod/homelab-cluster/` and all `.tf`/`.yaml` files under `terraform/modules/stacks/`.
+- **Watches:** Separate projects cover `homelab-cluster` and `windows-workstation`, including their owned stack/component files.
 - **Auto-plan:** Enabled — opens a plan on every PR that modifies watched files.
 - **Apply requirements:** `approved` + `mergeable`.
 - **Parallel plan:** Enabled. **Parallel apply:** Disabled (one environment at a time).
@@ -574,11 +587,15 @@ The root app's `repoURL` is set in [`terraform/deployments/config.yml`](../terra
 #      AWS_ACCESS_KEY_ID=...
 #      AWS_SECRET_ACCESS_KEY=...
 
-# 2. Edit terraform/deployments/prod/config.yml — node specs, IPs, USB/PCI devices.
+# 2. Edit prod/config.yml for Talos nodes, or
+#    prod/windows-workstation/config.yml for Windows PCI/USB settings.
 
 # 3. Plan + apply via the wrapper script.
 ./terraform/deploy.sh prod homelab-cluster plan
 ./terraform/deploy.sh prod homelab-cluster apply
+
+./terraform/deploy.sh prod windows-workstation plan
+./terraform/deploy.sh prod windows-workstation apply
 
 # 4. Export configs (filter out merge_configs.sh log noise with sed)
 cd terraform/deployments/prod/homelab-cluster
@@ -617,7 +634,7 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 - [ ] **Verify the bulk NFS export from Talos** — a worker must successfully mount `192.168.1.106:/mnt/data10tb` before bulk workloads are deployed
 - [ ] Deploy media stack PVC(s) bound to `storage1-bulk-pv` (bulk tier)
 - [ ] Deploy Immich + any other personal/critical workloads with PVCs bound to `storage2-bulk-pv` (critical tier) — **never** point critical apps at `storage1-bulk-pv`, smallgpu is borrowed
-- [ ] Convert the live Windows VM to a template once apps + games are installed; set `template_vm_id` in `config.yml`
+- [x] Retain Windows template 101 and manage VM 502 as a linked clone in the independent `windows-workstation` state
 - [ ] Tighten `tfsec` from `soft_fail: true` to blocking once rules are tuned
 - [ ] Switch from `root@pam` password auth to PCI Resource Mappings to allow API tokens back
 

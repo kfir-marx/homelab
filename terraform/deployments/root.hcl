@@ -25,17 +25,50 @@ locals {
       "${local.root_deployments_dir}/${local.relative_deployment_path}"
     )
   )
+
+  # Only pass settings owned by the selected state. This lets the cluster and
+  # workstation share environment defaults without leaking unrelated inputs.
+  stack_input_keys = {
+    homelab-cluster = [
+      "proxmox_api_url",
+      "talos_version",
+      "talos_image_datastore",
+      "network_bridge",
+      "network_nameservers",
+      "argocd_repo_url",
+      "argocd_app_path",
+      "cluster_name",
+      "cluster_endpoint",
+      "cluster_vip",
+      "network_gateway",
+      "argocd_target_revision",
+      "control_plane_nodes",
+      "worker_nodes",
+      "gpu_nodes",
+    ]
+    windows-workstation = [
+      "proxmox_api_url",
+      "network_bridge",
+      "windows_vms",
+    ]
+  }
+
+  stack_config = {
+    for key, value in local.merged_config :
+    key => value
+    if contains(local.stack_input_keys[local.stack], key)
+  }
 }
 
 # Pass merged YAML config as Terraform input variables.
 # Secrets are injected from environment variables — never stored in YAML.
-inputs = merge(local.merged_config, {
+inputs = merge(local.stack_config, {
   proxmox_api_token    = get_env("PROXMOX_API_TOKEN")
   proxmox_ssh_password = get_env("PROXMOX_SSH_PASSWORD", "")
 })
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Remote state — S3 + DynamoDB locking. Terragrunt assumes the IAM role
+# Remote state — S3 native lockfile locking. Terragrunt assumes the IAM role
 # defined below before any AWS call (state read/write, lock acquisition).
 # Local AWS credentials must have sts:AssumeRole on the target role.
 # ──────────────────────────────────────────────────────────────────────────────

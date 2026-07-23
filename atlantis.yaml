@@ -25,12 +25,31 @@ projects:
         - "../config.yml"                          # env-level overrides
         - "../../config.yml"                       # global defaults
         - "../../root.hcl"                         # backend / inputs
-        - "../../../modules/stacks/**/*.tf"        # shared stack module
-        - "../../../modules/stacks/**/*.yaml"      # Talos GPU patch etc.
+        - "../../../modules/stacks/homelab-cluster/**/*.tf"
+        - "../../../modules/stacks/homelab-cluster/**/*.yaml"
       enabled: true
     apply_requirements:
       - approved                        # At least one PR approval required.
       - mergeable                       # Branch protection checks must pass.
+    workflow: terragrunt
+
+  - name: windows-workstation-prod
+    dir: terraform/deployments/prod/windows-workstation
+    workspace: default
+    terraform_version: v1.11.4
+    autoplan:
+      when_modified:
+        - "*.hcl"
+        - "config.yml"
+        - "../config.yml"
+        - "../../config.yml"
+        - "../../root.hcl"
+        - "../../../modules/stacks/windows-workstation/**/*.tf"
+        - "../../../modules/components/proxmox-windows-vm/**/*.tf"
+      enabled: true
+    apply_requirements:
+      - approved
+      - mergeable
     workflow: terragrunt
 
 workflows:
@@ -46,7 +65,7 @@ workflows:
         - env:
             name: TG_NON_INTERACTIVE
             value: "true"
-        - run: '"$DIR/../../../deploy.sh" prod homelab-cluster plan -input=false -no-color -out="$PLANFILE"'
+        - run: '"$DIR/../../../deploy.sh" prod "$(basename "$DIR")" plan -input=false -no-color -out="$PLANFILE"'
     apply:
       steps:
         - env:
@@ -58,4 +77,4 @@ workflows:
         - env:
             name: TG_NON_INTERACTIVE
             value: "true"
-        - run: '"$DIR/../../../deploy.sh" prod homelab-cluster apply -no-color "$PLANFILE"'
+        - run: '"$DIR/../../../deploy.sh" prod "$(basename "$DIR")" apply -no-color "$PLANFILE"'
