@@ -91,7 +91,6 @@ data "talos_machine_configuration" "controlplane" {
     yamlencode({
       machine = {
         network = {
-          hostname    = each.key
           nameservers = var.nameservers
           interfaces = [{
             interface = "eth0"
@@ -107,6 +106,16 @@ data "talos_machine_configuration" "controlplane" {
           }]
         }
       }
+    }),
+
+    # Talos 1.13 generates a HostnameConfig document by default. Set the
+    # hostname through that document instead of the legacy
+    # machine.network.hostname field; defining both fails validation.
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      auto       = "off"
+      hostname   = each.key
     }),
   ]
 }
@@ -124,7 +133,6 @@ data "talos_machine_configuration" "worker" {
     yamlencode({
       machine = {
         network = {
-          hostname    = each.key
           nameservers = var.nameservers
           interfaces = [{
             interface = "eth0"
@@ -137,6 +145,13 @@ data "talos_machine_configuration" "worker" {
           }]
         }
       }
+    }),
+
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      auto       = "off"
+      hostname   = each.key
     }),
   ]
 }
@@ -154,7 +169,6 @@ data "talos_machine_configuration" "gpu_worker" {
     yamlencode({
       machine = {
         network = {
-          hostname    = each.key
           nameservers = var.nameservers
           interfaces = [{
             interface = "eth0"
@@ -167,6 +181,13 @@ data "talos_machine_configuration" "gpu_worker" {
           }]
         }
       }
+    }),
+
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "HostnameConfig"
+      auto       = "off"
+      hostname   = each.key
     }),
 
     file("${path.module}/talos-gpu-patch.yaml"),
@@ -240,6 +261,30 @@ resource "talos_cluster_kubeconfig" "this" {
   node                 = split("/", values(var.control_plane_nodes)[0].ip_address)[0]
 
   depends_on = [talos_machine_bootstrap.this]
+}
+
+# The kubeconfig can be issued before kube-apiserver and the control-plane VIP
+# are ready to serve clients. Make the module wait for Talos's full Kubernetes
+# health checks so downstream Helm releases do not race cluster bootstrap.
+data "talos_cluster_health" "this" {
+  client_configuration = talos_machine_secrets.this.client_configuration
+  endpoints            = [for n in var.control_plane_nodes : split("/", n.ip_address)[0]]
+  control_plane_nodes  = [for n in var.control_plane_nodes : split("/", n.ip_address)[0]]
+  worker_nodes = concat(
+    [for n in var.worker_nodes : split("/", n.ip_address)[0]],
+    [for n in var.gpu_worker_nodes : split("/", n.ip_address)[0]],
+  )
+
+  timeouts = {
+    read = "15m"
+  }
+
+  depends_on = [
+    talos_cluster_kubeconfig.this,
+    talos_machine_configuration_apply.controlplane,
+    talos_machine_configuration_apply.worker,
+    talos_machine_configuration_apply.gpu_worker,
+  ]
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

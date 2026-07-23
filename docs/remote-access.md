@@ -9,7 +9,7 @@ Secure external access to the homelab using two complementary solutions: **Cloud
 - **Zero inbound ports** — no port forwarding, no exposed home IP, no static IP required.
 - **No client install for streaming users** — friends and family just open a URL.
 - **Full mesh VPN for admin** — encrypted WireGuard tunnel for cluster management.
-- **Everything managed as code** — Terraform, Helm, ArgoCD.
+- **Everything managed as code** — Ansible, Terraform, Helm, ArgoCD.
 - **Free tier only** — $0 budget, up to 30 endpoints.
 
 ---
@@ -152,13 +152,13 @@ Internal services: ArgoCD, Proxmox, Sonarr, Radarr, Grafana, kubectl API
 | Service | Internal address | Purpose |
 |---------|-----------------|---------|
 | ArgoCD | `argocd.argocd.svc` | GitOps dashboard |
-| Proxmox | `10.0.10.1:8006` (or host IPs) | Hypervisor management |
+| Proxmox | `192.168.1.105:8006` (or the other host IPs) | Hypervisor management |
 | Sonarr | `sonarr.media.svc` | TV show management |
 | Radarr | `radarr.media.svc` | Movie management |
 | Prowlarr | `prowlarr.media.svc` | Indexer management |
 | Bazarr | `bazarr.media.svc` | Subtitle management |
 | Grafana | `grafana.monitoring.svc` | Observability |
-| K8s API | `10.0.10.100:6443` | kubectl access |
+| K8s API | `192.168.1.210:6443` | kubectl access |
 
 ### Security Model
 

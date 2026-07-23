@@ -80,7 +80,9 @@ data:
     // HuJSON (JSON with comments + trailing commas). Headscale parses this directly.
     {
       "groups": {
-        "group:admin": ["kfir@homelab"],
+        // Must match the local Headscale user created in
+        // docs/headscale-runbook.md.
+        "group:admin": ["kfir"],
       },
 
       "tagOwners": {
