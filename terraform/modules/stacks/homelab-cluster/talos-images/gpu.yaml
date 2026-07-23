@@ -1,0 +1,11 @@
+# Talos Image Factory profile for NVIDIA GPU worker VMs.
+#
+# Keep the kernel module and container toolkit on the same driver channel.
+# The Image Factory resolves versions compatible with the selected Talos
+# release, so these names do not need version tags.
+customization:
+  systemExtensions:
+    officialExtensions:
+      - siderolabs/nvidia-container-toolkit-production
+      - siderolabs/nvidia-open-gpu-kernel-modules-production
+      - siderolabs/qemu-guest-agent

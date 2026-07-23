@@ -1,0 +1,8 @@
+# Talos Image Factory profile for control-plane and general worker VMs.
+#
+# The Image Factory resolves the extension version compatible with the
+# talos_version selected in terraform/deployments/config.yml.
+customization:
+  systemExtensions:
+    officialExtensions:
+      - siderolabs/qemu-guest-agent
