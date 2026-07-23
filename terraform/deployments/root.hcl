@@ -72,6 +72,5 @@ terraform {
   source = "${local.root_deployments_dir}/../modules/stacks/${local.stack}"
 }
 
-# Retry transient Proxmox / network errors automatically.
-retry_max_attempts       = 3
-retry_sleep_interval_sec = 5
+# Terragrunt's built-in transient-error retry policy is used here. Its defaults
+# are three attempts with a five-second delay, matching the previous overrides.
