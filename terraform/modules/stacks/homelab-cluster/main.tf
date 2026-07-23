@@ -3,7 +3,7 @@
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 0. Talos nocloud image — downloaded once per Proxmox host via the API
+# 0. Talos Image Factory profiles and per-host image downloads
 # ──────────────────────────────────────────────────────────────────────────────
 
 locals {
@@ -15,25 +15,46 @@ locals {
   #   `qm shutdown 502 && qm start 402`   (Windows → Talos)
   # Talos GPU VMs auto-start on Proxmox boot (on_boot=true in proxmox-vm);
   # Windows VMs do not (on_boot=false in proxmox-windows-vm).
-  all_proxmox_nodes = distinct(concat(
+  base_image_nodes = distinct(concat(
     [for n in var.control_plane_nodes : n.proxmox_node],
     [for n in var.worker_nodes : n.proxmox_node],
-    [for n in var.gpu_nodes : n.proxmox_node],
   ))
+  gpu_image_nodes = distinct(
+    [for n in var.gpu_nodes : n.proxmox_node],
+  )
 
-  # Using .zst (not .xz): bpg/proxmox v0.105 only knows how to decompress
-  # gz/zst/bz2. The factory serves both — zst gives the smallest download.
-  talos_image_url = "https://factory.talos.dev/image/${var.talos_schematic_id}/${var.talos_version}/nocloud-amd64.raw.zst"
+  # A host can need both profiles (for example, smallgpu runs a control-plane
+  # VM and a GPU worker), so the key includes both node and profile.
+  talos_image_targets = merge(
+    {
+      for node in local.base_image_nodes : "${node}/base" => {
+        node    = node
+        profile = "base"
+      }
+    },
+    {
+      for node in local.gpu_image_nodes : "${node}/gpu" => {
+        node    = node
+        profile = "gpu"
+      }
+    },
+  )
 }
 
-resource "proxmox_virtual_environment_download_file" "talos_image" {
-  for_each = toset(local.all_proxmox_nodes)
+resource "talos_image_factory_schematic" "this" {
+  for_each = fileset("${path.module}/talos-images", "*.yaml")
+
+  schematic = file("${path.module}/talos-images/${each.value}")
+}
+
+resource "proxmox_download_file" "talos_image" {
+  for_each = local.talos_image_targets
 
   content_type            = "iso"
   datastore_id            = var.talos_image_datastore
-  node_name               = each.value
-  url                     = local.talos_image_url
-  file_name               = "talos-${var.talos_version}-nocloud-amd64.img"
+  node_name               = each.value.node
+  url                     = "https://factory.talos.dev/image/${talos_image_factory_schematic.this["${each.value.profile}.yaml"].id}/${var.talos_version}/nocloud-amd64.raw.zst"
+  file_name               = "talos-${var.talos_version}-${each.value.profile}-${substr(talos_image_factory_schematic.this["${each.value.profile}.yaml"].id, 0, 12)}-nocloud-amd64.img"
   decompression_algorithm = "zst" # required — file_name has no .zst suffix
   overwrite               = false
 }
@@ -55,7 +76,7 @@ module "control_plane_vms" {
   ip_address    = each.value.ip_address
   gateway       = var.network_gateway
   bridge        = var.network_bridge
-  image_file_id = proxmox_virtual_environment_download_file.talos_image[each.value.proxmox_node].id
+  image_file_id = proxmox_download_file.talos_image["${each.value.proxmox_node}/base"].id
 
   pci_devices = []
 }
@@ -73,7 +94,7 @@ module "worker_vms" {
   ip_address    = each.value.ip_address
   gateway       = var.network_gateway
   bridge        = var.network_bridge
-  image_file_id = proxmox_virtual_environment_download_file.talos_image[each.value.proxmox_node].id
+  image_file_id = proxmox_download_file.talos_image["${each.value.proxmox_node}/base"].id
 
   pci_devices = []
 }
@@ -91,7 +112,7 @@ module "gpu_vms" {
   ip_address    = each.value.ip_address
   gateway       = var.network_gateway
   bridge        = var.network_bridge
-  image_file_id = proxmox_virtual_environment_download_file.talos_image[each.value.proxmox_node].id
+  image_file_id = proxmox_download_file.talos_image["${each.value.proxmox_node}/gpu"].id
 
   pci_devices = each.value.pci_devices
 }

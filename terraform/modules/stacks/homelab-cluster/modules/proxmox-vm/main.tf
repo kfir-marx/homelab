@@ -82,6 +82,13 @@ resource "proxmox_virtual_environment_vm" "this" {
   vm_id     = var.vm_id
   tags      = ["talos", "terraform"]
 
+  # Every repo-managed Talos image includes the qemu-guest-agent extension.
+  agent {
+    enabled = true
+    trim    = true
+    type    = "virtio"
+  }
+
   machine = length(var.pci_devices) > 0 ? "q35" : "q35"
   bios    = length(var.pci_devices) > 0 ? "ovmf" : "seabios"
 

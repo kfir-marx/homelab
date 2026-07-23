@@ -49,12 +49,6 @@ variable "talos_version" {
 # Talos image
 # ──────────────────────────────────────────────────────────────────────────────
 
-variable "talos_schematic_id" {
-  description = "Talos Image Factory schematic ID (default = vanilla, no extensions)"
-  type        = string
-  default     = "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba"
-}
-
 variable "talos_image_datastore" {
   description = "Proxmox datastore to download the Talos image to"
   type        = string

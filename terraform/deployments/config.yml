@@ -8,7 +8,7 @@
 proxmox_api_url: "https://192.168.1.105:8006"
 
 # ── Talos ────────────────────────────────────────────────────────────────────
-talos_version: "v1.9.5"
+talos_version: "v1.13.7"
 talos_image_datastore: "local"
 
 # ── Network defaults ─────────────────────────────────────────────────────────

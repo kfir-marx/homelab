@@ -322,7 +322,8 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
 | `terraform/modules/stacks/homelab-cluster/modules/proxmox-vm/main.tf` | One Talos VM (CP/worker/GPU) with conditional PCIe passthrough | Changing Talos VM defaults |
 | `terraform/modules/stacks/homelab-cluster/modules/proxmox-windows-vm/main.tf` | Windows 11 VM: INSTALL mode (build) or CLONE mode (from template) | Changing Windows VM defaults, drivers |
 | `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/main.tf` | Per-role machine configs, applies them, bootstraps etcd | Changing Talos config patches, cluster topology |
-| `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/talos-gpu-patch.yaml` | NVIDIA extensions, kernel modules, containerd config | Upgrading GPU driver version |
+| `terraform/modules/stacks/homelab-cluster/talos-images/*.yaml` | Talos Image Factory extensions for base and GPU images | Adding or removing OS-level extensions |
+| `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/talos-gpu-patch.yaml` | NVIDIA kernel modules and containerd config | Changing GPU runtime behavior |
 | `kubernetes/system/storage/storage1-bulk.yaml` | NFS-backed `PV` + `StorageClass` — bulk tier (10 TB NTFS on smallgpu) | Resizing, retargeting NFS server, host-side export setup |
 | `kubernetes/system/storage/storage2-bulk.yaml` | NFS-backed `PV` + `StorageClass` — critical tier (800 GB ext4 on gpunvdgtx1060) | Resizing the carved LV, host-side export setup |
 | `kubernetes/apps/` | ArgoCD watches this directory for Application manifests | Deploying any new workload |
@@ -338,7 +339,10 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
 `terraform apply` executes a single DAG with explicit `depends_on` ordering:
 
 ```
-1. proxmox_virtual_environment_download_file.talos_image[*]   (once per Proxmox host)
+1. talos_image_factory_schematic.this[*]
+        │
+        ▼
+   proxmox_download_file.talos_image[*]   (once per host/profile pair)
         │
         ▼
 2. module.control_plane_vms  ─┐
@@ -348,7 +352,7 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
                              ─┘
 ```
 
-**Step 1:** The Talos `nocloud-amd64.raw.zst` image is downloaded directly by each Proxmox host from the Talos Image Factory (URL embeds the `talos_schematic_id` and `talos_version`). Decompression is done by the provider with `decompression_algorithm = "zst"`.
+**Step 1:** Repo-owned YAML files define separate base and NVIDIA GPU Image Factory profiles. Terraform registers those deterministic schematics, then each Proxmox host downloads the `nocloud-amd64.raw.zst` profiles it needs. The Image Factory selects extension versions compatible with `talos_version`; Proxmox performs the download and `zst` decompression.
 
 **Step 2:** Four parallel module fan-outs:
 
@@ -357,7 +361,7 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
 
 Physical host networking is intentionally absent from the Terraform DAG. Production guests use the existing LAN gateway; any future isolated-subnet forwarding or bridge address belongs in Ansible inventory/roles before its VMs are planned.
 
-**Step 3:** The `talos-cluster` module generates per-node machine configurations using `talos_machine_configuration` data sources. Each node gets a config patch with its hostname, static IP, and routes. GPU nodes additionally receive the `talos-gpu-patch.yaml` (NVIDIA extensions) and labels/taints. The module then applies configs via `talos_machine_configuration_apply`, bootstraps etcd on the first control-plane node, and retrieves the kubeconfig.
+**Step 3:** The `talos-cluster` module generates per-node machine configurations using `talos_machine_configuration` data sources. Each node gets a config patch with its hostname, static IP, and routes. GPU nodes additionally receive the `talos-gpu-patch.yaml` (module/runtime activation) and labels/taints; the NVIDIA extensions themselves are already in the GPU disk image. The module then applies configs via `talos_machine_configuration_apply`, bootstraps etcd on the first control-plane node, and retrieves the kubeconfig.
 
 **Step 4:** The Helm provider (authenticated via the kubeconfig from step 3) installs ArgoCD into the `argocd` namespace. `wait = false` because at bootstrap time there's no LB controller — `argocd-server`'s external IP stays `<pending>` and `helm --wait` would hang for 10 min before declaring failure. ArgoCD comes up healthy without it.
 
@@ -370,7 +374,8 @@ Creates a single Proxmox QEMU VM for Talos. Key behaviors:
 - **Machine type:** Always `q35` (required for PCIe passthrough).
 - **BIOS:** `ovmf` (UEFI) for GPU nodes, `seabios` for others. OVMF requires the dynamic `efi_disk` block.
 - **CPU type:** Always `host` — required for GPU passthrough.
-- **Boot disk:** Cloned from the downloaded Talos `nocloud` image (`file_id = ...talos_image[node].id`, `file_format = "raw"`). `lifecycle.ignore_changes = [disk[0].file_id]` so a Talos upgrade doesn't fight an in-place node's config.
+- **Boot disk:** Cloned from the downloaded base or GPU Talos `nocloud` image (`file_format = "raw"`). `lifecycle.ignore_changes = [disk[0].file_id]` so a Talos upgrade doesn't fight an in-place node's config.
+- **QEMU guest agent:** Enabled because both image profiles include the `siderolabs/qemu-guest-agent` extension.
 - **Cloud-init `initialization` block:** Static IP via nocloud cidata — without this, Talos comes up in maintenance mode on a DHCP lease and `talos_machine_configuration_apply` can't find the node.
 - **PCIe passthrough:** Dynamic `hostpci` block iterating over `var.pci_devices`. Empty list = no passthrough.
 - **`on_boot = true`** — Talos VMs auto-start with the host.

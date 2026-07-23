@@ -43,25 +43,22 @@ iam_role = get_env("AWS_IAM_ROLE")
 
 remote_state {
   backend = "s3"
+
   generate = {
     path      = "backend.tf"
     if_exists = "overwrite_terragrunt"
   }
+
   config = {
-    bucket         = "kfir-homelab-tfstate"
-    key            = "${dirname(local.relative_deployment_path)}/${local.stack}.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    dynamodb_table = "kfir-homelab-terragrunt-state-locks"
+    bucket       = "kfir-homelab-tfstate"
+    key          = "${dirname(local.relative_deployment_path)}/${local.stack}.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
 
     s3_bucket_tags = {
       Owner = "DevOps"
       Name  = "Terragrunt state storage"
-    }
-
-    dynamodb_table_tags = {
-      Owner = "DevOps"
-      Name  = "Terragrunt state lock table"
     }
   }
 }
