@@ -38,9 +38,24 @@ workflows:
     plan:
       steps:
         - env:
-            name: TERRAGRUNT_TFPATH
-            command: 'echo "terraform"'
-        - run: terragrunt plan -no-color -out=$PLANFILE
+            name: TG_TF_PATH
+            command: 'echo "terraform${ATLANTIS_TERRAFORM_VERSION}"'
+        - env:
+            name: TF_IN_AUTOMATION
+            value: "true"
+        - env:
+            name: TG_NON_INTERACTIVE
+            value: "true"
+        - run: '"$DIR/../../../deploy.sh" prod homelab-cluster plan -input=false -no-color -out="$PLANFILE"'
     apply:
       steps:
-        - run: terragrunt apply -no-color $PLANFILE
+        - env:
+            name: TG_TF_PATH
+            command: 'echo "terraform${ATLANTIS_TERRAFORM_VERSION}"'
+        - env:
+            name: TF_IN_AUTOMATION
+            value: "true"
+        - env:
+            name: TG_NON_INTERACTIVE
+            value: "true"
+        - run: '"$DIR/../../../deploy.sh" prod homelab-cluster apply -no-color "$PLANFILE"'
