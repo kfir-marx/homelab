@@ -21,6 +21,10 @@ cluster_vip: "192.168.1.210"
 
 # ── Network ──────────────────────────────────────────────────────────────────
 network_gateway: "192.168.1.1"
+# Reserved for Cilium LB IPAM. This range is outside the addresses used by the
+# Kubernetes API and Talos nodes and was explicitly approved for homelab use.
+cilium_load_balancer_ip_start: "192.168.1.220"
+cilium_load_balancer_ip_stop: "192.168.1.229"
 
 # ── ArgoCD ───────────────────────────────────────────────────────────────────
 argocd_target_revision: "main"

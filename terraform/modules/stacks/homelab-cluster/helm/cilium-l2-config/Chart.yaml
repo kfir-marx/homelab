@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cilium-l2-config
+description: Homelab Cilium LB IPAM pool and L2 announcement policy
+type: application
+version: 0.1.0
+appVersion: "1"

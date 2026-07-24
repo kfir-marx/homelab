@@ -33,6 +33,10 @@ variable "talos_version" {
   default = "v1.9.5"
 }
 
+variable "kubernetes_version" {
+  type = string
+}
+
 variable "nameservers" {
   type    = list(string)
   default = ["1.1.1.1"]
@@ -81,13 +85,27 @@ data "talos_client_configuration" "this" {
 data "talos_machine_configuration" "controlplane" {
   for_each = var.control_plane_nodes
 
-  cluster_name     = var.cluster_name
-  cluster_endpoint = var.cluster_endpoint
-  machine_type     = "controlplane"
-  machine_secrets  = talos_machine_secrets.this.machine_secrets
-  talos_version    = var.talos_version
+  cluster_name       = var.cluster_name
+  cluster_endpoint   = var.cluster_endpoint
+  machine_type       = "controlplane"
+  machine_secrets    = talos_machine_secrets.this.machine_secrets
+  talos_version      = var.talos_version
+  kubernetes_version = var.kubernetes_version
 
   config_patches = [
+    yamlencode({
+      cluster = {
+        network = {
+          cni = {
+            name = "none"
+          }
+        }
+        proxy = {
+          disabled = true
+        }
+      }
+    }),
+
     yamlencode({
       machine = {
         network = {
@@ -123,13 +141,27 @@ data "talos_machine_configuration" "controlplane" {
 data "talos_machine_configuration" "worker" {
   for_each = var.worker_nodes
 
-  cluster_name     = var.cluster_name
-  cluster_endpoint = var.cluster_endpoint
-  machine_type     = "worker"
-  machine_secrets  = talos_machine_secrets.this.machine_secrets
-  talos_version    = var.talos_version
+  cluster_name       = var.cluster_name
+  cluster_endpoint   = var.cluster_endpoint
+  machine_type       = "worker"
+  machine_secrets    = talos_machine_secrets.this.machine_secrets
+  talos_version      = var.talos_version
+  kubernetes_version = var.kubernetes_version
 
   config_patches = [
+    yamlencode({
+      cluster = {
+        network = {
+          cni = {
+            name = "none"
+          }
+        }
+        proxy = {
+          disabled = true
+        }
+      }
+    }),
+
     yamlencode({
       machine = {
         network = {
@@ -159,13 +191,27 @@ data "talos_machine_configuration" "worker" {
 data "talos_machine_configuration" "gpu_worker" {
   for_each = var.gpu_worker_nodes
 
-  cluster_name     = var.cluster_name
-  cluster_endpoint = var.cluster_endpoint
-  machine_type     = "worker"
-  machine_secrets  = talos_machine_secrets.this.machine_secrets
-  talos_version    = var.talos_version
+  cluster_name       = var.cluster_name
+  cluster_endpoint   = var.cluster_endpoint
+  machine_type       = "worker"
+  machine_secrets    = talos_machine_secrets.this.machine_secrets
+  talos_version      = var.talos_version
+  kubernetes_version = var.kubernetes_version
 
   config_patches = [
+    yamlencode({
+      cluster = {
+        network = {
+          cni = {
+            name = "none"
+          }
+        }
+        proxy = {
+          disabled = true
+        }
+      }
+    }),
+
     yamlencode({
       machine = {
         network = {
@@ -263,30 +309,6 @@ resource "talos_cluster_kubeconfig" "this" {
   depends_on = [talos_machine_bootstrap.this]
 }
 
-# The kubeconfig can be issued before kube-apiserver and the control-plane VIP
-# are ready to serve clients. Make the module wait for Talos's full Kubernetes
-# health checks so downstream Helm releases do not race cluster bootstrap.
-data "talos_cluster_health" "this" {
-  client_configuration = talos_machine_secrets.this.client_configuration
-  endpoints            = [for n in var.control_plane_nodes : split("/", n.ip_address)[0]]
-  control_plane_nodes  = [for n in var.control_plane_nodes : split("/", n.ip_address)[0]]
-  worker_nodes = concat(
-    [for n in var.worker_nodes : split("/", n.ip_address)[0]],
-    [for n in var.gpu_worker_nodes : split("/", n.ip_address)[0]],
-  )
-
-  timeouts = {
-    read = "15m"
-  }
-
-  depends_on = [
-    talos_cluster_kubeconfig.this,
-    talos_machine_configuration_apply.controlplane,
-    talos_machine_configuration_apply.worker,
-    talos_machine_configuration_apply.gpu_worker,
-  ]
-}
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Outputs
 # ──────────────────────────────────────────────────────────────────────────────
@@ -317,5 +339,10 @@ output "kubeconfig_client_key" {
 
 output "kubeconfig_ca_certificate" {
   value     = talos_cluster_kubeconfig.this.kubernetes_client_configuration.ca_certificate
+  sensitive = true
+}
+
+output "client_configuration" {
+  value     = talos_machine_secrets.this.client_configuration
   sensitive = true
 }

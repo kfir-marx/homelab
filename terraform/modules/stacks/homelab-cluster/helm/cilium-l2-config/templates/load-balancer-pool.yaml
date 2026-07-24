@@ -1,0 +1,8 @@
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: homelab-lan
+spec:
+  blocks:
+    - start: {{ required "loadBalancerPool.start is required" .Values.loadBalancerPool.start | quote }}
+      stop: {{ required "loadBalancerPool.stop is required" .Values.loadBalancerPool.stop | quote }}

@@ -32,6 +32,10 @@ locals {
     homelab-cluster = [
       "proxmox_api_url",
       "talos_version",
+      "kubernetes_version",
+      "cilium_version",
+      "cilium_load_balancer_ip_start",
+      "cilium_load_balancer_ip_stop",
       "talos_image_datastore",
       "network_bridge",
       "network_nameservers",

@@ -45,6 +45,16 @@ variable "talos_version" {
   default     = "v1.9.5"
 }
 
+variable "kubernetes_version" {
+  description = "Kubernetes version to bootstrap; must be supported by both Talos and Cilium"
+  type        = string
+}
+
+variable "cilium_version" {
+  description = "Pinned Cilium Helm chart version"
+  type        = string
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Talos image
 # ──────────────────────────────────────────────────────────────────────────────
@@ -74,6 +84,16 @@ variable "network_nameservers" {
   description = "DNS nameservers"
   type        = list(string)
   default     = ["1.1.1.1", "8.8.8.8"]
+}
+
+variable "cilium_load_balancer_ip_start" {
+  description = "First DHCP-excluded LAN address available to Cilium LB IPAM"
+  type        = string
+}
+
+variable "cilium_load_balancer_ip_stop" {
+  description = "Last DHCP-excluded LAN address available to Cilium LB IPAM"
+  type        = string
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

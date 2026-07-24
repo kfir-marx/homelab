@@ -75,9 +75,9 @@ This snapshot was read from the Proxmox API at `192.168.1.105`; it is operationa
 
 VM `100` uses a 12 GiB maximum with an 8 GiB balloon minimum. This lets the workstation consume otherwise-idle capacity while leaving Proxmox, corosync, and critical NFS room to operate. The host had about 3.1 GiB available and no active memory pressure after the change; retaining ballooning is essential because a fixed 12 GiB allocation would leave too little headroom.
 
-The critical NFS server is confirmed to run directly on Proxmox: `nfs-kernel-server` is active and enabled, `/mnt/storage2-bulk` is an ext4 mount backed by `/dev/mapper/gpu1--extra-storage2--bulk`, and it is exported read/write to `192.168.1.0/24` with NFSv4 `fsid=10`. TCP 111 and 2049 are listening. A client mount from Talos still needs verification after deployment.
+The critical NFS server is confirmed to run directly on Proxmox: `nfs-kernel-server` is active and enabled, `/mnt/storage2-bulk` is an ext4 mount backed by `/dev/mapper/gpu1--extra-storage2--bulk`, and it is exported read/write to `192.168.1.0/24` with NFSv4 `fsid=10`. TCP 111 and 2049 are listening. A read-only client mount from a Talos worker succeeded on 2026-07-24.
 
-The live state changed during the 2026-07-22 review: `smallgpu` now has the UUID-based `ntfs3` fstab entry, `/mnt/data10tb` is mounted read/write without a `force` option, and the intended `fsid=1` export is active. Earlier kernel logs recorded a dirty-volume refusal, so Ansible still treats an unmounted dirty or hibernated NTFS filesystem as a hard failure and never clears the flag or force-mounts it. The export still needs an end-to-end mount test from Talos before workloads depend on it.
+The live state changed during the 2026-07-22 review: `smallgpu` now has the UUID-based `ntfs3` fstab entry, `/mnt/data10tb` is mounted read/write without a `force` option, and the intended `fsid=1` export is active. Earlier kernel logs recorded a dirty-volume refusal, so Ansible still treats an unmounted dirty or hibernated NTFS filesystem as a hard failure and never clears the flag or force-mounts it. A read-only client mount from a Talos worker succeeded on 2026-07-24.
 
 All three GPU hosts now pass VFIO verification. The laptop GTX 1060 is bound to `vfio-pci` and exposes `/dev/vfio/2`; it is reserved for workstation VM `100`, though the live VM did not yet have a `hostpci` entry at verification time. All four RTX 2060 functions (`10de:1e89`, `10de:10f8`, `10de:1ad8`, and `10de:1ad9`) bind to `vfio-pci` in IOMMU group 18 and expose `/dev/vfio/18`. Both RTX 3080 functions (`10de:2216` and `10de:1aef`) bind to `vfio-pci` in group 21 and expose `/dev/vfio/21`; VMs `101` and `502` reference that GPU and remained stopped throughout convergence and reboot.
 
@@ -206,11 +206,11 @@ Beyond each host's default `local` (Directory, /var/lib/vz) and `local-lvm` (LVM
 | `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | ISOs, templates, backups (slow HDD, low-churn data)                    |
 | `gpunvdgtx1060` | `gpu1-extra`          | LVM-thin     | 912 GB     | Spare capacity for additional VMs + carved LV for `storage2-bulk` NFS  |
 | `gpunvdgtx1060` | `storage2-bulk` (NFS) | ext4 LV on `gpu1-extra`, NFSv4 export | 800 GB | **Critical tier** — Immich, personal data (only permanent host)        |
-| `smallgpu`      | `storage1-bulk` (NFS) | 10 TB NTFS via kernel `ntfs3`, NFSv4 export | 10 TB  | **Bulk tier** — active on the host; Talos client verification pending |
+| `smallgpu`      | `storage1-bulk` (NFS) | 10 TB NTFS via kernel `ntfs3`, NFSv4 export | 10 TB  | **Bulk tier** — active and mount-verified from Talos |
 
 ### Kubernetes storage
 
-Two static NFS-backed `PersistentVolume`s are declared, one per tier (see [Node ownership and permanence](#node-ownership-and-permanence) for why two tiers exist). Both host exports are live; each still requires an end-to-end mount test from a Talos worker:
+Two static NFS-backed `PersistentVolume`s are declared, one per tier (see [Node ownership and permanence](#node-ownership-and-permanence) for why two tiers exist). Both host exports are live and were mounted read-only from a Talos worker on 2026-07-24:
 
 | PV name             | StorageClass     | Backed by                                       | Size   | Tier — use case                                                                            |
 |---------------------|------------------|-------------------------------------------------|--------|--------------------------------------------------------------------------------------------|
@@ -278,7 +278,7 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
 │   │       └── storage2-bulk.yaml        # Critical tier: NFS PV + SC, 800 GB ext4 on gpunvdgtx1060
 │   └── bootstrap/                        # One-time bootstrap resources
 └── terraform/
-    ├── deploy.sh                         # Wrapper: loads .env → runs terragrunt
+    ├── run-terragrunt.sh                         # Wrapper: loads .env → runs terragrunt
     ├── deployments/                      # Per-environment Terragrunt stacks
     │   ├── root.hcl                      # S3 backend + IAM role + input plumbing
     │   ├── merge_configs.sh              # Hierarchical YAML deep-merge
@@ -332,6 +332,7 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
 | `terraform/modules/stacks/windows-workstation/` | Independent Windows stack backed by `prod/windows-workstation.tfstate` | Changing Windows orchestration |
 | `terraform/modules/components/proxmox-windows-vm/main.tf` | Windows 11 VM: INSTALL mode (build) or CLONE mode (from template) | Changing Windows VM defaults or drivers |
 | `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/main.tf` | Per-role machine configs, applies them, bootstraps etcd | Changing Talos config patches, cluster topology |
+| `terraform/modules/stacks/homelab-cluster/helm/cilium-l2-config/` | Cilium LB IPAM pool and LAN L2 announcement policy | Changing LoadBalancer address allocation or advertisement |
 | `terraform/modules/stacks/homelab-cluster/talos-images/*.yaml` | Talos Image Factory extensions for base and GPU images | Adding or removing OS-level extensions |
 | `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/talos-gpu-patch.yaml` | NVIDIA kernel modules and containerd config | Changing GPU runtime behavior |
 | `kubernetes/system/storage/storage1-bulk.yaml` | NFS-backed `PV` + `StorageClass` — bulk tier (10 TB NTFS on smallgpu) | Resizing, retargeting NFS server, host-side export setup |
@@ -358,7 +359,22 @@ The `homelab-cluster` apply executes a single DAG with explicit
         ▼
 2. module.control_plane_vms  ─┐
    module.worker_vms          │
-   module.gpu_vms             └──► 3. module.talos_cluster ──► 4. helm_release.argocd ──► 5. helm_release.argocd_root_app
+   module.gpu_vms             └──► 3. module.talos_cluster
+                                            │
+                                            ▼
+                                4. Kubernetes API TCP readiness gate
+                                            │
+                                            ▼
+                                5. helm_release.cilium
+                                            │
+                                            ▼
+                                6. Cilium LB IPAM + L2 policy
+                                            │
+                                            ▼
+                                7. talos_cluster_health
+                                            │
+                                            ▼
+                                8. ArgoCD ──► 9. root Application
 ```
 
 **Step 1:** Repo-owned YAML files define separate base and NVIDIA GPU Image Factory profiles. Terraform registers those deterministic schematics, then each Proxmox host downloads the `nocloud-amd64.raw.zst` profiles it needs. The Image Factory selects extension versions compatible with `talos_version`; Proxmox performs the download and `zst` decompression.
@@ -372,11 +388,19 @@ manages VM 502 independently so workstation drift cannot block cluster changes.
 
 Physical host networking is intentionally absent from the Terraform DAG. Production guests use the existing LAN gateway; any future isolated-subnet forwarding or bridge address belongs in Ansible inventory/roles before its VMs are planned.
 
-**Step 3:** The `talos-cluster` module generates per-node machine configurations using `talos_machine_configuration` data sources. Each node gets a config patch with its hostname, static IP, and routes. GPU nodes additionally receive the `talos-gpu-patch.yaml` (module/runtime activation) and labels/taints; the NVIDIA extensions themselves are already in the GPU disk image. The module then applies configs via `talos_machine_configuration_apply`, bootstraps etcd on the first control-plane node, and retrieves the kubeconfig.
+**Step 3:** The `talos-cluster` module generates per-node machine configurations using `talos_machine_configuration` data sources. Each node gets a config patch with its hostname, static IP, and routes. The built-in CNI and kube-proxy are disabled, and Kubernetes is explicitly pinned to a version supported by both Talos and Cilium. GPU nodes additionally receive the `talos-gpu-patch.yaml` (module/runtime activation) and labels/taints; the NVIDIA extensions themselves are already in the GPU disk image. The module then applies configs via `talos_machine_configuration_apply`, bootstraps etcd on the first control-plane node, and retrieves the kubeconfig. It deliberately does not wait for Kubernetes node readiness because that cannot happen before Cilium exists.
 
-**Step 4:** The Helm provider (authenticated via the kubeconfig from step 3) installs ArgoCD into the `argocd` namespace. `wait = false` because at bootstrap time there's no LB controller — `argocd-server`'s external IP stays `<pending>` and `helm --wait` would hang for 10 min before declaring failure. ArgoCD comes up healthy without it.
+**Step 4:** A local Terraform readiness gate waits up to five minutes for the Kubernetes API VIP's TCP socket. Kubeconfig retrieval can finish just before the freshly configured control plane reboots, so this gate prevents the Helm provider from racing that short outage.
 
-**Step 5:** A second Helm release deploys the ArgoCD "root Application" using the `argocd-apps` chart, pointing at `kubernetes/apps/` in this repo with automated sync + prune + self-heal. From this point, ArgoCD owns all in-cluster state.
+**Step 5:** Terraform installs the pinned Cilium Helm chart in `kube-system`. Cilium uses Kubernetes host-scope IPAM, Talos's existing cgroup v2 mount, full kube-proxy replacement, and the API VIP at `192.168.1.210:6443`. L2 announcements are enabled for `eth0`.
+
+**Step 6:** A small repo-local Helm chart creates a `CiliumLoadBalancerIPPool` from the explicitly configured DHCP-excluded LAN range and a `CiliumL2AnnouncementPolicy`. Cilium LB IPAM allocates addresses; the L2 policy advertises them with ARP. MetalLB is not installed.
+
+**Step 7:** A repo-local readiness Job waits for every Kubernetes node, the Cilium DaemonSet and operator, and CoreDNS to become Ready, and verifies that the LB IPAM pool and L2 policy exist. This explicit Job is necessary because Talos intentionally skips NodeReady and CoreDNS assertions when its configured CNI name is `none`. Terraform then runs the remaining Talos cluster health checks.
+
+**Step 8:** The Helm provider installs ArgoCD with normal readiness waiting enabled. `argocd-server` requests the first address in the Cilium pool through the `lbipam.cilium.io/ips` annotation, so its `LoadBalancer` service does not remain pending.
+
+**Step 9:** A second Argo Helm release deploys the "root Application" using the `argocd-apps` chart, pointing at `kubernetes/apps/` in this repo with automated sync + prune + self-heal. From this point, ArgoCD owns application state; Terraform continues to own the bootstrap CNI and its address-advertisement policy.
 
 ### Module: `proxmox-vm` (Talos VMs)
 
@@ -565,6 +589,29 @@ To deploy a new workload, add an ArgoCD `Application` manifest to `kubernetes/ap
 
 The root app's `repoURL` is set in [`terraform/deployments/config.yml`](../terraform/deployments/config.yml) (`argocd_repo_url`). Per-environment `argocd_target_revision` lives in each env's `config.yml`.
 
+## Cilium networking and LAN LoadBalancers
+
+Talos boots with `cluster.network.cni.name = "none"` and
+`cluster.proxy.disabled = true`. Terraform then installs Cilium before running
+the full cluster health check or installing ArgoCD. This ordering is a bootstrap
+requirement: pod networking cannot become Ready until Cilium exists, while
+ArgoCD itself depends on pod networking. A pre-Cilium TCP gate also waits for
+the API VIP after Talos bootstrap, because a fresh control plane may reboot
+between kubeconfig retrieval and the first Helm provider request.
+
+The globally configured versions are Talos `v1.13.7`, Kubernetes `1.34.9`, and
+Cilium `1.19.6`. Talos 1.13 supports Kubernetes 1.31–1.36, but stable Cilium
+1.19 only guarantees Kubernetes 1.31–1.34, so Kubernetes must not silently
+follow Talos's newer 1.36 default.
+
+Production must define `cilium_load_balancer_ip_start` and
+`cilium_load_balancer_ip_stop` as a contiguous LAN range reserved outside DHCP.
+Terraform rejects a reversed or single-address range and any overlap with the
+API VIP or node IPs. The first address is reserved for `argocd-server`; remaining
+addresses are available to other `LoadBalancer` Services. The pool is advertised
+on `eth0` by Cilium L2 announcements. Do not deploy MetalLB alongside this
+configuration.
+
 ---
 
 ## Getting started
@@ -591,11 +638,11 @@ The root app's `repoURL` is set in [`terraform/deployments/config.yml`](../terra
 #    prod/windows-workstation/config.yml for Windows PCI/USB settings.
 
 # 3. Plan + apply via the wrapper script.
-./terraform/deploy.sh prod homelab-cluster plan
-./terraform/deploy.sh prod homelab-cluster apply
+./terraform/run-terragrunt.sh prod homelab-cluster plan
+./terraform/run-terragrunt.sh prod homelab-cluster apply
 
-./terraform/deploy.sh prod windows-workstation plan
-./terraform/deploy.sh prod windows-workstation apply
+./terraform/run-terragrunt.sh prod windows-workstation plan
+./terraform/run-terragrunt.sh prod windows-workstation apply
 
 # 4. Export configs (filter out merge_configs.sh log noise with sed)
 cd terraform/deployments/prod/homelab-cluster
@@ -622,16 +669,16 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 
 ### Post-deploy checklist
 
-- [ ] **Reconcile retired-host Terraform state before apply.** The 2026-07-22 `-refresh=false` plan reports `4 add, 9 change, 20 destroy`, including VMs and Talos images recorded on returned `worker1`–`worker4`, the old `node6` image address, and replacement of `cp-1`. Back up state, verify those remote objects are truly gone, and deliberately remove/import or move only the stale addresses; do not run the plan as an unreviewed destroy operation.
-- [ ] **Plan the single-control-plane rebuild explicitly.** `cp-1` moves from retired `worker1` to `smallgpu`, while the existing bootstrap resource is unchanged because the API endpoint stays `192.168.1.210`. Arrange the Talos bootstrap/recovery step and expected API outage before apply; a replacement VM with no etcd data will not become a working cluster merely because its IP is unchanged.
+- [x] **Reconcile retired-host Terraform state before apply.** The production cluster stack was audited, destroyed, and recreated through saved Terraform plans on 2026-07-24 without deleting remote state or touching unrelated infrastructure.
+- [x] **Plan the single-control-plane rebuild explicitly.** `cp-1` was rebuilt on `smallgpu`, etcd bootstrapped, and the API VIP verified on 2026-07-24.
 - [ ] Deploy NVIDIA device plugin DaemonSet via ArgoCD (in `kubernetes/system/`)
 - [x] Prepare and verify `smallgpu` RTX 2060 passthrough — all four functions use `vfio-pci` and `/dev/vfio/18` exists after the explicitly approved reboot
 - [x] Prepare and verify `largegpu` RTX 3080 passthrough — both functions use `vfio-pci` and `/dev/vfio/21` exists; Windows VMs remained stopped during convergence
 - [ ] Deploy ingress controller + cert-manager for TLS termination
 - [x] **Configure the bulk NTFS export on smallgpu** — UUID-based `ntfs3` mount and `fsid=1` export observed active on 2026-07-22; Ansible now owns and safety-checks this state
 - [x] **Verify the critical NFS server on Proxmox** — daemon active/enabled, ext4 backing mount present, export restricted to `192.168.1.0/24`, and TCP 2049 listening on 2026-07-22
-- [ ] **Verify the critical NFS export from Talos** — a worker must successfully mount `192.168.1.105:/mnt/storage2-bulk` before critical workloads are deployed
-- [ ] **Verify the bulk NFS export from Talos** — a worker must successfully mount `192.168.1.106:/mnt/data10tb` before bulk workloads are deployed
+- [x] **Verify the critical NFS export from Talos** — read-only mount of `192.168.1.105:/mnt/storage2-bulk` succeeded from a worker on 2026-07-24
+- [x] **Verify the bulk NFS export from Talos** — read-only mount of `192.168.1.106:/mnt/data10tb` succeeded from a worker on 2026-07-24
 - [ ] Deploy media stack PVC(s) bound to `storage1-bulk-pv` (bulk tier)
 - [ ] Deploy Immich + any other personal/critical workloads with PVCs bound to `storage2-bulk-pv` (critical tier) — **never** point critical apps at `storage1-bulk-pv`, smallgpu is borrowed
 - [x] Retain Windows template 101 and manage VM 502 as a linked clone in the independent `windows-workstation` state
@@ -644,7 +691,8 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 
 - **One module call per node role** (control-plane, worker, GPU, Windows) using `for_each` over map variables. Add a node by adding a map entry — no new module blocks needed.
 - **Talos config patches are layered**, not monolithic. Base network config is generated inline; GPU-specific config lives in a separate YAML file for readability.
-- **ArgoCD bootstrap is intentionally minimal.** Terraform installs ArgoCD once with a `LoadBalancer` service and `server.insecure = true` (expects TLS termination at an ingress). `wait = false` because no LB controller exists at bootstrap. All further ArgoCD configuration goes through GitOps.
+- **Cilium is bootstrap infrastructure, not a GitOps application.** Terraform installs it after Talos bootstrap and before cluster health because ArgoCD cannot start without pod networking. Cilium replaces kube-proxy and provides LB IPAM plus L2 announcements; MetalLB must not be installed.
+- **ArgoCD bootstrap is intentionally minimal.** Terraform installs ArgoCD once with a Cilium-backed `LoadBalancer` service and `server.insecure = true` (expects TLS termination at an ingress). Helm waits for readiness because the LB controller and address pool already exist. All further ArgoCD configuration goes through GitOps.
 - **State contains secrets.** `talos_machine_secrets` stores cluster PKI in Terraform state — that's why the S3 bucket has SSE enabled and the role policy is tightly scoped.
 - **VM IDs are explicit.** 200s = control-plane, 300s = workers, 400s = GPU, 500s = Windows, 9000s = templates. Keeps the Proxmox UI organized and avoids collisions.
 - **IP addresses use CIDR notation** (`192.168.1.232/24`) in variables. Modules use `split("/", ip)[0]` to extract the bare IP and parse the prefix for routing.

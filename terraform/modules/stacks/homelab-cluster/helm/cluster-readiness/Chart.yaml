@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cluster-readiness
+description: Bootstrap barrier for Cilium-backed Talos cluster readiness
+type: application
+version: 0.1.0
+appVersion: "1"

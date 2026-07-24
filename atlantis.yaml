@@ -65,7 +65,7 @@ workflows:
         - env:
             name: TG_NON_INTERACTIVE
             value: "true"
-        - run: '"$DIR/../../../deploy.sh" prod "$(basename "$DIR")" plan -input=false -no-color -out="$PLANFILE"'
+        - run: '"$DIR/../../../run-terragrunt.sh" prod "$(basename "$DIR")" plan -input=false -no-color -out="$PLANFILE"'
     apply:
       steps:
         - env:
@@ -77,4 +77,4 @@ workflows:
         - env:
             name: TG_NON_INTERACTIVE
             value: "true"
-        - run: '"$DIR/../../../deploy.sh" prod "$(basename "$DIR")" apply -no-color "$PLANFILE"'
+        - run: '"$DIR/../../../run-terragrunt.sh" prod "$(basename "$DIR")" apply -no-color "$PLANFILE"'
