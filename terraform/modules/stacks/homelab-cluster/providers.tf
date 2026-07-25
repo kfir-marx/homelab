@@ -14,6 +14,14 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.17"
     }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.5"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.38"
+    }
   }
 }
 
@@ -57,4 +65,13 @@ provider "helm" {
     client_key             = base64decode(module.talos_cluster.kubeconfig_client_key)
     cluster_ca_certificate = base64decode(module.talos_cluster.kubeconfig_ca_certificate)
   }
+}
+
+# Kubernetes provider — installs bootstrap API extensions that Cilium must see
+# before its controller starts. Application resources remain managed by ArgoCD.
+provider "kubernetes" {
+  host                   = module.talos_cluster.kubeconfig_host
+  client_certificate     = base64decode(module.talos_cluster.kubeconfig_client_certificate)
+  client_key             = base64decode(module.talos_cluster.kubeconfig_client_key)
+  cluster_ca_certificate = base64decode(module.talos_cluster.kubeconfig_ca_certificate)
 }

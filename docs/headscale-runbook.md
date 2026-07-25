@@ -142,6 +142,18 @@ tailscale up \
 
 `--accept-routes` is the critical flag — without it the client connects but ignores the 192.168.1.0/24 advertisement from the router.
 
+Also allow the client to use the DNS configuration distributed by Headscale.
+On CLI clients this is normally enabled explicitly:
+
+```bash
+sudo tailscale set --accept-dns=true
+```
+
+Headscale's `dns.extra_records` publishes
+`argocd.homelab.ts.net → 192.168.1.220`. No record needs to be added to the
+laptop's local hosts file or public Cloudflare zone. Headscale reads static
+extra records at startup, so restart its StatefulSet after changing them.
+
 ### Linux
 
 ```bash
@@ -180,6 +192,9 @@ ping 192.168.1.105
 
 # Open the Proxmox UI:
 open https://192.168.1.105:8006
+
+# Open ArgoCD through its private Cilium Gateway API entry point:
+open http://argocd.homelab.ts.net
 ```
 
 Cert warning is expected (Proxmox's self-signed cert). Same one you see on the LAN today.
@@ -192,6 +207,7 @@ Cert warning is expected (Proxmox's self-signed cert). Same one you see on the L
 |---|---|---|
 | `tailscale up` hangs at "waiting for login" | Wrong `server_url` in headscale config — must exactly match what the client uses | `kubectl -n headscale logs <pod>` — look for `Mismatched server_url` |
 | Client connects but can't ping 192.168.1.105 | Routes not approved, or `--accept-routes` missing on client | `headscale routes list` + `tailscale status` |
+| ArgoCD VIP works but `argocd.homelab.ts.net` does not resolve | Client rejected Headscale DNS, or Headscale was not restarted after the record changed | `tailscale set --accept-dns=true`, then restart `sts/headscale` |
 | cloudflared healthy in dashboard but `https://admin.547600.xyz/health` returns 502 | Public Hostname target wrong | Cloudflare dashboard → tunnel → Public Hostname → service should be `http://headscale.headscale.svc.cluster.local:8080` |
 | Headscale pod CrashLoopBackOff on first start | `/mnt/storage2-bulk/headscale` doesn't exist or is owned by root | SSH gpunvdgtx1060, `ls -ln /mnt/storage2-bulk/headscale` — must be 1000:1000 |
 | Router pod logs `Tailscale Funnel ... is not available with your current plan` | Harmless — Funnel is a Tailscale-SaaS-only feature, Headscale ignores it |  |
@@ -204,4 +220,6 @@ Cert warning is expected (Proxmox's self-signed cert). Same one you see on the L
 - **Another device:** `headscale preauthkeys create --user kfir` → use on the new device.
 - **Onboard a friend:** `headscale users create alice`, then a preauth key for her. Edit `acl.hujson` in `kubernetes/system/headscale/configmap.yaml` to grant her access to specific tags.
 - **Advertise a second subnet** (e.g. if you build a 10.x lab network): edit the `--advertise-routes` arg in `kubernetes/system/tailscale-router/deployment.yaml`, plus the `autoApprovers` block in the ACL.
-- **MagicDNS:** any registered device is reachable at `<hostname>.homelab.ts.net` from any other device on the mesh.
+- **MagicDNS:** any registered device is reachable at `<hostname>.homelab.ts.net`
+  from any other device on the mesh. Static private service names belong in
+  `dns.extra_records` in `kubernetes/system/headscale/configmap.yaml`.

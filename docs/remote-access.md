@@ -151,7 +151,7 @@ Internal services: ArgoCD, Proxmox, Sonarr, Radarr, Grafana, kubectl API
 
 | Service | Internal address | Purpose |
 |---------|-----------------|---------|
-| ArgoCD | `argocd.argocd.svc` | GitOps dashboard |
+| ArgoCD | `http://argocd.homelab.ts.net` (`192.168.1.220`) | GitOps dashboard through Cilium Gateway API |
 | Proxmox | `192.168.1.105:8006` (or the other host IPs) | Hypervisor management |
 | Sonarr | `sonarr.media.svc` | TV show management |
 | Radarr | `radarr.media.svc` | Movie management |
@@ -166,6 +166,8 @@ Internal services: ArgoCD, Proxmox, Sonarr, Radarr, Grafana, kubectl API
 - **Self-hosted control plane** — no third party sees your peer list or network topology.
 - **ACLs** — define which devices can reach which services.
 - **MagicDNS** — human-friendly names for internal services.
+- **Private service DNS** — Headscale distributes static MagicDNS records such
+  as `argocd.homelab.ts.net`; they are not published in Cloudflare DNS.
 - **Only you** — no need to onboard friends/family to the VPN.
 
 ### IaC Management

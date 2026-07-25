@@ -1,7 +1,7 @@
-# Userspace networking mode — TS_USERSPACE=true. This avoids needing
-# /dev/net/tun (Talos doesn't expose it to pods by default) and keeps
-# the container runAsNonRoot-friendly. Throughput is lower than kernel
-# mode, but plenty for admin traffic (kubectl, Proxmox UI, SSH).
+# Kernel networking mode gives the subnet router a real tailscale0 interface
+# and avoids the userspace netstack's L4 proxying overhead. Talos 1.13's
+# container runtime exposes a mounted /dev/net/tun without the legacy generic
+# device plugin. NET_ADMIN is scoped to this container's network namespace.
 #
 # Single replica only — two routers advertising the same /24 would
 # fight over route announcements in Headscale.
@@ -37,9 +37,11 @@ spec:
             - name: TS_KUBE_SECRET
               value: tailscale-router-state
             - name: TS_USERSPACE
-              value: "true"
+              value: "false"
             - name: TS_AUTH_ONCE
               value: "true"
+            - name: TS_ROUTES
+              value: 192.168.1.0/24
             # Auth key produced by `headscale preauthkeys create
             # --user kfir --tags tag:router --reusable`. See runbook.
             - name: TS_AUTHKEY
@@ -50,14 +52,20 @@ spec:
             - name: TS_EXTRA_ARGS
               value: >-
                 --login-server=https://admin.547600.xyz
-                --advertise-routes=192.168.1.0/24
                 --advertise-tags=tag:router
                 --hostname=k8s-router
                 --accept-dns=false
           securityContext:
+            allowPrivilegeEscalation: false
             capabilities:
+              drop:
+                - ALL
               add:
                 - NET_ADMIN
+                - NET_RAW
+          volumeMounts:
+            - name: tun
+              mountPath: /dev/net/tun
           resources:
             requests:
               cpu: 50m
@@ -65,3 +73,8 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+      volumes:
+        - name: tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice

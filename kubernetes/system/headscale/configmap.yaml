@@ -62,6 +62,13 @@ data:
           - 1.1.1.1
           - 8.8.8.8
       search_domains: []
+      # Private service records are distributed only to enrolled clients that
+      # accept Headscale DNS. The target is a Cilium L2 LoadBalancer VIP reached
+      # remotely through the router's 192.168.1.0/24 subnet advertisement.
+      extra_records:
+        - name: argocd.homelab.ts.net
+          type: A
+          value: 192.168.1.220
 
     # Persistent key material. Generated on first start; do NOT delete
     # without re-registering every client.

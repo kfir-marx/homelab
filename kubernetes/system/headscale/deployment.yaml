@@ -21,7 +21,7 @@ spec:
       annotations:
         # Force pod restart on config change. Without this, a configmap
         # edit only takes effect when the pod happens to restart.
-        checksum/config: placeholder
+        checksum/config: "2026-07-24-private-dns"
     spec:
       securityContext:
         fsGroup: 1000

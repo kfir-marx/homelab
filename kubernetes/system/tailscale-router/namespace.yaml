@@ -3,6 +3,10 @@ kind: Namespace
 metadata:
   name: tailscale-router
   labels:
-    # Userspace mode + NET_ADMIN is needed for tailscaled routing.
-    # 'baseline' permits these; 'restricted' would block them.
-    pod-security.kubernetes.io/enforce: baseline
+    # Kernel-mode tailscaled needs NET_ADMIN, NET_RAW, and /dev/net/tun. The
+    # container is not fully privileged, but Pod Security's baseline profile
+    # does not permit these capabilities, so this namespace must opt into the
+    # privileged policy level.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

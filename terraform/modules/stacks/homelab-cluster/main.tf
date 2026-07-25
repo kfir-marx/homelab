@@ -46,6 +46,23 @@ locals {
     [for n in var.worker_nodes : split("/", n.ip_address)[0]],
     [for n in var.gpu_nodes : split("/", n.ip_address)[0]],
   )
+  gateway_api_crds = {
+    gatewayclasses = {
+      sha256 = "7d958ad3965ea4a4996616846d9ecaf1fededbf9351b9752b8b85973936ae8c8"
+    }
+    gateways = {
+      sha256 = "a02ea425fc901f197b668c9ddd56375e1f6896994914c6e6b9b4fdb85cf3ba6e"
+    }
+    httproutes = {
+      sha256 = "98c6777c22309d319292e9c288ee632006c9ffdd4272383d6f9dffa3fbccaf14"
+    }
+    referencegrants = {
+      sha256 = "d74fc2f8e90094f4c4d6dc13a2d720011a40e30e5640b3e2a2051fac820f6584"
+    }
+    grpcroutes = {
+      sha256 = "b72068b42cb32051ca609e5a8dfefb16904d164abe2e71d9f3c776fae41c4dab"
+    }
+  }
 }
 
 resource "talos_image_factory_schematic" "this" {
@@ -197,6 +214,40 @@ resource "terraform_data" "kubernetes_api_ready" {
   depends_on = [module.talos_cluster]
 }
 
+# Cilium 1.19 requires the Gateway API v1.4.1 standard CRDs to exist before its
+# Gateway controller starts. Pin both the release and response hashes so a
+# changed upstream asset cannot silently enter the bootstrap path.
+data "http" "gateway_api_crd" {
+  for_each = local.gateway_api_crds
+
+  url = "https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.4.1/config/crd/standard/gateway.networking.k8s.io_${each.key}.yaml"
+
+  lifecycle {
+    postcondition {
+      condition     = sha256(self.response_body) == each.value.sha256
+      error_message = "Gateway API v1.4.1 ${each.key} CRD did not match its pinned SHA-256."
+    }
+  }
+}
+
+resource "kubernetes_manifest" "gateway_api_crd" {
+  for_each = data.http.gateway_api_crd
+
+  # Release assets may include a server-populated top-level status block.
+  # Kubernetes providers correctly reject callers trying to own that field.
+  manifest = {
+    for key, value in yamldecode(each.value.response_body) :
+    key => value if key != "status"
+  }
+
+  field_manager {
+    force_conflicts = true
+    name            = "terraform"
+  }
+
+  depends_on = [terraform_data.kubernetes_api_ready]
+}
+
 resource "helm_release" "cilium" {
   name       = "cilium"
   namespace  = "kube-system"
@@ -250,6 +301,9 @@ resource "helm_release" "cilium" {
       l2announcements = {
         enabled = true
       }
+      gatewayAPI = {
+        enabled = true
+      }
       k8sClientRateLimit = {
         qps   = 10
         burst = 20
@@ -261,7 +315,10 @@ resource "helm_release" "cilium" {
     })
   ]
 
-  depends_on = [terraform_data.kubernetes_api_ready]
+  depends_on = [
+    terraform_data.kubernetes_api_ready,
+    kubernetes_manifest.gateway_api_crd,
+  ]
 }
 
 resource "helm_release" "cilium_l2_config" {
@@ -395,10 +452,9 @@ resource "helm_release" "argocd" {
       }
       server = {
         service = {
-          type = "LoadBalancer"
-          annotations = {
-            "lbipam.cilium.io/ips" = var.cilium_load_balancer_ip_start
-          }
+          # External HTTP access is owned by the Cilium Gateway API resource.
+          # Keeping this ClusterIP avoids a second, route-bypassing LAN VIP.
+          type = "ClusterIP"
         }
       }
     })

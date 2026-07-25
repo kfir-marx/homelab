@@ -398,7 +398,9 @@ Physical host networking is intentionally absent from the Terraform DAG. Product
 
 **Step 7:** A repo-local readiness Job waits for every Kubernetes node, the Cilium DaemonSet and operator, and CoreDNS to become Ready, and verifies that the LB IPAM pool and L2 policy exist. This explicit Job is necessary because Talos intentionally skips NodeReady and CoreDNS assertions when its configured CNI name is `none`. Terraform then runs the remaining Talos cluster health checks.
 
-**Step 8:** The Helm provider installs ArgoCD with normal readiness waiting enabled. `argocd-server` requests the first address in the Cilium pool through the `lbipam.cilium.io/ips` annotation, so its `LoadBalancer` service does not remain pending.
+**Step 8:** The Helm provider installs ArgoCD with normal readiness waiting
+enabled. `argocd-server` remains a ClusterIP Service; an Argo-managed Cilium
+Gateway requests the first address in the LB IPAM pool and owns browser ingress.
 
 **Step 9:** A second Argo Helm release deploys the "root Application" using the `argocd-apps` chart, pointing at `kubernetes/apps/` in this repo with automated sync + prune + self-heal. From this point, ArgoCD owns application state; Terraform continues to own the bootstrap CNI and its address-advertisement policy.
 
@@ -607,10 +609,17 @@ follow Talos's newer 1.36 default.
 Production must define `cilium_load_balancer_ip_start` and
 `cilium_load_balancer_ip_stop` as a contiguous LAN range reserved outside DHCP.
 Terraform rejects a reversed or single-address range and any overlap with the
-API VIP or node IPs. The first address is reserved for `argocd-server`; remaining
-addresses are available to other `LoadBalancer` Services. The pool is advertised
-on `eth0` by Cilium L2 announcements. Do not deploy MetalLB alongside this
-configuration.
+API VIP or node IPs. The first address is reserved for the private Cilium
+Gateway API entry point; remaining addresses are available to other
+`LoadBalancer` Services. The pool is advertised on `eth0` by Cilium L2
+announcements. Do not deploy MetalLB alongside this configuration.
+
+Gateway API v1.4.1 CRDs are pinned and installed by Terraform before Cilium.
+Cilium's Gateway controller owns `192.168.1.220` and routes
+`http://argocd.homelab.ts.net` to the ClusterIP-only `argocd-server`. Headscale
+MagicDNS distributes that hostname to enrolled clients. The address is a LAN
+VIP reached remotely through the `192.168.1.0/24` subnet route; it is not a
+Tailscale CGNAT address and remains directly reachable from the trusted LAN.
 
 ---
 
