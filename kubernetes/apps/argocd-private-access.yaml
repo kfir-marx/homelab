@@ -1,5 +1,5 @@
 # Private browser entry point for ArgoCD. The Cilium Gateway receives a LAN VIP
-# and Headscale MagicDNS publishes argocd.homelab.ts.net only to VPN clients.
+# reached locally or through the official Tailscale subnet router.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

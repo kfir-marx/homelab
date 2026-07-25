@@ -615,11 +615,14 @@ Gateway API entry point; remaining addresses are available to other
 announcements. Do not deploy MetalLB alongside this configuration.
 
 Gateway API v1.4.1 CRDs are pinned and installed by Terraform before Cilium.
-Cilium's Gateway controller owns `192.168.1.220` and routes
-`http://argocd.homelab.ts.net` to the ClusterIP-only `argocd-server`. Headscale
-MagicDNS distributes that hostname to enrolled clients. The address is a LAN
-VIP reached remotely through the `192.168.1.0/24` subnet route; it is not a
-Tailscale CGNAT address and remains directly reachable from the trusted LAN.
+Cilium's Gateway controller owns `192.168.1.220` and routes private hostnames
+such as `http://argocd.home.547600.xyz` to ClusterIP-only backends. AdGuard Home
+uses Cilium LoadBalancer VIP `192.168.1.221` for TCP/UDP DNS and privately maps
+`*.home.547600.xyz` to the shared Gateway. Both addresses are reached remotely
+through the official Tailscale service and the cluster subnet router's
+`192.168.1.0/24` route; they are not Tailscale CGNAT addresses and remain
+directly reachable from the trusted LAN. Public services such as Jellyfin use a
+separate Cloudflare Tunnel path and do not traverse the tailnet.
 
 ---
 

@@ -3,8 +3,7 @@
 # container runtime exposes a mounted /dev/net/tun without the legacy generic
 # device plugin. NET_ADMIN is scoped to this container's network namespace.
 #
-# Single replica only — two routers advertising the same /24 would
-# fight over route announcements in Headscale.
+# Single replica only — this Deployment uses one persistent node identity.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,15 +34,15 @@ spec:
             # Store tailscaled state in this Secret instead of /var/lib.
             # tailscaled creates + manages the Secret itself.
             - name: TS_KUBE_SECRET
-              value: tailscale-router-state
+              value: tailscale-router-state-official
             - name: TS_USERSPACE
               value: "false"
             - name: TS_AUTH_ONCE
               value: "true"
             - name: TS_ROUTES
               value: 192.168.1.0/24
-            # Auth key produced by `headscale preauthkeys create
-            # --user kfir --tags tag:router --reusable`. See runbook.
+            # Tagged auth key created in the official Tailscale admin console.
+            # See docs/tailscale-runbook.md.
             - name: TS_AUTHKEY
               valueFrom:
                 secretKeyRef:
@@ -51,7 +50,6 @@ spec:
                   key: TS_AUTHKEY
             - name: TS_EXTRA_ARGS
               value: >-
-                --login-server=https://admin.547600.xyz
                 --advertise-tags=tag:router
                 --hostname=k8s-router
                 --accept-dns=false

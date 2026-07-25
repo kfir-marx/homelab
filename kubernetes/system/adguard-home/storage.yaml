@@ -1,0 +1,39 @@
+# AdGuard Home configuration, query statistics, and filter state are small but
+# operationally important, so they live on the critical NFS tier. Create the
+# export subdirectory before ArgoCD syncs this application; see the runbook.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: adguard-home-data-pv
+  labels:
+    app: adguard-home
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: adguard-home
+    name: adguard-home-data
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/adguard-home
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: adguard-home-data
+  namespace: adguard-home
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 2Gi
+  volumeName: adguard-home-data-pv

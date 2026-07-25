@@ -1,11 +1,11 @@
-# Headscale — self-hosted Tailscale coordination server.
-# Exposes admin.547600.xyz publicly via cloudflared tunnel (see cloudflared.yaml).
-# Once registered, clients reach in-cluster + LAN services through a
-# subnet router (see tailscale-router.yaml).
+# AdGuard Home provides private DNS for *.home.547600.xyz and optional
+# tailnet-wide ad/tracker blocking. DNS is reachable on the LAN through the
+# dedicated Cilium LoadBalancer VIP; the admin UI uses the shared private
+# Gateway and is not exposed by the DNS LoadBalancer.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: headscale
+  name: adguard-home
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -14,10 +14,10 @@ spec:
   source:
     repoURL: https://github.com/kfir-marx/homelab.git
     targetRevision: main
-    path: kubernetes/system/headscale
+    path: kubernetes/system/adguard-home
   destination:
     server: https://kubernetes.default.svc
-    namespace: headscale
+    namespace: adguard-home
   syncPolicy:
     automated:
       prune: true

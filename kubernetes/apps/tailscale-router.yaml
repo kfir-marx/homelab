@@ -1,7 +1,6 @@
 # Tailscale subnet router — bridges the WireGuard mesh to 192.168.1.0/24.
-# Without this, a remote Tailscale client reaches Headscale-registered
-# peers only; advertising the LAN as a route is what lets you hit
-# Proxmox (192.168.1.105) and other LAN hosts from outside.
+# Advertising the LAN route lets official Tailscale clients reach Proxmox
+# (192.168.1.105), Cilium LoadBalancer VIPs, and other LAN hosts remotely.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -25,9 +24,9 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-  # The auth-key Secret is created out-of-band after Headscale generates
-  # a preauthkey for tag:router — don't let ArgoCD prune it. Tailscale
-  # itself also writes node state into a self-managed Secret.
+  # The auth-key Secret is created out-of-band from an official Tailscale
+  # auth key — don't let ArgoCD prune it. tailscaled also writes node state
+  # into a self-managed Secret.
   ignoreDifferences:
     - group: ""
       kind: Secret
@@ -36,6 +35,6 @@ spec:
         - /data
     - group: ""
       kind: Secret
-      name: tailscale-router-state
+      name: tailscale-router-state-official
       jsonPointers:
         - /data

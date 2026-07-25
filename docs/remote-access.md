@@ -1,212 +1,127 @@
-# Remote Access Strategy
+# Remote access strategy
 
-Secure external access to the homelab using two complementary solutions: **Cloudflare Tunnel** for public-facing services and **Headscale** for private admin access.
+The homelab uses two independent hosted services:
 
----
+- **Cloudflare Tunnel** exposes intentionally public applications such as
+  Jellyfin.
+- **Official Tailscale** provides private administrative access through a
+  kernel-mode subnet router in Kubernetes.
 
-## Design Principles
+Using Tailscale's hosted control plane removes a public coordination-server
+dependency from the homelab and provides managed coordination and DERP relay
+infrastructure.
 
-- **Zero inbound ports** — no port forwarding, no exposed home IP, no static IP required.
-- **No client install for streaming users** — friends and family just open a URL.
-- **Full mesh VPN for admin** — encrypted WireGuard tunnel for cluster management.
-- **Everything managed as code** — Ansible, Terraform, Helm, ArgoCD.
-- **Free tier only** — $0 budget, up to 30 endpoints.
+## Architecture
 
----
+```text
+Family and friends
+        |
+        | HTTPS: jellyfin.547600.xyz
+        v
+Cloudflare edge --- outbound Cloudflare Tunnel ---> Jellyfin service
 
-## Architecture Overview
-
-```
-                        ┌─────────────────────────────────────┐
-                        │           Cloudflare Edge            │
-                        │                                     │
-  Family / Friends ────►│  jellyfin.547600.xyz  (public)  │◄──── cloudflared pod
-  (browser, apps, TV)   │  DDoS protection + TLS termination  │      (outbound tunnel)
-                        └─────────────────────────────────────┘          │
-                                                                         │
-                        ┌─────────────────────────────────────┐          │
-                        │           Headscale Server           │          │
-                        │       (pod in k8s cluster)           │          │
-  Admin (you) ─────────►│  WireGuard mesh VPN                 │          │
-  (tailscale client)    │  ACLs, MagicDNS                     │          │
-                        └─────────────────────────────────────┘          │
-                                         │                               │
-                                         ▼                               ▼
-                        ┌─────────────────────────────────────────────────┐
-                        │              Kubernetes Cluster                  │
-                        │                                                 │
-                        │  ┌───────────┐ ┌────────┐ ┌────────┐          │
-                        │  │ Jellyfin  │ │ Sonarr │ │ Radarr │  ...     │
-                        │  │ (public)  │ │ (VPN)  │ │ (VPN)  │          │
-                        │  └───────────┘ └────────┘ └────────┘          │
-                        │  ┌───────────┐ ┌──────────┐ ┌───────────┐    │
-                        │  │ ArgoCD    │ │ Grafana  │ │ Prowlarr  │    │
-                        │  │ (VPN)     │ │ (VPN)    │ │ (VPN)     │    │
-                        │  └───────────┘ └──────────┘ └───────────┘    │
-                        └─────────────────────────────────────────────────┘
+Administrator devices
+        |
+        | Official Tailscale control plane coordinates WireGuard peers
+        v
+Tailscale tailnet ---> k8s-router advertises 192.168.1.0/24
+                                |
+                                +--> ArgoCD Gateway: 192.168.1.220
+                                +--> AdGuard DNS: 192.168.1.221
+                                +--> Kubernetes API: 192.168.1.210:6443
+                                +--> Proxmox and other LAN services
 ```
 
----
+The two paths do not depend on one another. A Cloudflare Tunnel outage does not
+change private administration, and the public Jellyfin path does not traverse
+the tailnet.
 
-## Cloudflare Tunnel — Public Services
+## Cloudflare Tunnel: public services
 
-### Purpose
+The in-cluster `cloudflared` deployment maintains outbound connections to
+Cloudflare. No inbound port forwarding or public home IP is required.
 
-Expose HTTPS services (primarily Jellyfin) to friends and family on any device, from anywhere in the world, without a VPN client.
+| Service | Public hostname | Internal target | Authentication |
+|---------|-----------------|-----------------|----------------|
+| Jellyfin | `jellyfin.547600.xyz` | `jellyfin.media.svc:8096` | Jellyfin account |
 
-### How It Works
+Add only applications intended for external users to the tunnel. Do not put
+ArgoCD, Proxmox, the Kubernetes API, or other administrative endpoints on it.
+Cloudflare Access is not placed in front of Jellyfin because browser redirects
+are incompatible with many native TV and mobile clients.
 
-1. A `cloudflared` pod in the cluster maintains a persistent **outbound** connection to Cloudflare's edge.
-2. Cloudflare DNS points `jellyfin.547600.xyz` to Cloudflare's edge (home IP stays hidden).
-3. Incoming requests from users hit Cloudflare's edge, flow through the tunnel, and reach the target service inside the cluster.
-4. No static IP, no public IP, no port forwarding required. Works behind CGNAT.
+## Official Tailscale: private administration
 
-### Traffic Flow
+The `tailscale-router` Deployment joins the official tailnet as
+`k8s-router` with `tag:router`. It advertises `192.168.1.0/24`, covering the
+LAN and the Cilium LoadBalancer pool. The router runs in kernel mode with a real
+`tailscale0` interface; encrypted traffic is normally peer-to-peer and falls
+back to Tailscale's managed DERP relays when direct connectivity is unavailable.
 
-```
-User's device (anywhere)
-    │
-    │  HTTPS request to jellyfin.547600.xyz
-    ▼
-Cloudflare Edge (104.x.x.x)
-    │  DNS resolves to Cloudflare, NOT your home IP
-    │
-    │  Routes through existing tunnel
-    ▼
-cloudflared pod (in-cluster)
-    │
-    │  Forwards to internal service
-    ▼
-jellyfin.media.svc:8096
-    │
-    │  Jellyfin handles auth (username/password)
-    ▼
-Stream video back through the same path
-```
+| Service | Private address | Access path |
+|---------|-----------------|-------------|
+| ArgoCD | `http://argocd.home.547600.xyz` / `192.168.1.220:80` | Cilium Gateway API |
+| AdGuard Home UI | `http://adguard.home.547600.xyz` / `192.168.1.220:80` | Cilium Gateway API |
+| AdGuard Home DNS | `192.168.1.221:53` TCP/UDP | Cilium LoadBalancer |
+| Kubernetes API | `192.168.1.210:6443` | API VIP |
+| Proxmox | `https://192.168.1.105:8006` and other host IPs | LAN subnet route |
+| Other LAN services | `192.168.1.0/24` | LAN subnet route |
 
-### Services Exposed via Cloudflare Tunnel
+AdGuard Home privately resolves `*.home.547600.xyz` to `192.168.1.220`.
+Cilium Gateway API then routes each exact hostname to its backend service.
+DNS does not grant access: the private address is reachable only from the LAN
+or through the Tailscale route. Tailnet grants determine which enrolled users
+and devices may use that route.
 
-| Service | Public hostname | Internal target | Auth |
-|---------|----------------|-----------------|------|
-| Jellyfin | `jellyfin.547600.xyz` | `jellyfin.media.svc:8096` | Jellyfin built-in (username/password) |
+Tailscale's control plane sees tailnet device and coordination metadata, but
+application traffic remains WireGuard encrypted between peers.
 
-Add more services by adding ingress rules to the `cloudflared` config. Only expose services that are intended for external users.
+## Security boundaries
 
-### Security Model
+- Cloudflare Tunnel is limited to explicitly public services.
+- Tailscale device enrollment, tags, route approval, and grants are managed in
+  the official admin console.
+- `tag:router` owns the subnet-router identity; it should receive only the
+  access needed to route the LAN.
+- Route approval and access grants are separate controls. Approving
+  `192.168.1.0/24` does not by itself authorize every tailnet identity.
+- The router namespace uses privileged Pod Security because kernel Tailscale
+  needs `NET_ADMIN`, `NET_RAW`, and `/dev/net/tun`.
+- Kubernetes NetworkPolicies remain useful for pod traffic, but Tailscale
+  grants are the primary policy boundary for clients entering through the
+  subnet router.
+- Auth keys and Cloudflare credentials are created out-of-band and never
+  committed to Git.
 
-- **No open inbound ports** — `cloudflared` only makes outbound connections.
-- **Home IP hidden** — DNS points to Cloudflare, not your residential IP.
-- **DDoS protection** — Cloudflare absorbs volumetric attacks at the edge.
-- **TLS termination** — Cloudflare handles HTTPS certificates automatically.
-- **Jellyfin authentication** — built-in username/password login. No Cloudflare Access in front (incompatible with native TV/mobile apps).
-- **WAF rules** (optional) — rate-limit login attempts on the free tier.
+## Private DNS and ad blocking
 
-### Why Not Cloudflare Access?
+Tailscale MagicDNS automatically names tailnet devices but cannot host
+arbitrary application records. AdGuard Home is the restricted resolver for
+`home.547600.xyz` and provides the wildcard mapping:
 
-Cloudflare Access uses a browser-based redirect flow for authentication. Native apps (Android TV, iOS, Fire Stick, Roku) cannot handle this redirect — they make API calls and expect JSON responses, not HTML login pages. Jellyfin's built-in auth works on every client.
-
-### IaC Management
-
-- **Terraform**: Cloudflare provider (`cloudflare/cloudflare`) manages tunnels, DNS records, and WAF rules.
-- **ArgoCD**: `cloudflared` deployment manifest in `kubernetes/apps/` or `kubernetes/system/`.
-
-### Requirements
-
-- A domain name (managed through Cloudflare DNS).
-- A Cloudflare account (free tier).
-- `cloudflared` container image deployed in the cluster.
-
----
-
-## Headscale — Private Admin Access
-
-### Purpose
-
-Secure WireGuard mesh VPN for administrative access to cluster services (ArgoCD, Proxmox, Sonarr, Radarr, Grafana, etc.) when away from the home network.
-
-### How It Works
-
-1. Headscale runs as a pod in the cluster — it is the self-hosted replacement for Tailscale's coordination server.
-2. Your devices (laptop, phone) run the standard Tailscale client, pointed at your Headscale instance.
-3. Headscale coordinates key exchange and NAT traversal. WireGuard handles the actual encrypted tunnel.
-4. Once connected, your device can reach all cluster services on their internal IPs/DNS names.
-
-### Traffic Flow
-
-```
-Your laptop (coffee shop, hotel, abroad)
-    │
-    │  Tailscale client → connects to Headscale coordination server
-    │  WireGuard tunnel established (peer-to-peer or via DERP relay)
-    ▼
-Headscale pod (in-cluster)
-    │
-    │  Coordinates peers, distributes keys
-    │  Actual traffic flows direct (WireGuard P2P) when possible
-    ▼
-Internal services: ArgoCD, Proxmox, Sonarr, Radarr, Grafana, kubectl API
+```text
+*.home.547600.xyz -> 192.168.1.220
 ```
 
-### Services Accessible via Headscale
+The resolver itself is reached at `192.168.1.221` through the approved subnet
+route. After private-zone resolution is stable, it can also become Tailscale's
+global nameserver to provide DNS-level ad and tracker blocking. This is staged
+because a single in-cluster global resolver makes cluster availability a
+dependency of public DNS resolution.
 
-| Service | Internal address | Purpose |
-|---------|-----------------|---------|
-| ArgoCD | `http://argocd.homelab.ts.net` (`192.168.1.220`) | GitOps dashboard through Cilium Gateway API |
-| Proxmox | `192.168.1.105:8006` (or the other host IPs) | Hypervisor management |
-| Sonarr | `sonarr.media.svc` | TV show management |
-| Radarr | `radarr.media.svc` | Movie management |
-| Prowlarr | `prowlarr.media.svc` | Indexer management |
-| Bazarr | `bazarr.media.svc` | Subtitle management |
-| Grafana | `grafana.monitoring.svc` | Observability |
-| K8s API | `192.168.1.210:6443` | kubectl access |
+## Operations
 
-### Security Model
+See [Tailscale subnet-router runbook](tailscale-runbook.md) for tailnet policy,
+auth Secret creation, route approval, client enrollment, and troubleshooting.
+See [AdGuard Home runbook](adguard-home-runbook.md) for storage preparation,
+initial setup, split DNS, ad blocking, and resilience.
 
-- **WireGuard encryption** — state-of-the-art cryptography (Noise protocol, ChaCha20, Poly1305).
-- **Self-hosted control plane** — no third party sees your peer list or network topology.
-- **ACLs** — define which devices can reach which services.
-- **MagicDNS** — human-friendly names for internal services.
-- **Private service DNS** — Headscale distributes static MagicDNS records such
-  as `argocd.homelab.ts.net`; they are not published in Cloudflare DNS.
-- **Only you** — no need to onboard friends/family to the VPN.
+ArgoCD manages:
 
-### IaC Management
+- `kubernetes/apps/cloudflared.yaml`
+- `kubernetes/apps/tailscale-router.yaml`
+- `kubernetes/apps/argocd-private-access.yaml`
+- `kubernetes/apps/adguard-home.yaml`
 
-- **Helm/ArgoCD**: Headscale deployed as a Kubernetes workload via ArgoCD.
-- **Configuration**: Headscale config managed as a ConfigMap or values file in Git.
-- **Ansible** (optional): For bootstrapping Tailscale clients on your personal devices.
-
-### Requirements
-
-- Headscale server deployed in the cluster.
-- Tailscale client on your personal devices (laptop, phone).
-- DERP relay for NAT traversal when P2P isn't possible (can self-host or use Tailscale's public DERP servers).
-
----
-
-## Decision Matrix
-
-| Concern | Cloudflare Tunnel | Headscale |
-|---------|------------------|-----------|
-| **Use case** | Public-facing services | Private admin access |
-| **Users** | Friends, family, you | You only |
-| **Client required** | No (just a browser or Jellyfin app) | Yes (Tailscale client) |
-| **Protocol** | HTTPS only (free tier) | Any TCP/UDP (full VPN) |
-| **Control plane** | Cloudflare (third party) | Self-hosted (you own it) |
-| **Home IP exposed** | No | No |
-| **Static IP required** | No | No |
-| **Port forwarding required** | No | No |
-| **Cost** | Free (50 users) | Free (unlimited) |
-| **Terraform provider** | Yes (official) | No (API + Helm) |
-| **Talos/K8s deployment** | Pod (`cloudflared`) | Pod (Headscale server) |
-
----
-
-## Domain Requirements
-
-Cloudflare Tunnel requires a domain managed through Cloudflare DNS. Options:
-
-- Register a cheap domain (e.g. `.uk` ~$1/yr) and transfer DNS to Cloudflare.
-- Cloudflare Registrar offers at-cost domain pricing (no markup).
-
-The domain is used only for Cloudflare Tunnel services. Headscale uses MagicDNS internally and does not need a public domain.
+The official Tailscale and Cloudflare dashboards manage their respective
+hosted control-plane configuration.

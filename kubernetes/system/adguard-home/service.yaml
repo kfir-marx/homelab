@@ -1,0 +1,42 @@
+# Only DNS is exposed directly on the LAN. Cilium LB IPAM assigns and announces
+# the requested address from the production 192.168.1.220-229 pool.
+apiVersion: v1
+kind: Service
+metadata:
+  name: adguard-home-dns
+  namespace: adguard-home
+  annotations:
+    lbipam.cilium.io/ips: 192.168.1.221
+spec:
+  type: LoadBalancer
+  # Cilium L2 Announcements requires Cluster; Local can announce the VIP from
+  # a node that does not currently host the single AdGuard endpoint.
+  externalTrafficPolicy: Cluster
+  selector:
+    app: adguard-home
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: dns-udp
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: dns-tcp
+      protocol: TCP
+---
+# The setup and administration interface stays inside the cluster. The private
+# Cilium Gateway is its only browser entry point.
+apiVersion: v1
+kind: Service
+metadata:
+  name: adguard-home-web
+  namespace: adguard-home
+spec:
+  type: ClusterIP
+  selector:
+    app: adguard-home
+  ports:
+    - name: http
+      port: 3000
+      targetPort: web
+      protocol: TCP

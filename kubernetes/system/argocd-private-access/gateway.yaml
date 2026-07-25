@@ -9,13 +9,26 @@ spec:
     - type: IPAddress
       value: 192.168.1.220
   listeners:
-    - name: http
+    # Keep ArgoCD's route limited to its own namespace.
+    - name: argocd-http
       protocol: HTTP
       port: 80
-      hostname: argocd.homelab.ts.net
+      hostname: argocd.home.547600.xyz
       allowedRoutes:
         namespaces:
           from: Same
+    # Application namespaces opt in with the
+    # homelab.kfir.dev/private-gateway-access label.
+    - name: private-http
+      protocol: HTTP
+      port: 80
+      hostname: "*.home.547600.xyz"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              homelab.kfir.dev/private-gateway-access: "true"
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -25,9 +38,9 @@ metadata:
 spec:
   parentRefs:
     - name: private
-      sectionName: http
+      sectionName: argocd-http
   hostnames:
-    - argocd.homelab.ts.net
+    - argocd.home.547600.xyz
   rules:
     - backendRefs:
         - name: argocd-server
