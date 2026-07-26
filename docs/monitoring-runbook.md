@@ -41,6 +41,7 @@ ssh root@192.168.1.106
 mkdir -p /mnt/data10tb/monitoring/prometheus
 mkdir -p /mnt/data10tb/monitoring/alertmanager
 mkdir -p /mnt/data10tb/monitoring/grafana
+chown 472:472 /mnt/data10tb/monitoring/grafana
 
 exportfs -rav
 exit
