@@ -246,9 +246,10 @@ data "talos_machine_configuration" "gpu_worker" {
           "homelab.dev/role"       = "gpu-worker"
           "homelab.dev/gpu-node"   = each.key
         }
-        nodeTaints = each.value.dedicated ? {
-          "nvidia.com/gpu" = "true:NoSchedule"
-        } : {}
+        # no need for a taint right now as all the nodes are with GPU, but if you want to dedicate a node for GPU workloads only, you can uncomment the following lines and set dedicated = true in the gpu_worker_nodes variable
+        # nodeTaints = each.value.dedicated ? {
+        #   "nvidia.com/gpu" = "true:NoSchedule"
+        # } : {}
       }
     }),
   ]
