@@ -49,20 +49,20 @@ control_plane_nodes:
 # hosts and does not require a colocated general Kubernetes worker.
 worker_nodes: {}
 
-# ── GPU nodes (PCIe passthrough; dedicated nodes are tainted NoSchedule) ─────
+# ── GPU nodes (PCIe passthrough; ) ─────
 # The GTX 1060 on gpunvdgtx1060 is reserved for workstation VM 100 and is not
-# part of Kubernetes. That host also retains headroom for its critical NFS role.
+# part of Kubernetes. 
 gpu_nodes:
   # largegpu: Ryzen 7 5800X (8c/16t), 62.7 GiB RAM, RTX 3080 at 08:00.
-  # The Talos GPU VM is reduced to 8c/32GiB: ample initial GPU capacity without
-  # reserving the whole host. It remains mutually exclusive with the 60 GiB
+  # The Talos GPU VM is 16c/56GiB 
+  # It remains mutually exclusive with the 60 GiB
   # Windows VM because both pass through the RTX 3080. Stop 402 before 502.
   gpu-2:
     proxmox_node: "largegpu"
     vm_id: 402
     ip_address: "192.168.1.232/24"
-    cores: 8
-    memory_mb: 32768
+    cores: 16
+    memory_mb: 57344
     disk_size_gb: 159
     pci_devices:
       - id: "08:00"
