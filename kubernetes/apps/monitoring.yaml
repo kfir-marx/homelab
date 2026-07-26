@@ -1,0 +1,195 @@
+# Cluster resource monitoring with Prometheus, Alertmanager, and Grafana.
+# The upstream chart is pinned so upgrades are explicit. Local manifests provide
+# static NFS volumes and the private Gateway API route.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/kfir-marx/homelab.git
+      targetRevision: main
+      path: kubernetes/system/monitoring
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 85.0.1
+      helm:
+        releaseName: monitoring
+        valuesObject:
+          # Talos binds these control-plane metrics endpoints to localhost, and
+          # this cluster replaces kube-proxy with Cilium. Disable unreachable
+          # scrape targets and their corresponding false-positive rules.
+          kubeControllerManager:
+            enabled: false
+          kubeEtcd:
+            enabled: false
+          kubeScheduler:
+            enabled: false
+          kubeProxy:
+            enabled: false
+          defaultRules:
+            rules:
+              etcd: false
+              kubeControllerManager: false
+              kubeProxy: false
+              kubeSchedulerAlerting: false
+              kubeSchedulerRecording: false
+
+          grafana:
+            admin:
+              existingSecret: monitoring-grafana-admin
+              userKey: admin-user
+              passwordKey: admin-password
+            # The NTFS-backed NFS export synthesizes mode 0777 and cannot
+            # persist Unix ownership. Avoid startup chown/fsGroup operations.
+            initChownData:
+              enabled: false
+            podSecurityContext:
+              runAsNonRoot: true
+              runAsUser: 472
+              runAsGroup: 472
+            deploymentStrategy:
+              type: Recreate
+            persistence:
+              enabled: true
+              existingClaim: monitoring-grafana
+            grafana.ini:
+              server:
+                domain: grafana.home.547600.xyz
+                root_url: http://grafana.home.547600.xyz
+              users:
+                allow_sign_up: false
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: "1"
+                memory: 1Gi
+            tolerations:
+              - key: nvidia.com/gpu
+                operator: Equal
+                value: "true"
+                effect: NoSchedule
+
+          prometheus:
+            prometheusSpec:
+              replicas: 1
+              retention: 15d
+              # Keep a safety margin below the 50 GiB PVC capacity.
+              retentionSize: 40GiB
+              walCompression: true
+              serviceMonitorSelectorNilUsesHelmValues: false
+              podMonitorSelectorNilUsesHelmValues: false
+              ruleSelectorNilUsesHelmValues: false
+              serviceMonitorNamespaceSelector: {}
+              podMonitorNamespaceSelector: {}
+              ruleNamespaceSelector: {}
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 2000
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 300m
+                  memory: 1Gi
+                limits:
+                  cpu: "2"
+                  memory: 3Gi
+              tolerations:
+                - key: nvidia.com/gpu
+                  operator: Equal
+                  value: "true"
+                  effect: NoSchedule
+              storageSpec:
+                volumeClaimTemplate:
+                  spec:
+                    storageClassName: nfs-storage1
+                    accessModes:
+                      - ReadWriteOnce
+                    resources:
+                      requests:
+                        storage: 50Gi
+                    selector:
+                      matchLabels:
+                        homelab.kfir.dev/volume: monitoring-prometheus
+
+          alertmanager:
+            alertmanagerSpec:
+              replicas: 1
+              retention: 120h
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 2000
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              tolerations:
+                - key: nvidia.com/gpu
+                  operator: Equal
+                  value: "true"
+                  effect: NoSchedule
+              storage:
+                volumeClaimTemplate:
+                  spec:
+                    storageClassName: nfs-storage1
+                    accessModes:
+                      - ReadWriteOnce
+                    resources:
+                      requests:
+                        storage: 2Gi
+                    selector:
+                      matchLabels:
+                        homelab.kfir.dev/volume: monitoring-alertmanager
+
+          prometheusOperator:
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: "1"
+                memory: 512Mi
+            tolerations:
+              - key: nvidia.com/gpu
+                operator: Equal
+                value: "true"
+                effect: NoSchedule
+
+          kube-state-metrics:
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                cpu: 500m
+                memory: 256Mi
+            tolerations:
+              - key: nvidia.com/gpu
+                operator: Equal
+                value: "true"
+                effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true

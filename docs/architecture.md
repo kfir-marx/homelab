@@ -219,6 +219,12 @@ Two static NFS-backed `PersistentVolume`s are declared, one per tier (see [Node 
 
 Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests.
 
+Prometheus, Alertmanager, and Grafana use smaller static PVs carved from the
+`nfs-storage1` export under `/mnt/data10tb/monitoring`. Metrics are explicitly
+non-critical. Prometheus does not officially support NFS for its local TSDB, so
+corruption or loss is handled by resetting the metrics directory rather than by
+treating monitoring history as durable data.
+
 To consume one: create a PVC in the app's namespace with the matching `storageClassName` and pin `volumeName` to the PV name. No dynamic provisioner — PVs are static, so a typo in `storageClassName` will just leave the PVC `Pending` forever rather than silently provisioning somewhere wrong.
 
 > **Picking a tier:** if losing the data is merely inconvenient (re-download / re-rip), use `storage1-bulk-pv`. If losing it is unrecoverable (personal photos, config you don't have a backup of, etc.), use `storage2-bulk-pv`. When in doubt, critical tier — 800 GB on the permanent host is the scarce resource, but it's the one that survives a borrowed-machine return.

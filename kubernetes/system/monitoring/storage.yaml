@@ -1,0 +1,92 @@
+# Monitoring history is disposable and therefore belongs on the non-critical
+# NFS tier. Prometheus upstream does not support NFS for its local TSDB; this is
+# an intentional homelab availability/reliability tradeoff. ReclaimPolicy
+# Retain protects the directories from an accidental Argo Application removal.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: monitoring-prometheus-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    app.kubernetes.io/part-of: monitoring
+    homelab.kfir.dev/volume: monitoring-prometheus
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage1
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  nfs:
+    server: 192.168.1.106
+    path: /mnt/data10tb/monitoring/prometheus
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: monitoring-alertmanager-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    app.kubernetes.io/part-of: monitoring
+    homelab.kfir.dev/volume: monitoring-alertmanager
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage1
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  nfs:
+    server: 192.168.1.106
+    path: /mnt/data10tb/monitoring/alertmanager
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: monitoring-grafana-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    app.kubernetes.io/part-of: monitoring
+    homelab.kfir.dev/volume: monitoring-grafana
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage1
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: monitoring
+    name: monitoring-grafana
+  nfs:
+    server: 192.168.1.106
+    path: /mnt/data10tb/monitoring/grafana
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: monitoring-grafana
+  namespace: monitoring
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-storage1
+  resources:
+    requests:
+      storage: 2Gi
+  volumeName: monitoring-grafana-pv
+

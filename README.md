@@ -12,6 +12,7 @@ and bootstraps Talos, and ArgoCD manages in-cluster workloads.
 | [Remote Access](docs/remote-access.md) | Cloudflare Tunnel for public services + official Tailscale for private admin access |
 | [Tailscale Runbook](docs/tailscale-runbook.md) | Subnet-router enrollment, route approval, client setup, and troubleshooting |
 | [AdGuard Home Runbook](docs/adguard-home-runbook.md) | Private split DNS, tailnet ad blocking, initial setup, and recovery |
+| [Monitoring Runbook](docs/monitoring-runbook.md) | Prometheus/Grafana deployment, NFS storage, private access, and verification |
 | [Proxmox Ansible](ansible/README.md) | Physical-host repositories, packages, NFS, VFIO, safety checks, and reboot workflow |
 
 ## Repository Structure

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  labels:
+    homelab.kfir.dev/private-gateway-access: "true"
+    # node-exporter needs host network/PID/filesystem access to collect node
+    # metrics. Keep this exception isolated to the monitoring namespace.
+    pod-security.kubernetes.io/enforce: privileged
+
