@@ -39,11 +39,11 @@ Create the exact exported directories on `smallgpu`:
 ssh root@192.168.1.106
 
 mkdir -p /mnt/data10tb/monitoring/prometheus
-chown 1000:2000 /mnt/data10tb/monitoring/prometheus/
+chown -R 1000:2000 /mnt/data10tb/monitoring/prometheus/
 mkdir -p /mnt/data10tb/monitoring/alertmanager
-chown 1000:2000 /mnt/data10tb/monitoring/alertmanager/
+chown -R 1000:2000 /mnt/data10tb/monitoring/alertmanager/
 mkdir -p /mnt/data10tb/monitoring/grafana
-chown 472:472 /mnt/data10tb/monitoring/grafana
+chown -R 472:472 /mnt/data10tb/monitoring/grafana
 
 exportfs -rav
 exit
