@@ -156,6 +156,11 @@ variable "gpu_nodes" {
     memory_mb    = number
     disk_size_gb = number
     dedicated    = optional(bool, true)
+    scratch_disk = optional(object({
+      datastore_id = string
+      size_gb      = number
+      serial       = string
+    }))
     pci_devices = list(object({
       id   = string
       pcie = bool

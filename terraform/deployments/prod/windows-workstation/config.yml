@@ -17,6 +17,7 @@ windows_vms:
     disk_size_gb: 635
 
     # Ignored in clone mode, but retained for a future deliberate reinstall.
+    iso_datastore_id: "largegpu-hdd"
     windows_iso: "Win11_25H2_EnglishInternational_x64_v2.iso"
     virtio_iso: "virtio-win.iso"
 

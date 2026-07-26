@@ -85,7 +85,7 @@ All three GPU hosts now pass VFIO verification. The laptop GTX 1060 is bound to 
 
 Each layer has a deliberately non-overlapping owner:
 
-- **Ansible owns physical Proxmox host configuration after installation and cluster joining:** APT repositories, role-specific packages, filesystem mounts, NFS exports/services, VFIO bindings, module/blacklist files, boot parameters, initramfs updates, and host preflight/verification. It never creates or changes corosync membership, formats disks, clears filesystem flags, detaches live GPUs, or reboots from the normal configuration play.
+- **Ansible owns physical Proxmox host configuration after installation and cluster joining:** APT repositories, role-specific packages, filesystem mounts, Proxmox directory-storage registration, local backup jobs and ISO placement, NFS exports/services, VFIO bindings, module/blacklist files, boot parameters, initramfs updates, and host preflight/verification. It never creates or changes corosync membership, partitions or formats disks, clears filesystem flags, detaches live GPUs, or reboots from the normal configuration play.
 - **Terraform/Terragrunt owns virtual infrastructure and Talos bootstrap:** VM definitions and placement, PCI attachment to VMs, Talos machine configuration, cluster bootstrap, and initial ArgoCD/application bootstrap.
 - **ArgoCD owns in-cluster resources:** applications, system controllers, and static Kubernetes PV/StorageClass declarations. Kubernetes manifests do not configure their physical NFS servers.
 
@@ -99,7 +99,7 @@ The staged design is:
 
 | Stage | Control plane | Workers | Availability trade-off |
 |-------|---------------|---------|------------------------|
-| Constrained / configured | One `2 vCPU / 4 GiB` VM on `smallgpu` | GPU workers: mixed-role RTX 2060 `10 vCPU / 8 GiB` and RTX 3080 `8 vCPU / 32 GiB` | Not control-plane HA. RTX 2060 accepts ordinary pods; RTX 3080 is tainted and stops for Windows. The GTX 1060 host is reserved for its workstation and NFS |
+| Constrained / configured | One `2 vCPU / 4 GiB` VM on `smallgpu` | GPU workers: mixed-role RTX 2060 `10 vCPU / 8 GiB` and RTX 3080 `16 vCPU / 56 GiB` | Not control-plane HA. RTX 2060 accepts ordinary pods; RTX 3080 is tainted and stops for Windows. The GTX 1060 host is reserved for its workstation and NFS |
 | Three-host steady state | Three `2 vCPU / 4 GiB` VMs, exactly one per physical host | Right-size workers independently after observing real usage | Survives one control-plane VM or physical-host failure, but only after `gpunvdgtx1060` has additional RAM or its workstation allocation is materially reduced |
 
 `gpunvdgtx1060` deliberately has no Kubernetes worker. A small CPU-only worker would consume nearly all remaining memory headroom while adding little capacity beyond mixed-role `gpu-3`; a GPU worker would also conflict with the higher-priority workstation. Any LAN-connected worker can still mount `192.168.1.105:/mnt/storage2-bulk`, so critical storage does not require a colocated Kubernetes VM.
@@ -168,8 +168,9 @@ qm shutdown 502 && qm start 402
 
 The configured runtime allocation is:
 
-- `gpu-2` requests 8 vCPUs and 32 GiB RAM; the Windows VM requests 16 vCPUs and 60 GiB RAM. They remain mutually exclusive because they share the RTX 3080, so the Windows allocation can still use essentially the whole host when `gpu-2` is stopped.
+- `gpu-2` requests 16 vCPUs and 56 GiB RAM; the Windows VM requests 16 vCPUs and 60 GiB RAM. They remain mutually exclusive because they share the RTX 3080. The Talos allocation leaves about 6.7 GiB nominal headroom for Proxmox and QEMU overhead instead of reserving half the host for no workload.
 - The largegpu host's 794 GB local NVMe LVM-thin is split ~80/20 — Windows gets `disk_size_gb: 635` for games, gpu-2 gets `disk_size_gb: 159` for the Talos rootfs.
+- A separate 400 GiB `qcow2` disk on `largegpu-hdd` is attached to `gpu-2` with backups disabled. Talos provisions it as the `gpu-scratch` user volume and mounts it at `/var/mnt/gpu-scratch`; Kubernetes exposes it through the static `local-gpu-scratch` StorageClass/PV.
 - `on_boot = true` for the Talos GPU worker (auto-start on Proxmox boot); `on_boot = false` for the Windows VM (manual).
 
 ### Windows VM lifecycle: retained template → linked workstation clone
@@ -203,7 +204,7 @@ Beyond each host's default `local` (Directory, /var/lib/vz) and `local-lvm` (LVM
 | Host         | Storage name        | Type         | Size       | Purpose                                                         |
 |--------------|---------------------|--------------|------------|-----------------------------------------------------------------|
 | `largegpu`      | `local-lvm`           | LVM-thin     | 794 GB     | Windows VM (~635 GB) + Talos `gpu-2` (~159 GB), 80/20 split             |
-| `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | ISOs, templates, backups (slow HDD, low-churn data)                    |
+| `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | Priority: VM backups, Windows/VirtIO ISOs, then capped 400 GiB `gpu-2` disposable scratch |
 | `gpunvdgtx1060` | `gpu1-extra`          | LVM-thin     | 912 GB     | Spare capacity for additional VMs + carved LV for `storage2-bulk` NFS  |
 | `gpunvdgtx1060` | `storage2-bulk` (NFS) | ext4 LV on `gpu1-extra`, NFSv4 export | 800 GB | **Critical tier** — Immich, personal data (only permanent host)        |
 | `smallgpu`      | `storage1-bulk` (NFS) | 10 TB NTFS via kernel `ntfs3`, NFSv4 export | 10 TB  | **Bulk tier** — active and mount-verified from Talos |
@@ -218,6 +219,28 @@ Two static NFS-backed `PersistentVolume`s are declared, one per tier (see [Node 
 | `storage2-bulk-pv`  | `nfs-storage2`   | `gpunvdgtx1060:/mnt/storage2-bulk` (ext4 on LVM-thin) | 800 Gi | **Critical** — Immich, config snapshots, personal data, anything that must survive a host loss |
 
 Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests.
+
+The separate `gpu2-scratch-pv` is node-local rather than NFS. It is a static
+`390 GiB`, `ReadWriteOnce` PV backed by the capped 400 GiB virtual HDD attached
+only to `gpu-2`, with `WaitForFirstConsumer` binding and node affinity. It is
+appropriate only for replaceable caches and temporary work. It is unavailable
+while Windows owns `largegpu`, and loss or return of that borrowed host destroys
+the data. Talos VM `402` is not backed up because Terraform and Talos can
+recreate it; its scratch disk is disposable as well.
+
+`largegpu-hdd` stores the monthly Proxmox backup of durable Windows template VM
+`101`, with one retained copy. Personal workstation VM `100` is backed up
+weekly to the already-existing `storage1-bulk` NFS storage, with two retained
+copies; its Proxmox node can already reach that target, so `largegpu` does not
+become a third NFS server. Linked Windows VM `502` and all Talos VMs are
+recreated from their retained template or Terraform rather than backed up.
+Ansible also corrects the Proxmox `storage1-bulk` registration to the live
+`/mnt/data10tb` export; the former `/mnt/storage1-bulk` path could remain
+temporarily usable through a stale NFS client mount but failed on fresh mounts.
+These backups help with VM mistakes and rollback but are not disaster recovery
+because both backup destinations are borrowed hosts. Windows and VirtIO
+installation ISOs live on `largegpu-hdd` as low-priority, replaceable assets;
+Terraform-managed per-node Talos images remain on each node's `local` storage.
 
 Prometheus, Alertmanager, and Grafana use smaller static PVs carved from the
 `nfs-storage1` export under `/mnt/data10tb/monitoring`. Metrics are explicitly
@@ -273,7 +296,7 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
 ├── ansible/                              # Physical Proxmox host configuration
 │   ├── inventory/production/             # Hosts, group vars, hardware-specific host vars
 │   ├── playbooks/                        # Configure, verify, and explicit reboot entry points
-│   └── roles/                            # Repositories, packages, NFS, VFIO, preflight
+│   └── roles/                            # Repositories, storage/backups, NFS, VFIO, preflight
 ├── docs/
 │   └── architecture.md                   # This file
 ├── kubernetes/
@@ -688,6 +711,8 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 
 ### Post-deploy checklist
 
+- [ ] **Converge and verify VM backups.** Apply the Ansible `storage,backup` tags, confirm the two ISOs were checksum-verified on `largegpu-hdd`, confirm VM `101` targets `largegpu-hdd`, and confirm VM `100` targets the existing `storage1-bulk` NFS storage.
+- [ ] **Attach and verify `gpu-2` scratch.** Apply the cluster Terraform stack after Ansible storage convergence, then confirm Talos reports `u-gpu-scratch` mounted at `/var/mnt/gpu-scratch` and Kubernetes reports `gpu2-scratch-pv` as `Available`.
 - [x] **Reconcile retired-host Terraform state before apply.** The production cluster stack was audited, destroyed, and recreated through saved Terraform plans on 2026-07-24 without deleting remote state or touching unrelated infrastructure.
 - [x] **Plan the single-control-plane rebuild explicitly.** `cp-1` was rebuilt on `smallgpu`, etcd bootstrapped, and the API VIP verified on 2026-07-24.
 - [x] Define NVIDIA GPU Operator through ArgoCD with Talos-managed driver/toolkit

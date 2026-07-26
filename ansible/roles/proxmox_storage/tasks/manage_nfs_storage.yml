@@ -1,0 +1,142 @@
+---
+- name: Read Proxmox NFS registration for {{ proxmox_nfs_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/storage/{{ proxmox_nfs_storage.id }}"
+      - --output-format
+      - json
+  register: proxmox_nfs_storage_registration
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Derive NFS registration state for {{ proxmox_nfs_storage.id }}
+  ansible.builtin.set_fact:
+    proxmox_nfs_storage_current: >-
+      {{
+        (proxmox_nfs_storage_registration.stdout | from_json)
+        if proxmox_nfs_storage_registration.rc == 0
+        else {}
+      }}
+
+- name: Determine whether NFS registration needs reconciliation for {{ proxmox_nfs_storage.id }}
+  ansible.builtin.set_fact:
+    proxmox_nfs_storage_needs_recreate: >-
+      {{
+        proxmox_nfs_storage_registration.rc == 0
+        and (
+          proxmox_nfs_storage_current.get('type', '') != 'nfs'
+          or proxmox_nfs_storage_current.get('server', '') != proxmox_nfs_storage.server
+          or proxmox_nfs_storage_current.get('export', '') != proxmox_nfs_storage.export
+        )
+      }}
+    proxmox_nfs_storage_needs_update: >-
+      {{
+        proxmox_nfs_storage_registration.rc != 0
+        or proxmox_nfs_storage_current.get('type', '') != 'nfs'
+        or proxmox_nfs_storage_current.get('server', '') != proxmox_nfs_storage.server
+        or proxmox_nfs_storage_current.get('export', '') != proxmox_nfs_storage.export
+        or (proxmox_nfs_storage_current.get('content', '').split(',') | sort)
+           != (proxmox_nfs_storage.content | sort)
+        or proxmox_nfs_storage_current.get('options', '')
+           != proxmox_nfs_storage.options | default('vers=4.2')
+      }}
+
+- name: Remove NFS registration with immutable identity drift - {{ proxmox_nfs_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - delete
+      - "/storage/{{ proxmox_nfs_storage.id }}"
+  when:
+    - proxmox_nfs_storage_needs_recreate | bool
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Inspect NFS mount source on Proxmox nodes - {{ proxmox_nfs_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --output
+      - SOURCE
+      - --mountpoint
+      - "/mnt/pve/{{ proxmox_nfs_storage.id }}"
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['proxmox_hosts'] | default([inventory_hostname]) }}"
+  register: proxmox_nfs_storage_mounts
+  changed_when: false
+  failed_when: proxmox_nfs_storage_mounts.rc not in [0, 1]
+  check_mode: false
+
+- name: Unmount stale NFS sources before reconciliation - {{ proxmox_nfs_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - umount
+      - "/mnt/pve/{{ proxmox_nfs_storage.id }}"
+  delegate_to: "{{ item.item }}"
+  loop: "{{ proxmox_nfs_storage_mounts.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - item.rc == 0
+    - item.stdout | trim != proxmox_nfs_storage.server ~ ':' ~ proxmox_nfs_storage.export
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Register Proxmox NFS storage {{ proxmox_nfs_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - create
+      - /storage
+      - --storage
+      - "{{ proxmox_nfs_storage.id }}"
+      - --type
+      - nfs
+      - --server
+      - "{{ proxmox_nfs_storage.server }}"
+      - --export
+      - "{{ proxmox_nfs_storage.export }}"
+      - --content
+      - "{{ proxmox_nfs_storage.content | join(',') }}"
+      - --options
+      - "{{ proxmox_nfs_storage.options | default('vers=4.2') }}"
+  when:
+    - >-
+      proxmox_nfs_storage_registration.rc != 0
+      or proxmox_nfs_storage_needs_recreate | bool
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Reconcile Proxmox NFS storage {{ proxmox_nfs_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - set
+      - "/storage/{{ proxmox_nfs_storage.id }}"
+      - --content
+      - "{{ proxmox_nfs_storage.content | join(',') }}"
+      - --options
+      - "{{ proxmox_nfs_storage.options | default('vers=4.2') }}"
+  when:
+    - proxmox_nfs_storage_registration.rc == 0
+    - proxmox_nfs_storage_needs_update | bool
+    - not proxmox_nfs_storage_needs_recreate | bool
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Refresh NFS storage mount on Proxmox nodes - {{ proxmox_nfs_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - pvesm
+      - status
+      - --storage
+      - "{{ proxmox_nfs_storage.id }}"
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['proxmox_hosts'] | default([inventory_hostname]) }}"
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode

@@ -1,0 +1,66 @@
+---
+- name: Validate Proxmox backup job declarations
+  ansible.builtin.assert:
+    that:
+      - item.id is match('^[a-zA-Z0-9_-]+$')
+      - item.vmid | string is match('^[1-9][0-9]*$')
+      - item.storage is match('^[a-zA-Z][a-zA-Z0-9_-]+$')
+      - item.node is match('^[a-zA-Z][a-zA-Z0-9_-]+$')
+      - item.mode in ['snapshot', 'stop', 'suspend']
+      - item.compress in ['zstd', 'gzip', 'lzo', '0']
+      - item.keep_last | int > 0
+    fail_msg: "Invalid Proxmox backup job declaration: {{ item }}"
+  loop: "{{ proxmox_backup_jobs }}"
+  loop_control:
+    label: "{{ item.id | default('unnamed') }}"
+
+- name: Read backup target status
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ item.node }}/storage/{{ item.storage }}/status"
+      - --output-format
+      - json
+  register: proxmox_backup_target_status
+  changed_when: false
+  check_mode: false
+  loop: "{{ proxmox_backup_jobs }}"
+  loop_control:
+    label: "{{ item.node }}/{{ item.storage }}"
+
+- name: Require active backup-capable target storage
+  ansible.builtin.assert:
+    that:
+      - target_status.active | int == 1
+      - target_status.enabled | int == 1
+      - "'backup' in target_status.content.split(',')"
+    fail_msg: >-
+      {{ item.item.storage }} is not active and backup-capable on
+      {{ item.item.node }}.
+  vars:
+    target_status: "{{ item.stdout | from_json }}"
+  loop: "{{ proxmox_backup_target_status.results }}"
+  loop_control:
+    label: "{{ item.item.node }}/{{ item.item.storage }}"
+
+- name: Require declared backup guests on their target nodes
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ item.node }}/qemu/{{ item.vmid }}/status/current"
+      - --output-format
+      - json
+  changed_when: false
+  check_mode: false
+  loop: "{{ proxmox_backup_jobs }}"
+  loop_control:
+    label: "{{ item.node }}/{{ item.vmid }}"
+
+- name: Manage each Proxmox backup job
+  ansible.builtin.include_tasks: manage_job.yml
+  loop: "{{ proxmox_backup_jobs }}"
+  loop_control:
+    loop_var: proxmox_backup_job
+    label: "{{ proxmox_backup_job.id }}"

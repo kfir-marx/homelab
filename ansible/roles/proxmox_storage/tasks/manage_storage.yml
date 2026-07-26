@@ -1,0 +1,175 @@
+---
+- name: Resolve backing device for {{ proxmox_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -U
+      - "{{ proxmox_storage.uuid }}"
+  register: proxmox_storage_backing_device
+  changed_when: false
+  check_mode: false
+
+- name: Require a unique backing filesystem for {{ proxmox_storage.id }}
+  ansible.builtin.assert:
+    that:
+      - proxmox_storage_backing_device.stdout is match('^/dev/')
+    fail_msg: >-
+      UUID {{ proxmox_storage.uuid }} for {{ proxmox_storage.id }} did not
+      resolve to a block device. The role never formats or guesses disks.
+
+- name: Read backing filesystem type for {{ proxmox_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -s
+      - TYPE
+      - -o
+      - value
+      - "{{ proxmox_storage_backing_device.stdout }}"
+  register: proxmox_storage_backing_filesystem
+  changed_when: false
+  check_mode: false
+
+- name: Require expected backing filesystem for {{ proxmox_storage.id }}
+  ansible.builtin.assert:
+    that:
+      - proxmox_storage_backing_filesystem.stdout == proxmox_storage.filesystem
+    fail_msg: >-
+      {{ proxmox_storage.id }} expected {{ proxmox_storage.filesystem }} on
+      UUID {{ proxmox_storage.uuid }}, found
+      {{ proxmox_storage_backing_filesystem.stdout | default('unknown') }}.
+
+- name: Create mount point for {{ proxmox_storage.id }}
+  ansible.builtin.file:
+    path: "{{ proxmox_storage.mount_point }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Manage fstab entry for {{ proxmox_storage.id }}
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: >-
+      ^[^#\s]+\s+{{ proxmox_storage.mount_point | regex_escape() }}\s+
+    line: >-
+      UUID={{ proxmox_storage.uuid }} {{ proxmox_storage.mount_point }}
+      {{ proxmox_storage.filesystem }}
+      {{ proxmox_storage.mount_options | default('defaults') }} 0 2
+    state: present
+    backup: true
+
+- name: Read mount state for {{ proxmox_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --output
+      - UUID,FSTYPE,TARGET,OPTIONS
+      - --target
+      - "{{ proxmox_storage.mount_point }}"
+  register: proxmox_storage_mount_state
+  changed_when: false
+  failed_when: proxmox_storage_mount_state.rc not in [0, 1]
+  check_mode: false
+
+- name: Validate existing mount for {{ proxmox_storage.id }}
+  ansible.builtin.assert:
+    that:
+      - proxmox_storage.uuid in proxmox_storage_mount_state.stdout
+      - proxmox_storage.filesystem in proxmox_storage_mount_state.stdout
+      - proxmox_storage.mount_point in proxmox_storage_mount_state.stdout
+      - proxmox_storage_mount_state.stdout is search('(^|[, ])rw([, ]|$)')
+    fail_msg: >-
+      {{ proxmox_storage.mount_point }} is mounted from an unexpected device,
+      with an unexpected filesystem, or read-only. Refusing to replace it.
+  when: proxmox_storage_mount_state.rc == 0
+
+- name: Mount {{ proxmox_storage.id }} from the managed fstab entry
+  ansible.builtin.command:
+    argv:
+      - mount
+      - "{{ proxmox_storage.mount_point }}"
+  when:
+    - proxmox_storage_mount_state.rc == 1
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Read Proxmox registration for {{ proxmox_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/storage/{{ proxmox_storage.id }}"
+      - --output-format
+      - json
+  register: proxmox_storage_registration
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Derive registration state for {{ proxmox_storage.id }}
+  ansible.builtin.set_fact:
+    proxmox_storage_registration_current: >-
+      {{
+        (proxmox_storage_registration.stdout | from_json)
+        if proxmox_storage_registration.rc == 0
+        else {}
+      }}
+
+- name: Determine whether registration needs reconciliation for {{ proxmox_storage.id }}
+  ansible.builtin.set_fact:
+    proxmox_storage_registration_needs_update: >-
+      {{
+        proxmox_storage_registration.rc != 0
+        or proxmox_storage_registration_current.get('type', '') != 'dir'
+        or proxmox_storage_registration_current.get('path', '') != proxmox_storage.mount_point
+        or (proxmox_storage_registration_current.get('content', '').split(',') | sort)
+           != (proxmox_storage.content | sort)
+        or (proxmox_storage_registration_current.get('nodes', '').split(',') | sort)
+           != (proxmox_storage.nodes | sort)
+        or proxmox_storage_registration_current.get('is_mountpoint', '0') | string != '1'
+      }}
+
+- name: Register Proxmox directory storage {{ proxmox_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - create
+      - /storage
+      - --storage
+      - "{{ proxmox_storage.id }}"
+      - --type
+      - dir
+      - --path
+      - "{{ proxmox_storage.mount_point }}"
+      - --content
+      - "{{ proxmox_storage.content | join(',') }}"
+      - --nodes
+      - "{{ proxmox_storage.nodes | join(',') }}"
+      - --is_mountpoint
+      - "1"
+  when:
+    - proxmox_storage_registration.rc != 0
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Reconcile Proxmox directory storage {{ proxmox_storage.id }}
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - set
+      - "/storage/{{ proxmox_storage.id }}"
+      - --path
+      - "{{ proxmox_storage.mount_point }}"
+      - --content
+      - "{{ proxmox_storage.content | join(',') }}"
+      - --nodes
+      - "{{ proxmox_storage.nodes | join(',') }}"
+      - --is_mountpoint
+      - "1"
+  when:
+    - proxmox_storage_registration.rc == 0
+    - proxmox_storage_registration_needs_update | bool
+    - not ansible_check_mode
+  changed_when: true

@@ -58,9 +58,10 @@ variable "worker_nodes" {
 
 variable "gpu_worker_nodes" {
   type = map(object({
-    ip_address = string
-    gpu        = bool
-    dedicated  = bool
+    ip_address          = string
+    gpu                 = bool
+    dedicated           = bool
+    scratch_disk_serial = optional(string)
   }))
   default = {}
 }
@@ -198,61 +199,81 @@ data "talos_machine_configuration" "gpu_worker" {
   talos_version      = var.talos_version
   kubernetes_version = var.kubernetes_version
 
-  config_patches = [
-    yamlencode({
-      cluster = {
-        network = {
-          cni = {
-            name = "none"
+  config_patches = concat(
+    [
+      yamlencode({
+        cluster = {
+          network = {
+            cni = {
+              name = "none"
+            }
+          }
+          proxy = {
+            disabled = true
           }
         }
-        proxy = {
-          disabled = true
-        }
-      }
-    }),
+      }),
 
-    yamlencode({
-      machine = {
-        network = {
-          nameservers = var.nameservers
-          interfaces = [{
-            interface = "eth0"
-            dhcp      = false
-            addresses = [each.value.ip_address]
-            routes = [{
-              network = "0.0.0.0/0"
-              gateway = cidrhost(each.value.ip_address, 1)
+      yamlencode({
+        machine = {
+          network = {
+            nameservers = var.nameservers
+            interfaces = [{
+              interface = "eth0"
+              dhcp      = false
+              addresses = [each.value.ip_address]
+              routes = [{
+                network = "0.0.0.0/0"
+                gateway = cidrhost(each.value.ip_address, 1)
+              }]
             }]
-          }]
+          }
         }
-      }
-    }),
+      }),
 
-    yamlencode({
-      apiVersion = "v1alpha1"
-      kind       = "HostnameConfig"
-      auto       = "off"
-      hostname   = each.key
-    }),
+      yamlencode({
+        apiVersion = "v1alpha1"
+        kind       = "HostnameConfig"
+        auto       = "off"
+        hostname   = each.key
+      }),
 
-    file("${path.module}/talos-gpu-patch.yaml"),
+      file("${path.module}/talos-gpu-patch.yaml"),
 
-    yamlencode({
-      machine = {
-        nodeLabels = {
-          "node.kubernetes.io/gpu" = "true"
-          "nvidia.com/gpu.present" = "true"
-          "homelab.dev/role"       = "gpu-worker"
-          "homelab.dev/gpu-node"   = each.key
+      yamlencode({
+        machine = {
+          nodeLabels = {
+            "node.kubernetes.io/gpu" = "true"
+            "nvidia.com/gpu.present" = "true"
+            "homelab.dev/role"       = "gpu-worker"
+            "homelab.dev/gpu-node"   = each.key
+          }
+          # no need for a taint right now as all the nodes are with GPU, but if you want to dedicate a node for GPU workloads only, you can uncomment the following lines and set dedicated = true in the gpu_worker_nodes variable
+          # nodeTaints = each.value.dedicated ? {
+          #   "nvidia.com/gpu" = "true:NoSchedule"
+          # } : {}
         }
-        # no need for a taint right now as all the nodes are with GPU, but if you want to dedicate a node for GPU workloads only, you can uncomment the following lines and set dedicated = true in the gpu_worker_nodes variable
-        # nodeTaints = each.value.dedicated ? {
-        #   "nvidia.com/gpu" = "true:NoSchedule"
-        # } : {}
-      }
-    }),
-  ]
+      }),
+    ],
+    each.value.scratch_disk_serial == null ? [] : [
+      yamlencode({
+        apiVersion = "v1alpha1"
+        kind       = "UserVolumeConfig"
+        name       = "gpu-scratch"
+        provisioning = {
+          diskSelector = {
+            match = "disk.serial == '${each.value.scratch_disk_serial}'"
+          }
+          minSize = "390GiB"
+          maxSize = "400GiB"
+          grow    = false
+        }
+        mount = {
+          disableAccessTime = true
+        }
+      }),
+    ],
+  )
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,12 @@
+---
+# Existing filesystems to validate, mount persistently, and register as
+# node-scoped Proxmox directory storages. This role never partitions or formats.
+proxmox_directory_storages: []
+
+# Cluster-level Proxmox NFS storage registrations. The backing export itself
+# remains owned by the nfs_server role on its server.
+proxmox_nfs_storages: []
+
+# ISO files to copy between directory storages on the same Proxmox node.
+# Sources are removed only after the destination checksum matches.
+proxmox_iso_relocations: []

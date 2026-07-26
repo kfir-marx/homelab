@@ -16,6 +16,14 @@
       when: inventory_hostname in groups.get('nfs_servers', [])
       tags:
         - nfs
+    - role: proxmox_storage
+      when: inventory_hostname in groups.get('local_storage_hosts', [])
+      tags:
+        - storage
+    - role: proxmox_backup
+      when: inventory_hostname in groups.get('backup_hosts', [])
+      tags:
+        - backup
     - role: nut_server
       when: inventory_hostname in groups.get('nut_servers', [])
       tags:

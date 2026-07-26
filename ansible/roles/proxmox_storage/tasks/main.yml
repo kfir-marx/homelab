@@ -1,0 +1,128 @@
+---
+- name: Validate Proxmox directory storage declarations
+  ansible.builtin.assert:
+    that:
+      - item.id is match('^[a-zA-Z][a-zA-Z0-9_-]+$')
+      - item.uuid | length > 0
+      - item.filesystem in ['ext4', 'xfs']
+      - item.mount_point is match('^/mnt/pve/[a-zA-Z0-9_-]+$')
+      - item.mount_point != '/mnt/pve'
+      - item.content | length > 0
+      - item.nodes | length > 0
+    fail_msg: "Invalid or unsafe Proxmox directory storage declaration: {{ item }}"
+  loop: "{{ proxmox_directory_storages }}"
+  loop_control:
+    label: "{{ item.id | default('unnamed') }}"
+
+- name: Manage each Proxmox directory storage
+  ansible.builtin.include_tasks: manage_storage.yml
+  loop: "{{ proxmox_directory_storages }}"
+  loop_control:
+    loop_var: proxmox_storage
+    label: "{{ proxmox_storage.id }}"
+
+- name: Validate Proxmox NFS storage declarations
+  ansible.builtin.assert:
+    that:
+      - item.id is match('^[a-zA-Z][a-zA-Z0-9_-]+$')
+      - item.server is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+      - item.export is match('^/[^/].*')
+      - item.content | length > 0
+    fail_msg: "Invalid Proxmox NFS storage declaration: {{ item }}"
+  loop: "{{ proxmox_nfs_storages }}"
+  loop_control:
+    label: "{{ item.id | default('unnamed') }}"
+
+- name: Manage each Proxmox NFS storage registration
+  ansible.builtin.include_tasks: manage_nfs_storage.yml
+  loop: "{{ proxmox_nfs_storages }}"
+  loop_control:
+    loop_var: proxmox_nfs_storage
+    label: "{{ proxmox_nfs_storage.id }}"
+
+- name: Validate ISO relocation declarations
+  ansible.builtin.assert:
+    that:
+      - item.source is match('^/[^/].+')
+      - item.destination is match('^/[^/].+')
+      - item.source != item.destination
+      - item.destination | dirname in
+        (proxmox_directory_storages | map(attribute='mount_point') |
+         map('regex_replace', '$', '/template/iso') | list)
+    fail_msg: "Invalid or unsafe ISO relocation declaration: {{ item }}"
+  loop: "{{ proxmox_iso_relocations }}"
+  loop_control:
+    label: "{{ item.source | default('unnamed') }}"
+
+- name: Create destination ISO directories
+  ansible.builtin.file:
+    path: "{{ item.destination | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ proxmox_iso_relocations }}"
+  loop_control:
+    label: "{{ item.destination | dirname }}"
+
+- name: Inspect source ISO files
+  ansible.builtin.stat:
+    path: "{{ item.source }}"
+    checksum_algorithm: sha256
+  register: proxmox_storage_iso_sources
+  loop: "{{ proxmox_iso_relocations }}"
+  loop_control:
+    label: "{{ item.source }}"
+
+- name: Copy declared ISO files to directory storage
+  ansible.builtin.copy:
+    src: "{{ item.item.source }}"
+    dest: "{{ item.item.destination }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: item.stat.exists
+  loop: "{{ proxmox_storage_iso_sources.results }}"
+  loop_control:
+    label: "{{ item.item.source }}"
+
+- name: Inspect relocated ISO files
+  ansible.builtin.stat:
+    path: "{{ item.item.destination }}"
+    checksum_algorithm: sha256
+  register: proxmox_storage_iso_destinations
+  when: item.stat.exists
+  loop: "{{ proxmox_storage_iso_sources.results }}"
+  loop_control:
+    label: "{{ item.item.destination }}"
+
+- name: Require matching ISO checksums before source removal
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.checksum == source_result.stat.checksum
+    fail_msg: >-
+      Refusing to remove {{ item.item.item.source }} because the destination
+      checksum does not match.
+  vars:
+    source_result: "{{ item.item }}"
+  when:
+    - item.item.stat.exists
+    - item.item.item.remove_source | default(false) | bool
+    - not ansible_check_mode
+  loop: "{{ proxmox_storage_iso_destinations.results }}"
+  loop_control:
+    label: "{{ item.item.item.source }}"
+
+- name: Remove verified source ISO files
+  ansible.builtin.file:
+    path: "{{ item.item.item.source }}"
+    state: absent
+  when:
+    - item.item.stat.exists
+    - item.item.item.remove_source | default(false) | bool
+    - not ansible_check_mode
+  loop: "{{ proxmox_storage_iso_destinations.results }}"
+  loop_control:
+    label: "{{ item.item.item.source }}"

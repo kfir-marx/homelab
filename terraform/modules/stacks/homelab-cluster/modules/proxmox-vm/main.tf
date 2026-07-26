@@ -72,6 +72,16 @@ variable "pci_devices" {
   default = []
 }
 
+variable "scratch_disks" {
+  description = "Disposable data disks attached after the Talos system disk"
+  type = list(object({
+    datastore_id = string
+    size_gb      = number
+    serial       = string
+  }))
+  default = []
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # VM resource
 # ──────────────────────────────────────────────────────────────────────────────
@@ -109,6 +119,22 @@ resource "proxmox_virtual_environment_vm" "this" {
     file_format  = "raw"
     ssd          = true
     discard      = "on"
+  }
+
+  dynamic "disk" {
+    for_each = var.scratch_disks
+    content {
+      datastore_id = disk.value.datastore_id
+      interface    = "scsi${disk.key + 1}"
+      size         = disk.value.size_gb
+      serial       = disk.value.serial
+      file_format  = "qcow2"
+      ssd          = false
+      discard      = "on"
+      iothread     = true
+      backup       = false
+      replicate    = false
+    }
   }
 
   network_device {

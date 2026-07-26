@@ -14,8 +14,9 @@ module "windows_vms" {
   disk_size_gb = each.value.disk_size_gb
   bridge       = var.network_bridge
 
-  windows_iso = each.value.windows_iso
-  virtio_iso  = each.value.virtio_iso
+  windows_iso      = each.value.windows_iso
+  virtio_iso       = each.value.virtio_iso
+  iso_datastore_id = each.value.iso_datastore_id
 
   template_vm_id = each.value.template_vm_id
   full_clone     = each.value.full_clone

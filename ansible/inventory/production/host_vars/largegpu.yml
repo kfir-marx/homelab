@@ -1,6 +1,67 @@
 ---
 proxmox_expected_hostname: largegpu
 
+proxmox_directory_storages:
+  - id: largegpu-hdd
+    uuid: 84e5ba00-6169-4082-b453-ec93f693f167
+    filesystem: ext4
+    mount_point: /mnt/pve/largegpu-hdd
+    mount_options: defaults
+    content:
+      - backup
+      - iso
+      - vztmpl
+      - images
+    nodes:
+      - largegpu
+
+# The backing export is owned by smallgpu's nfs_server role. This declaration
+# fixes the stale Proxmox path (/mnt/storage1-bulk) so clients remount the live
+# /mnt/data10tb export after reboot.
+proxmox_nfs_storages:
+  - id: storage1-bulk
+    server: 192.168.1.106
+    export: /mnt/data10tb
+    options: vers=4.2
+    content:
+      - backup
+      - iso
+      - vztmpl
+
+# These assets are independent of the Terraform-managed, per-node Talos images.
+# The role copies, verifies SHA-256, and only then removes the NVMe source.
+proxmox_iso_relocations:
+  - source: /var/lib/vz/template/iso/Win11_25H2_EnglishInternational_x64_v2.iso
+    destination: /mnt/pve/largegpu-hdd/template/iso/Win11_25H2_EnglishInternational_x64_v2.iso
+    remove_source: true
+  - source: /var/lib/vz/template/iso/virtio-win.iso
+    destination: /mnt/pve/largegpu-hdd/template/iso/virtio-win.iso
+    remove_source: true
+
+# The Windows template is the durable, manually configured state on largegpu.
+# The linked Windows VM 502 and all Terraform-managed Talos VMs are disposable.
+# Workstation VM 100 runs on gpunvdgtx1060, where the existing storage1-bulk
+# NFS storage is already active; using it avoids creating a third NFS server.
+proxmox_backup_jobs:
+  - id: largegpu-windows-template
+    vmid: 101
+    storage: largegpu-hdd
+    node: largegpu
+    schedule: monthly
+    mode: stop
+    compress: zstd
+    keep_last: 1
+    enabled: true
+  - id: personal-workstation
+    vmid: 100
+    storage: storage1-bulk
+    node: gpunvdgtx1060
+    schedule: "sun 04:00"
+    mode: snapshot
+    compress: zstd
+    keep_last: 2
+    enabled: true
+
 # Planned NUT configuration: add this host to nut_servers only after its UPS
 # arrives, connect the USB data cable, and replace both empty values with the
 # four-digit lowercase IDs reported by `lsusb`.

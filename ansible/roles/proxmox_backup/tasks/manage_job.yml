@@ -1,0 +1,97 @@
+---
+- name: Read backup job {{ proxmox_backup_job.id }}
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/cluster/backup/{{ proxmox_backup_job.id }}"
+      - --output-format
+      - json
+  register: proxmox_backup_job_read
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Derive backup job state for {{ proxmox_backup_job.id }}
+  ansible.builtin.set_fact:
+    proxmox_backup_job_current: >-
+      {{
+        (proxmox_backup_job_read.stdout | from_json)
+        if proxmox_backup_job_read.rc == 0
+        else {}
+      }}
+
+- name: Normalize backup retention for {{ proxmox_backup_job.id }}
+  ansible.builtin.set_fact:
+    proxmox_backup_job_current_keep_last: >-
+      {{
+        proxmox_backup_job_current.get('prune-backups', {}).get('keep-last', '')
+        if proxmox_backup_job_current.get('prune-backups', {}) is mapping
+        else (
+          proxmox_backup_job_current.get('prune-backups', '')
+          | regex_replace('^keep-last=', '')
+        )
+      }}
+
+- name: Determine whether backup job {{ proxmox_backup_job.id }} needs reconciliation
+  ansible.builtin.set_fact:
+    proxmox_backup_job_needs_update: >-
+      {{
+        proxmox_backup_job_read.rc != 0
+        or proxmox_backup_job_current.get('vmid', '') | string
+           != proxmox_backup_job.vmid | string
+        or proxmox_backup_job_current.get('storage', '')
+           != proxmox_backup_job.storage
+        or proxmox_backup_job_current.get('node', '')
+           != proxmox_backup_job.node
+        or proxmox_backup_job_current.get('schedule', '')
+           != proxmox_backup_job.schedule
+        or proxmox_backup_job_current.get('mode', 'snapshot')
+           != proxmox_backup_job.mode
+        or proxmox_backup_job_current.get('compress', '0') | string
+           != proxmox_backup_job.compress | string
+        or proxmox_backup_job_current.get('enabled', 1) | int
+           != (proxmox_backup_job.enabled | default(true) | bool) | int
+        or proxmox_backup_job_current_keep_last | string
+           != proxmox_backup_job.keep_last | string
+      }}
+
+- name: Build backup job command for {{ proxmox_backup_job.id }}
+  ansible.builtin.set_fact:
+    proxmox_backup_job_command: >-
+      {{
+        [
+          'pvesh',
+          ('set' if proxmox_backup_job_read.rc == 0 else 'create'),
+          (
+            '/cluster/backup/' ~ proxmox_backup_job.id
+            if proxmox_backup_job_read.rc == 0
+            else '/cluster/backup'
+          )
+        ]
+        + (
+          []
+          if proxmox_backup_job_read.rc == 0
+          else ['--id', proxmox_backup_job.id]
+        )
+        + [
+          '--vmid', proxmox_backup_job.vmid | string,
+          '--storage', proxmox_backup_job.storage,
+          '--node', proxmox_backup_job.node,
+          '--schedule', proxmox_backup_job.schedule,
+          '--mode', proxmox_backup_job.mode,
+          '--compress', proxmox_backup_job.compress,
+          '--enabled', ((proxmox_backup_job.enabled | default(true) | bool) | int) | string,
+          '--prune-backups', 'keep-last=' ~ (proxmox_backup_job.keep_last | string),
+          '--remove', '1',
+          '--repeat-missed', '0'
+        ]
+      }}
+
+- name: Reconcile backup job {{ proxmox_backup_job.id }}
+  ansible.builtin.command:
+    argv: "{{ proxmox_backup_job_command }}"
+  when:
+    - proxmox_backup_job_needs_update | bool
+    - not ansible_check_mode
+  changed_when: true

@@ -50,18 +50,55 @@ Useful limited runs:
 ```bash
 ansible-playbook playbooks/configure-proxmox.yml --check --diff --tags repositories
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nfs
+ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags storage
+ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags backup
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nut
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags vfio
 ansible-playbook playbooks/verify-proxmox.yml --limit nfs_servers --tags nfs
+ansible-playbook playbooks/verify-proxmox.yml --limit local_storage_hosts --tags storage
+ansible-playbook playbooks/verify-proxmox.yml --limit backup_hosts --tags backup
 ansible-playbook playbooks/verify-proxmox.yml --limit nut_servers --tags nut
 ```
 
-Available configuration tags are `repositories`, `packages`, `nfs`, `nut`, and
-`vfio`. Common preflight checks (hostname, Proxmox major version, and quorate
-cluster membership) always run. Filesystem checks run only with NFS work, while
-PCI/IOMMU and running-VM conflict checks run only with VFIO work. A
-repository-, package-, NFS-, or NUT-only run is therefore not blocked by a GPU
-legitimately assigned to a running VM.
+Available configuration tags are `repositories`, `packages`, `nfs`, `storage`,
+`backup`, `nut`, and `vfio`. Common preflight checks (hostname, Proxmox major
+version, and quorate cluster membership) always run. Filesystem checks run only
+with NFS or directory-storage work, while PCI/IOMMU and running-VM conflict
+checks run only with VFIO work. A repository-, package-, storage-, backup-,
+NFS-, or NUT-only run is therefore not blocked by a GPU legitimately assigned
+to a running VM.
+
+## Local directory storage and backups
+
+The `proxmox_storage` role owns existing node-local filesystems declared on
+`local_storage_hosts`. It validates the live filesystem UUID and type, writes
+the UUID-based fstab entry, mounts it read/write, and reconciles the node-scoped
+Proxmox directory storage. It never partitions or formats a disk. ISO
+relocations are remote copies followed by checksum verification; a source is
+removed only after the destination SHA-256 matches.
+
+The role also reconciles Proxmox's cluster-level registration of existing NFS
+exports without owning the server-side export. In particular, it points
+`storage1-bulk` at smallgpu's live `/mnt/data10tb` export; the previous
+`/mnt/storage1-bulk` registration survived only as a stale client mount and
+would fail after remount or reboot.
+
+On `largegpu`, Windows and VirtIO ISOs move to `largegpu-hdd`. Terraform-managed
+Talos images remain in each node's `local` storage because the image download
+resource is per Proxmox node. The same HDD accepts VM images so Terraform can
+attach a capped, disposable scratch disk to VM `402`.
+
+The `proxmox_backup` role owns node-scoped vzdump jobs. The durable Windows
+template VM `101` is backed up monthly to `largegpu-hdd` with one retained copy.
+Personal workstation VM `100` is backed up weekly to the existing
+`storage1-bulk` NFS target with two retained copies. The linked Windows VM `502`
+and all Terraform-managed Talos VMs are intentionally excluded because they can
+be recreated declaratively. VM `402`'s HDD scratch disk also has
+`backup = false`.
+
+These backups primarily provide rollback from guest misconfiguration or
+accidental deletion. They are not full disaster recovery: `largegpu-hdd` and
+`storage1-bulk` are both on borrowed physical hosts.
 
 ## UPS shutdown and recovery
 

@@ -139,6 +139,9 @@ module "gpu_vms" {
   image_file_id = proxmox_download_file.talos_image["${each.value.proxmox_node}/gpu"].id
 
   pci_devices = each.value.pci_devices
+  scratch_disks = (
+    each.value.scratch_disk == null ? [] : [each.value.scratch_disk]
+  )
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -173,6 +176,9 @@ module "talos_cluster" {
       ip_address = node.ip_address
       gpu        = true
       dedicated  = node.dedicated
+      scratch_disk_serial = (
+        node.scratch_disk == null ? null : node.scratch_disk.serial
+      )
     }
   }
 

@@ -156,3 +156,180 @@
       when: inventory_hostname in groups.get('vfio_hosts', [])
       tags:
         - vfio
+
+    - name: Read managed directory storage mounts
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - --noheadings
+          - --output
+          - UUID,FSTYPE,TARGET,OPTIONS
+          - --target
+          - "{{ item.mount_point }}"
+      register: verified_directory_storage_mounts
+      changed_when: false
+      check_mode: false
+      loop: "{{ proxmox_directory_storages | default([]) }}"
+      loop_control:
+        label: "{{ item.id }}"
+      when: inventory_hostname in groups.get('local_storage_hosts', [])
+      tags:
+        - storage
+
+    - name: Require managed directory storages to be mounted read/write
+      ansible.builtin.assert:
+        that:
+          - item.item.uuid in item.stdout
+          - item.item.filesystem in item.stdout
+          - item.item.mount_point in item.stdout
+          - item.stdout is search('(^|[, ])rw([, ]|$)')
+        fail_msg: "Directory storage {{ item.item.id }} is not mounted as declared."
+      loop: "{{ verified_directory_storage_mounts.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+      when: inventory_hostname in groups.get('local_storage_hosts', [])
+      tags:
+        - storage
+
+    - name: Read managed Proxmox directory storage registrations
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - get
+          - "/storage/{{ item.id }}"
+          - --output-format
+          - json
+      register: verified_directory_storage_registrations
+      changed_when: false
+      check_mode: false
+      loop: "{{ proxmox_directory_storages | default([]) }}"
+      loop_control:
+        label: "{{ item.id }}"
+      when: inventory_hostname in groups.get('local_storage_hosts', [])
+      tags:
+        - storage
+
+    - name: Require Proxmox directory storage registrations
+      ansible.builtin.assert:
+        that:
+          - registration.type == 'dir'
+          - registration.path == item.item.mount_point
+          - registration.is_mountpoint | string == '1'
+          - (registration.content.split(',') | sort) == (item.item.content | sort)
+          - (registration.nodes.split(',') | sort) == (item.item.nodes | sort)
+        fail_msg: "Proxmox storage {{ item.item.id }} does not match inventory."
+      vars:
+        registration: "{{ item.stdout | from_json }}"
+      loop: "{{ verified_directory_storage_registrations.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+      when: inventory_hostname in groups.get('local_storage_hosts', [])
+      tags:
+        - storage
+
+    - name: Read managed Proxmox NFS storage registrations
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - get
+          - "/storage/{{ item.id }}"
+          - --output-format
+          - json
+      register: verified_nfs_storage_registrations
+      changed_when: false
+      check_mode: false
+      loop: "{{ proxmox_nfs_storages | default([]) }}"
+      loop_control:
+        label: "{{ item.id }}"
+      when: inventory_hostname in groups.get('local_storage_hosts', [])
+      tags:
+        - storage
+
+    - name: Require Proxmox NFS storage registrations
+      ansible.builtin.assert:
+        that:
+          - registration.type == 'nfs'
+          - registration.server == item.item.server
+          - registration.export == item.item.export
+          - registration.get('options', '') ==
+            (item.item.options | default('vers=4.2'))
+          - (registration.content.split(',') | sort) == (item.item.content | sort)
+        fail_msg: "Proxmox NFS storage {{ item.item.id }} does not match inventory."
+      vars:
+        registration: "{{ item.stdout | from_json }}"
+      loop: "{{ verified_nfs_storage_registrations.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+      when: inventory_hostname in groups.get('local_storage_hosts', [])
+      tags:
+        - storage
+
+    - name: Verify relocated ISO destinations
+      ansible.builtin.stat:
+        path: "{{ item.destination }}"
+      register: verified_relocated_isos
+      loop: "{{ proxmox_iso_relocations | default([]) }}"
+      loop_control:
+        label: "{{ item.destination }}"
+      when: inventory_hostname in groups.get('local_storage_hosts', [])
+      tags:
+        - storage
+
+    - name: Require relocated ISO destinations
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+        fail_msg: "Relocated ISO {{ item.item.destination }} is absent."
+      loop: "{{ verified_relocated_isos.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.destination }}"
+      when: inventory_hostname in groups.get('local_storage_hosts', [])
+      tags:
+        - storage
+
+    - name: Read managed Proxmox backup jobs
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - get
+          - "/cluster/backup/{{ item.id }}"
+          - --output-format
+          - json
+      register: verified_proxmox_backup_jobs
+      changed_when: false
+      check_mode: false
+      loop: "{{ proxmox_backup_jobs | default([]) }}"
+      loop_control:
+        label: "{{ item.id }}"
+      when: inventory_hostname in groups.get('backup_hosts', [])
+      tags:
+        - backup
+
+    - name: Require managed Proxmox backup job definitions
+      ansible.builtin.assert:
+        that:
+          - backup_job.vmid | string == item.item.vmid | string
+          - backup_job.storage == item.item.storage
+          - backup_job.node == item.item.node
+          - backup_job.schedule == item.item.schedule
+          - backup_job.mode == item.item.mode
+          - backup_job.compress | string == item.item.compress | string
+          - >-
+            (
+              backup_job.get('prune-backups', {}).get('keep-last', '')
+              if backup_job.get('prune-backups', {}) is mapping
+              else (
+                backup_job.get('prune-backups', '')
+                | regex_replace('^keep-last=', '')
+              )
+            ) | string == item.item.keep_last | string
+        fail_msg: "Backup job {{ item.item.id }} does not match inventory."
+      vars:
+        backup_job: "{{ item.stdout | from_json }}"
+      loop: "{{ verified_proxmox_backup_jobs.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+      when: inventory_hostname in groups.get('backup_hosts', [])
+      tags:
+        - backup
