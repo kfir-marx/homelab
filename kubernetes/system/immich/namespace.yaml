@@ -4,3 +4,4 @@ metadata:
   name: immich
   labels:
     pod-security.kubernetes.io/enforce: baseline
+    homelab.kfir.dev/private-gateway-access: "true"
