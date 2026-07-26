@@ -1,0 +1,25 @@
+# ArgoCD ownership for the cluster's static NFS StorageClasses and bulk PVs.
+# Pruning is intentionally disabled: deleting this Application must not delete
+# retained storage objects or make existing claims harder to recover.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: storage
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/storage
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+

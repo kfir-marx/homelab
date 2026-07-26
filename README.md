@@ -13,6 +13,7 @@ and bootstraps Talos, and ArgoCD manages in-cluster workloads.
 | [Tailscale Runbook](docs/tailscale-runbook.md) | Subnet-router enrollment, route approval, client setup, and troubleshooting |
 | [AdGuard Home Runbook](docs/adguard-home-runbook.md) | Private split DNS, tailnet ad blocking, initial setup, and recovery |
 | [Monitoring Runbook](docs/monitoring-runbook.md) | Prometheus/Grafana deployment, NFS storage, private access, and verification |
+| [GPU Operator Runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, ArgoCD rollout, GPU validation, and metrics |
 | [Proxmox Ansible](ansible/README.md) | Physical-host repositories, packages, NFS, VFIO, safety checks, and reboot workflow |
 
 ## Repository Structure

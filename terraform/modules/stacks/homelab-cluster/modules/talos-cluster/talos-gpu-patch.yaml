@@ -3,7 +3,8 @@
 #
 # The NVIDIA system extensions are part of talos-images/gpu.yaml and are
 # resolved by the Image Factory for the configured Talos release. This patch
-# only activates the modules and configures the NVIDIA container runtime.
+# activates the modules; Talos 1.13 supplies CDI devices from the toolkit
+# extension and the Argo-managed GPU Operator exposes them to Kubernetes.
 # ──────────────────────────────────────────────────────────────────────────────
 
 machine:
@@ -18,20 +19,3 @@ machine:
   # Sysctls sometimes needed for large-memory GPU workloads.
   sysctls:
     vm.nr_hugepages: "1024"
-
-  # Register the NVIDIA runtime with containerd so Kubernetes pods
-  # can request GPU resources via the nvidia-device-plugin DaemonSet.
-  files:
-    - content: |
-        [plugins]
-          [plugins."io.containerd.grpc.v1.cri"]
-            [plugins."io.containerd.grpc.v1.cri".containerd]
-              default_runtime_name = "nvidia"
-              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
-                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia]
-                  privileged_without_host_devices = false
-                  runtime_type = "io.containerd.runc.v2"
-                  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
-                    BinaryName = "/usr/bin/nvidia-container-runtime"
-      path: /etc/cri/conf.d/20-customization.part
-      op: create

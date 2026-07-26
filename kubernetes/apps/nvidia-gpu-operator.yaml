@@ -1,0 +1,69 @@
+# Talos owns the NVIDIA kernel driver and container toolkit through system
+# extensions. GPU Operator owns Kubernetes discovery, the device plugin,
+# validators, and DCGM metrics.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nvidia-gpu-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/kfir-marx/homelab.git
+      targetRevision: main
+      path: kubernetes/system/nvidia-gpu-operator
+    - repoURL: https://helm.ngc.nvidia.com/nvidia
+      chart: gpu-operator
+      targetRevision: v26.3.1
+      helm:
+        releaseName: gpu-operator
+        valuesObject:
+          # Required for Talos: these components are already installed as
+          # version-matched system extensions in the immutable OS image.
+          driver:
+            enabled: false
+          toolkit:
+            enabled: false
+          hostPaths:
+            driverInstallDir: /usr/local
+
+          # NFD discovers both passed-through GPUs, including a node whose
+          # Terraform-owned convenience labels have not converged yet.
+          nfd:
+            enabled: true
+
+          # Export GPU utilization, memory, temperature, power, and health to
+          # the existing kube-prometheus-stack instance.
+          dcgmExporter:
+            enabled: true
+            serviceMonitor:
+              enabled: true
+              interval: 15s
+              additionalLabels:
+                release: monitoring
+              relabelings:
+                - sourceLabels:
+                    - __meta_kubernetes_pod_node_name
+                  targetLabel: instance
+
+          daemonsets:
+            tolerations:
+              - key: nvidia.com/gpu
+                operator: Exists
+                effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gpu-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+

@@ -509,20 +509,20 @@ The same role is used by the Atlantis runner, by GitHub Actions, and locally —
 
 ## GPU passthrough pipeline
 
-GPU support spans two layers — Proxmox (hardware passthrough) and Talos (OS-level NVIDIA stack):
+GPU support spans three layers: Proxmox hardware passthrough, the Talos
+OS-level NVIDIA stack, and Argo-managed Kubernetes GPU components:
 
 ```
 Proxmox host                     Talos VM                           Kubernetes
 ─────────────                    ────────                           ──────────
-IOMMU enabled          ──►  PCIe device visible       ──►   nvidia-container-runtime
-vfio-pci driver bound         in the VM                       registered in containerd
-via hostpci block             kernel modules loaded:
-                              nvidia, nvidia_uvm,             Pods with toleration
-                              nvidia_drm, nvidia_modeset      nvidia.com/gpu=NoSchedule
-                                                              can schedule here
-                              System extensions:
-                              nvidia-container-toolkit
-                              nvidia-open-gpu-kernel-modules
+IOMMU enabled          ──►  PCIe device visible       ──►   NVIDIA GPU Operator
+vfio-pci driver bound         in the VM                       discovers both nodes
+via hostpci block             kernel modules loaded:          and exposes
+                              nvidia, nvidia_uvm,             nvidia.com/gpu
+                              nvidia_drm, nvidia_modeset
+                                                              DCGM Exporter sends
+                              CDI supplied by the             GPU metrics to
+                              container-toolkit extension     Prometheus
 ```
 
 **Proxmox side:** Ansible owns the physical host's IOMMU parameters, VFIO
@@ -537,13 +537,14 @@ PCI devices to guests:
 **Talos side** (handled by `talos-gpu-patch.yaml`):
 - Installs `nvidia-container-toolkit` and `nvidia-open-gpu-kernel-modules` as Talos system extensions (baked into the OS image, not Kubernetes DaemonSets).
 - Loads four kernel modules at boot: `nvidia`, `nvidia_uvm`, `nvidia_drm`, `nvidia_modeset`.
-- Writes a containerd config snippet to `/etc/cri/conf.d/20-customization.part` that registers the `nvidia` runtime as the default container runtime on GPU nodes.
+- Uses Talos 1.13's CDI support and the toolkit extension to make NVIDIA devices available to the container runtime.
 - Sets `vm.nr_hugepages = 1024` for large-memory GPU workloads.
 
-**Kubernetes side** (handled inline in `talos-cluster/main.tf`):
+**Kubernetes side** (Terraform labels plus the Argo-managed GPU Operator):
 - GPU nodes get labels: `nvidia.com/gpu.present=true`, `homelab.dev/role=gpu-worker`, `homelab.dev/gpu-node=<hostname>`.
 - Dedicated GPU nodes get taint `nvidia.com/gpu=true:NoSchedule`; mixed-role `gpu-3` deliberately omits it so ordinary pods have a worker.
-- You still need to deploy the [NVIDIA device plugin DaemonSet](https://github.com/NVIDIA/k8s-device-plugin) via ArgoCD to expose `nvidia.com/gpu` as a schedulable resource. Place that manifest in `kubernetes/system/`.
+- ArgoCD installs NVIDIA GPU Operator v26.3.1 with its driver and toolkit disabled because Talos owns those host components.
+- GPU Operator deploys node-feature-discovery, the NVIDIA device plugin, validation operands, and DCGM Exporter. Prometheus discovers DCGM through a `ServiceMonitor`.
 
 ---
 
@@ -591,7 +592,7 @@ To deploy a new workload, add an ArgoCD `Application` manifest to `kubernetes/ap
 | Directory                    | Purpose |
 |------------------------------|---------|
 | `kubernetes/apps/`           | ArgoCD Application manifests — each one points to a Helm chart or kustomize path |
-| `kubernetes/system/`         | Cluster-wide infrastructure (cert-manager, ingress-nginx, nvidia-device-plugin, etc.) |
+| `kubernetes/system/`         | Cluster-wide infrastructure (storage, private gateways, NVIDIA GPU Operator support, etc.) |
 | `kubernetes/system/storage/` | NFS-backed PVs + StorageClasses (e.g. `storage1-bulk.yaml`) |
 | `kubernetes/bootstrap/`      | One-time setup resources that don't fit the ArgoCD lifecycle |
 
@@ -689,7 +690,7 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 
 - [x] **Reconcile retired-host Terraform state before apply.** The production cluster stack was audited, destroyed, and recreated through saved Terraform plans on 2026-07-24 without deleting remote state or touching unrelated infrastructure.
 - [x] **Plan the single-control-plane rebuild explicitly.** `cp-1` was rebuilt on `smallgpu`, etcd bootstrapped, and the API VIP verified on 2026-07-24.
-- [ ] Deploy NVIDIA device plugin DaemonSet via ArgoCD (in `kubernetes/system/`)
+- [x] Define NVIDIA GPU Operator through ArgoCD with Talos-managed driver/toolkit
 - [x] Prepare and verify `smallgpu` RTX 2060 passthrough — all four functions use `vfio-pci` and `/dev/vfio/18` exists after the explicitly approved reboot
 - [x] Prepare and verify `largegpu` RTX 3080 passthrough — both functions use `vfio-pci` and `/dev/vfio/21` exists; Windows VMs remained stopped during convergence
 - [ ] Deploy ingress controller + cert-manager for TLS termination
