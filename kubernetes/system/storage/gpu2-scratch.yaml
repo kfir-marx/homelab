@@ -1,0 +1,54 @@
+# Disposable node-local storage backed by largegpu's HDD and attached to Talos
+# VM gpu-2 as a 400 GiB virtual disk. Talos provisions and mounts the user
+# volume at /var/mnt/gpu-scratch. This tier is for replaceable caches, temporary
+# datasets, model files, builds, and transcoding workspace only.
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: gpu2-scratch-pv
+  labels:
+    storage: gpu2-scratch
+    medium: hdd
+    tier: scratch
+spec:
+  capacity:
+    storage: 390Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-gpu-scratch
+  local:
+    path: /var/mnt/gpu-scratch
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - gpu-2
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-gpu-scratch
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+---
+# Example claim: copy into the consuming workload's namespace and mount it only
+# from workloads that may be scheduled on gpu-2.
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: gpu-scratch
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   storageClassName: local-gpu-scratch
+#   resources:
+#     requests:
+#       storage: 390Gi
+#   volumeName: gpu2-scratch-pv
