@@ -1,17 +1,18 @@
-# Homelab — GitOps Kubernetes on Proxmox and libvirt
+# Homelab — GitOps Kubernetes on Proxmox
 
-GitOps-driven Kubernetes architecture running Talos Linux across two Proxmox
-hosts and one Ubuntu QEMU/KVM workstation. The optional Windows 11 gaming VM on
+GitOps-driven Kubernetes architecture running Talos Linux on two Proxmox
+hosts. The separate Ubuntu workstation supplies critical NFS storage and keeps
+its NVIDIA GPU for local graphics. The optional Windows 11 gaming VM on
 `largegpu` still shares the RTX 3080 with a Talos worker. Ansible configures
-physical hosts, Terraform/Terragrunt provisions Proxmox and libvirt VMs and
-bootstraps Talos, and ArgoCD owns in-cluster workloads.
+physical hosts, Terraform/Terragrunt provisions Proxmox VMs and bootstraps
+Talos, and ArgoCD owns in-cluster workloads.
 
 > **Architecture transition (2026-07-28):** Proxmox was removed completely
 > from `192.168.1.105`. Ubuntu 26.04 now runs directly on that laptop, serves
-> the existing critical NFS volume, and hosts a `4 vCPU / 6 GiB / 50 GB`
-> libvirt Talos VM with GTX 1060 passthrough. The remaining Proxmox nodes are
-> unchanged. The cluster still has one control plane and is intentionally not
-> control-plane HA.
+> the existing critical NFS volume, and owns the GTX 1060 and HDMI output. The
+> attempted workstation-hosted Talos VM was retired because HDMI is physically
+> routed through the passed-through NVIDIA GPU. The remaining Proxmox nodes are
+> unchanged. The cluster has one control plane and is intentionally not HA.
 
 ---
 
@@ -22,7 +23,7 @@ bootstraps Talos, and ArgoCD owns in-cluster workloads.
 │                        Git repository (this repo)                   │
 │                                                                     │
 │  ansible/             Configures Proxmox + Ubuntu physical hosts    │
-│  terraform/           Provisions Proxmox/libvirt VMs + Talos        │
+│  terraform/           Provisions Proxmox VMs + Talos                │
 │  kubernetes/          ArgoCD-managed app manifests + storage PVs    │
 │  .github/workflows/   CI: lint, validate, security scan, plan       │
 │  atlantis.yaml        PR-driven terragrunt plan/apply               │
@@ -37,17 +38,15 @@ bootstraps Talos, and ArgoCD owns in-cluster workloads.
 │  Proxmox VE 9 (2 hosts)          │   │  Kubernetes / Talos 1.13    │
 │                                  │   │                              │
 │  smallgpu  ── cp-1               │   │  cp-1   2c / 4 GiB          │
-│            ── gpu-3 + RTX 2060   │   │  gpu-1  4c / 6 GiB / GTX1060│
 │            ── 10 TB bulk NFS     │   │  gpu-2 16c / 56 GiB / RTX3080│
-│                                  │   │  gpu-3 10c / 8 GiB / RTX2060│
+│            ── gpu-3 + RTX 2060   │   │  gpu-3 10c / 8 GiB / RTX2060│
 │  largegpu  ── gpu-2 / Windows    │   │                              │
 │               runtime mutex      │   │  NFS PVs (static, RWX):     │
 │                                  │   │   bulk     → smallgpu       │
 ├──────────────────────────────────┤   │   critical → Ubuntu :105    │
-│  Ubuntu 26.04 + libvirt          │   └──────────────────────────────┘
-│  192.168.1.105 ── gpu-1          │
-│                ── GTX 1060 VFIO  │
-│                ── 800 GB NFS     │
+│  Ubuntu 26.04 workstation        │   └──────────────────────────────┘
+│  192.168.1.105 ── 800 GB NFS     │
+│                ── GTX 1060/HDMI  │
 └──────────────────────────────────┘
 ```
 
@@ -55,7 +54,7 @@ bootstraps Talos, and ArgoCD owns in-cluster workloads.
 
 | Host | Mgmt IP | Host OS / hypervisor | CPU / RAM | GPU | Primary role |
 |------|---------|----------------------|-----------|-----|--------------|
-| `ubuntu-workstation` | `192.168.1.105` on `br0` | Ubuntu 26.04 + QEMU/KVM/libvirt | Intel i7-8750H, 6c/12t; 15.46 GiB | Intel UHD 630 for Ubuntu; GTX 1060 Mobile for `gpu-1` | Daily workstation, critical NFS, Talos GPU worker |
+| `ubuntu-workstation` | `192.168.1.105` on `enp7s0f1` | Ubuntu 26.04 | Intel i7-8750H, 6c/12t; 15.46 GiB | Intel UHD 630 + GTX 1060 Mobile for Ubuntu | Daily workstation and critical NFS |
 | `smallgpu` | `192.168.1.106` | Proxmox VE 9 | Ryzen 5 3600, 6c/12t; 15.55 GiB | RTX 2060 | Control plane, mixed GPU worker, 10 TB bulk NFS |
 | `largegpu` | `192.168.1.107` | Proxmox VE 9 | Ryzen 7 5800X, 8c/16t; 62.70 GiB | RTX 3080 LHR | Talos GPU / Windows runtime mutex |
 
@@ -71,34 +70,34 @@ The reserved cluster VIP is `192.168.1.210` — the Talos control-plane VIP and 
 
 ### Workstation transition snapshot (2026-07-28)
 
-The Ubuntu workstation currently has libvirt/virt-manager installed and a
-manually created, stopped `talos-worker` domain. Its copied 60 GiB qcow2 is
-healthy, but the VM was configured with Secure Boot while the copied Talos
-artifact is the normal non-Secure-Boot image. Its NIC also uses libvirt's
-NAT-only `default` network. Terraform replaces this design with `gpu-1`: plain
-OVMF UEFI, q35, a virtio system disk, `br0`, and both GTX 1060 functions.
+The attempted `talos-worker` domain is no longer defined and no QEMU process is
+running. The Talos design was retired after confirming that this PH315-51's
+only native external-display output requires the GTX 1060. The workstation
+Ansible play removes the retired virtualization packages and VFIO boot files;
+after an explicit reboot, Ubuntu's NVIDIA and HDMI-audio drivers reclaim both
+GPU functions.
 
 The existing 800 GB ext4 LV is present at
 `/dev/mapper/gpu1--extra-storage2--bulk` with UUID
-`07445d19-37d4-4353-af1a-9511fb9c74e9`, but it is not yet mounted and
-`nfs-kernel-server` is not yet installed on the fresh Ubuntu OS. The Ubuntu
-Ansible play restores the same `/mnt/storage2-bulk` path and `fsid=10` export,
-so Kubernetes PV definitions do not change.
+`07445d19-37d4-4353-af1a-9511fb9c74e9`. It is mounted read/write at
+`/mnt/storage2-bulk`, and `nfs-kernel-server` is active with the LAN `fsid=10`
+export. The Ubuntu Ansible play owns that state, so Kubernetes PV definitions
+do not change.
 
 The live state changed during the 2026-07-22 review: `smallgpu` now has the UUID-based `ntfs3` fstab entry, `/mnt/data10tb` is mounted read/write without a `force` option, and the intended `fsid=1` export is active. Earlier kernel logs recorded a dirty-volume refusal, so Ansible still treats an unmounted dirty or hibernated NTFS filesystem as a hard failure and never clears the flag or force-mounts it. A read-only client mount from a Talos worker succeeded on 2026-07-24.
 
-On the fresh Ubuntu install, the GTX 1060 currently uses `nvidia` and its audio
-function uses `snd_hda_intel`; IOMMU group 2 contains the upstream PCI bridge
-and both GPU functions. `configure-ubuntu-workstation.yml` stages
-`intel_iommu=on iommu=pt` and binds PCI IDs `10de:1c20` and `10de:10f1` to
-`vfio-pci` after an explicit reboot. The Intel UHD 630 remains on `i915`.
+At the decision point, the GTX 1060 and HDMI-audio function still used
+`vfio-pci` because the previous play had staged early boot binding. The updated
+`configure-ubuntu-workstation.yml` removes those generated settings and
+rebuilds initramfs/GRUB. A reboot is required before `nvidia` and
+`snd_hda_intel` can reclaim the devices.
 
 ### Configuration ownership boundary
 
 Each layer has a deliberately non-overlapping owner:
 
-- **Ansible owns physical host configuration:** Proxmox packages/storage/backups/NFS/VFIO on the two PVE hosts, and libvirt packages, NFS, and VFIO boot configuration on Ubuntu. It never partitions or formats disks, detaches a live GPU, activates the workstation bridge, or reboots the workstation.
-- **Terraform/Terragrunt owns virtual infrastructure and Talos bootstrap:** Proxmox VMs, the Ubuntu libvirt `gpu-1` domain and volumes, PCI attachment, Talos machine configuration, cluster bootstrap, and initial ArgoCD/application bootstrap.
+- **Ansible owns physical host configuration:** Proxmox packages/storage/backups/NFS/VFIO on the two PVE hosts and NFS on Ubuntu. It never partitions or formats disks, changes the active workstation network profile, or reboots the workstation.
+- **Terraform/Terragrunt owns virtual infrastructure and Talos bootstrap:** Proxmox VMs, PCI attachment, Talos machine configuration, cluster bootstrap, and initial ArgoCD/application bootstrap.
 - **ArgoCD owns in-cluster resources:** applications, system controllers, and static Kubernetes PV/StorageClass declarations. Kubernetes manifests do not configure their physical NFS servers.
 
 Proxmox installation and cluster joining remain prerequisites only for
@@ -114,13 +113,12 @@ The staged design is:
 
 | Stage | Control plane | Workers | Availability trade-off |
 |-------|---------------|---------|------------------------|
-| Constrained / configured | One `2 vCPU / 4 GiB` VM on `smallgpu` | `gpu-1` GTX 1060 `4 vCPU / 6 GiB`; `gpu-2` RTX 3080 `16 vCPU / 56 GiB`; `gpu-3` RTX 2060 `10 vCPU / 8 GiB` | Not control-plane HA. The workstation keeps roughly 9 GiB before QEMU overhead; `gpu-2` stops for Windows |
-| Future HA | Three `2 vCPU / 4 GiB` control planes across distinct physical hosts | Right-size workers independently after observing real usage | Requires additional workstation/smallgpu memory or reduced workers |
+| Constrained / configured | One `2 vCPU / 4 GiB` VM on `smallgpu` | `gpu-2` RTX 3080 `16 vCPU / 56 GiB`; `gpu-3` RTX 2060 `10 vCPU / 8 GiB` | Not control-plane HA; `gpu-2` stops for Windows |
+| Future HA | Three `2 vCPU / 4 GiB` control planes across distinct Proxmox hosts | Right-size workers independently after observing real usage | Requires at least one additional virtualization host and memory headroom |
 
-`gpu-1` is deliberately a 6 GiB mixed-role worker rather than an 8–12 GiB VM:
-Ubuntu is now the interactive workstation and NFS server. The worker and NFS
-server share a physical failure domain, but storage remains reachable from all
-other LAN-connected nodes whenever Ubuntu is up.
+The Ubuntu workstation deliberately runs no Kubernetes VM. Its constrained
+memory remains available to the interactive desktop and NFS, while any
+LAN-connected Kubernetes node can mount the critical export.
 
 ### Retired Terraform topology
 
@@ -142,7 +140,7 @@ Practical consequences that the rest of this document depends on:
 - **Critical / personal data stays on `ubuntu-workstation`.** Personal cloud, config snapshots, and anything irreplaceable bind against `storage2-bulk-pv`.
 - **Bulk / non-critical / reproducible data goes on the borrowed hosts.** Media libraries (Plex/Jellyfin, *arr stack), large model caches, and anything that can be re-downloaded land on the **bulk tier** (`storage1-bulk-pv` on `smallgpu`, 10 TB).
 - **`smallgpu` is the "big storage server, non-critical" role.** This is the physical host previously named `node6` (and before that `storage1`) at `192.168.1.106`. The Kubernetes PV/StorageClass names (`storage1-bulk-pv`, `nfs-storage1`) remain unchanged so existing bindings continue to resolve.
-- **The workstation is both compute and storage.** Critical pods may mount its NFS export from any node, but `gpu-1` and the export fail together if Ubuntu is down. Storage placement and workload placement protect against different failures and are not substitutes for backups.
+- **The workstation is storage, not cluster compute.** Critical pods may mount its NFS export from any node, but that storage is unavailable whenever Ubuntu is down.
 
 **IP convention:**
 
@@ -151,9 +149,9 @@ Practical consequences that the rest of this document depends on:
 | `192.168.1.101–199` | Physical hosts                       |
 | `192.168.1.200–299` | VMs (role-specific static address pools) |
 
-**Why VMs live on the home subnet:** Proxmox uses `vmbr0` and Ubuntu uses
-`br0`, both bridged to the same LAN. Libvirt's NAT `default` network is not
-valid for a cluster node because other nodes cannot initiate connections to it.
+**Why VMs live on the home subnet:** both Proxmox hosts use `vmbr0`, bridged to
+the same LAN. The Ubuntu workstation uses its physical Ethernet interface
+directly and hosts no VMs.
 
 VM specs, IPs, and PCI/USB device IDs are defined as YAML in [`terraform/deployments/<env>/config.yml`](../terraform/deployments/) and consumed via Terragrunt's hierarchical config-merging in [`root.hcl`](../terraform/deployments/root.hcl). The production YAML now implements the constrained topology described above.
 
@@ -164,11 +162,11 @@ VM specs, IPs, and PCI/USB device IDs are defined as YAML in [`terraform/deploym
 | Cluster VIP      | `192.168.1.210`                 |
 | K8s API endpoint | `https://192.168.1.210:6443`    |
 | Gateway          | `192.168.1.1` (home router)     |
-| Bridges          | Proxmox `vmbr0`; Ubuntu `br0`  |
+| Bridges          | Proxmox `vmbr0`                 |
 | DNS              | `1.1.1.1`, `8.8.8.8`            |
 | CP node IPs      | `cp-1`: `192.168.1.211/24` |
 | Worker IPs       | GPU workers also accept ordinary workloads |
-| GPU node IPs     | `gpu-1`: `.231/24`; `gpu-2`: `.232/24`; `gpu-3`: `.233/24` |
+| GPU node IPs     | `gpu-2`: `.232/24`; `gpu-3`: `.233/24` |
 
 The control-plane VIP is managed by Talos's built-in VIP mechanism — no external load balancer is needed. The replacement control-plane nodes will each need a network-interface `vip` block pointing at the shared VIP.
 
@@ -281,11 +279,11 @@ To consume one: create a PVC in the app's namespace with the matching `storageCl
 
 | Layer              | Tool / Version                                  | Purpose                                                  |
 |--------------------|-------------------------------------------------|----------------------------------------------------------|
-| Hypervisors        | Proxmox VE 9 + Ubuntu libvirt/QEMU/KVM          | VM capacity across three physical hosts                  |
+| Hypervisors        | Proxmox VE 9 on two hosts                       | Talos and Windows VM capacity                            |
 | APT repo           | `pve-no-subscription` (deb822 format)           | Enabled on both Proxmox nodes; enterprise repo disabled  |
 | Node OS (K8s)      | Talos Linux `v1.13.7`                           | Immutable, API-driven Linux — no SSH, no shell           |
 | Node OS (gaming)   | Windows 11 25H2 + virtio drivers (0.1.271)      | One VM, GPU-passthrough'd, manual start                  |
-| VM provisioning    | Terraform + `bpg/proxmox` ~> 0.105.0 + `dmacvicar/libvirt` ~> 0.9.8 | Creates Proxmox and local libvirt VMs |
+| VM provisioning    | Terraform + `bpg/proxmox` ~> 0.105.0            | Creates Proxmox VMs                                      |
 | Cluster bootstrap  | Terraform + `siderolabs/talos` ~> 0.7           | Generates machine configs, applies them, bootstraps etcd |
 | Stack orchestration| Terragrunt 0.63.0                               | Hierarchical YAML config merging + per-env state isolation |
 | Remote state       | S3 `kfir-homelab-tfstate` + native lockfile + IAM role assumption | Encrypted state with cross-account `sts:AssumeRole` |
@@ -336,7 +334,7 @@ The longer-term cleaner fix is to switch to PCI Resource Mappings (`mapping = "n
     │   ├── merge_configs.sh              # Hierarchical YAML deep-merge
     │   ├── config.yml                    # Global defaults
     │   ├── prod/
-    │   │   ├── config.yml                # Prod VM topology for the current 3-host fleet
+    │   │   ├── config.yml                # Prod VM topology for two Proxmox hosts
     │   │   ├── homelab-cluster/
     │   │   │   └── terragrunt.hcl        # Talos/Kubernetes state
     │   │   └── windows-workstation/
@@ -411,8 +409,7 @@ The `homelab-cluster` apply executes a single DAG with explicit
         ▼
 2. module.control_plane_vms  ─┐
    module.worker_vms          │
-   module.gpu_vms             │
-   module.libvirt_gpu_vms     └──► 3. module.talos_cluster
+   module.gpu_vms             └──► 3. module.talos_cluster
                                             │
                                             ▼
                                 4. Kubernetes API TCP readiness gate
@@ -431,23 +428,19 @@ The `homelab-cluster` apply executes a single DAG with explicit
 ```
 
 **Step 1:** Repo-owned YAML files define separate base and NVIDIA GPU Image
-Factory profiles. Proxmox hosts download their base or RTX artifacts through the
-provider. For libvirt, Terraform runs the repo helper to download and validate
-the Pascal GPU `nocloud-amd64.raw.zst`, convert it into a sparse 50 GB qcow2
-disk, and build a `cidata` ISO containing the initial static network.
+Factory profiles. Proxmox hosts download their base or RTX artifacts through
+the provider.
 
 **Step 2:** Talos VM module fan-outs:
 
 - `control_plane_vms` / `worker_vms` / `gpu_vms` — Talos VMs via `proxmox-vm`.
-- `libvirt_gpu_vms` — q35/OVMF Talos VMs via local system libvirt, with
-  bridged networking and managed PCI host devices.
 
 Windows is deliberately absent from this DAG. The `windows-workstation` state
 manages VM 502 independently so workstation drift cannot block cluster changes.
 
 Physical host networking is intentionally absent from the Terraform DAG.
-Proxmox `vmbr0` already exists; Ubuntu `br0` is an explicit, locally activated
-NetworkManager prerequisite documented in the Ansible runbook.
+Proxmox `vmbr0` already exists. Ubuntu's direct Ethernet and NFS address are
+documented in the workstation runbook and are not VM prerequisites.
 
 **Step 3:** The `talos-cluster` module generates per-node machine configurations using `talos_machine_configuration` data sources. Each node gets a config patch with its hostname, static IP, and routes. The built-in CNI and kube-proxy are disabled, and Kubernetes is explicitly pinned to a version supported by both Talos and Cilium. GPU nodes additionally receive the `talos-gpu-patch.yaml` (module/runtime activation) and labels/taints; the NVIDIA extensions themselves are already in the GPU disk image. The module then applies configs via `talos_machine_configuration_apply`, bootstraps etcd on the first control-plane node, and retrieves the kubeconfig. It deliberately does not wait for Kubernetes node readiness because that cannot happen before Cilium exists.
 
@@ -478,23 +471,6 @@ Creates a single Proxmox QEMU VM for Talos. Key behaviors:
 - **PCIe passthrough:** Dynamic `hostpci` block iterating over `var.pci_devices`. Empty list = no passthrough.
 - **`on_boot = true`** — Talos VMs auto-start with the host.
 - **Tags:** `["talos", "terraform"]`.
-
-### Module: `libvirt-talos-vm`
-
-Creates the workstation-hosted `gpu-1` domain through system libvirt:
-
-- **Sizing:** 4 host-passthrough vCPUs, 6144 MiB RAM, and a sparse 50 GiB qcow2 disk.
-- **Firmware:** q35 with explicitly non-Secure-Boot OVMF. This fixes the manual
-  virt-manager domain that repeatedly returned to the UEFI boot picker.
-- **Networking:** fixed MAC on Ubuntu `br0`; a CIDATA ISO assigns
-  `192.168.1.231/24` before the Talos API configuration apply.
-- **GPU:** managed libvirt PCI host devices for `0000:01:00.0` and `.1`.
-- **Image:** the same Talos version and GPU machine configuration as the
-  Proxmox workers, but a Pascal-specific Image Factory profile with the
-  proprietary R580 LTS driver.
-- **Lifecycle:** running and autostart enabled. The old manual `talos-worker`
-  domain is outside Terraform and must be undefined once its copied disk is no
-  longer needed.
 
 ### Module: `proxmox-windows-vm`
 
@@ -534,11 +510,6 @@ Defined as `map(object)` variables — the map key is the hostname.
 
 # gpu_nodes:
 #   ... same as above + pci_devices: list({ id, pcie })
-
-# libvirt_gpu_nodes:
-#   ip_address, cores, memory_mb, disk_size_gb, pool, bridge, mac_address,
-#   ovmf_code, ovmf_vars,
-#   pci_devices: list({ domain, bus, slot, function })
 
 # windows_vms:
 #   proxmox_node, vm_id, cores, memory_mb, disk_size_gb,
@@ -605,19 +576,15 @@ via hostpci/hostdev           kernel modules loaded:          and exposes
 
 **Physical-host side:** Ansible owns IOMMU parameters, VFIO
 modules, PCI ID binding, driver blacklists, initramfs update, and verification.
-Terraform's Proxmox and libvirt modules only attach the prepared devices:
+Terraform's Proxmox module only attaches the prepared devices:
 - GPU VMs use `bios = "ovmf"` and `machine = "q35"`.
-- GPU addresses are Ubuntu `01:00.0/.1` for `gpu-1`, Proxmox `08:00` for `gpu-2`/Windows, and Proxmox `09:00` for `gpu-3`.
-- `gpu-1` uses non-Secure-Boot OVMF because the normal Image Factory raw artifact is not the separate SecureBoot image.
+- GPU addresses are Proxmox `08:00` for `gpu-2`/Windows and Proxmox `09:00` for `gpu-3`.
 - AMD-V (SVM) must be enabled in BIOS on AMD hosts (largegpu, smallgpu).
-- Ansible stages `intel_iommu=on` or `amd_iommu=on`, verifies the complete IOMMU group, and binds the declared GPU functions to `vfio-pci` after an explicitly approved reboot.
+- Ansible stages `amd_iommu=on`, verifies the complete IOMMU group, and binds the declared GPU functions to `vfio-pci` after an explicitly approved reboot.
 
 **Talos side** (handled by `talos-gpu-patch.yaml`):
 - Installs NVIDIA kernel modules and the matching container toolkit as Talos
-  system extensions. RTX nodes use the production open-driver profile.
-  `gpu-1` uses proprietary R580 LTS because Pascal is unsupported by the open
-  modules. CUDA workloads scheduled on `gpu-1` must remain on CUDA 12.x because
-  [CUDA 13 drops Pascal](https://docs.nvidia.com/cuda/archive/13.0.0/cuda-toolkit-release-notes/index.html).
+  system extensions. Both RTX nodes use the production open-driver profile.
 - Loads four kernel modules at boot: `nvidia`, `nvidia_uvm`, `nvidia_drm`, `nvidia_modeset`.
 - Uses Talos 1.13's CDI support and the toolkit extension to make NVIDIA devices available to the container runtime.
 - Sets `vm.nr_hugepages = 1024` for large-memory GPU workloads.
@@ -635,16 +602,13 @@ Terraform's Proxmox and libvirt modules only attach the prepared devices:
 ### GitHub Actions (`.github/workflows/terraform-plan.yml`)
 
 Triggers on PRs to `main` that touch `terraform/**`. Runs lint and security
-checks, validates the cluster module and all provider schemas without remote
-state, and plans the Proxmox-only `windows-workstation` stack.
+checks and plans both Proxmox-backed Terraform stacks.
 
 1. **Lint & Format** — `terraform fmt -check -recursive` + `terragrunt hclfmt --terragrunt-check`.
 2. **Security Scan** — `tfsec` via the `aquasecurity/tfsec-action`. Currently `soft_fail: true` (non-blocking) — tighten once rules are tuned.
-3. **Cluster Validate** — runs `terraform init -backend=false` and
-   `terraform validate`. A real cluster plan is local-only because
-   `qemu:///system` refers to the Ubuntu workstation.
-4. **Windows Plan** — runs `terragrunt plan` and posts the output as a PR
-   comment. It uses the Proxmox and AWS credentials supplied to CI.
+3. **Plan matrix** — runs `terragrunt plan` for `homelab-cluster` and
+   `windows-workstation` and posts each output as a PR comment. It uses the
+   Proxmox and AWS credentials supplied to CI.
 
 The plan job depends on lint + security passing first.
 
@@ -652,16 +616,14 @@ The plan job depends on lint + security passing first.
 
 Atlantis provides the PR-driven plan/apply workflow:
 
-- **Watches:** Atlantis covers `windows-workstation` only.
+- **Watches:** Separate projects cover `homelab-cluster` and `windows-workstation`.
 - **Auto-plan:** Enabled — opens a plan on every PR that modifies watched files.
 - **Apply requirements:** `approved` + `mergeable`.
 - **Parallel plan:** Enabled. **Parallel apply:** Disabled (one environment at a time).
 - **Workflow:** Custom `terragrunt` workflow that runs `terragrunt plan -out=$PLANFILE` and `terragrunt apply $PLANFILE`.
 
-The cluster stack is deliberately excluded from Atlantis: applying it anywhere
-except `ubuntu-workstation` would point libvirt at the wrong host or a missing
-socket. Run its plan/apply with `terraform/run-terragrunt.sh` on the workstation.
-Atlantis continues to provide gated apply for the independent Windows stack.
+Both stacks are Proxmox-only, so Atlantis can provide gated apply for each
+without access to the Ubuntu workstation.
 
 ---
 
@@ -726,10 +688,10 @@ separate Cloudflare Tunnel path and do not traverse the tailnet.
 
 ### Prerequisites
 
-1. **Physical hosts:** Proxmox VE 9 on `smallgpu` and `largegpu`, both joined to `HomeLab-Cluster`; Ubuntu 26.04 on `ubuntu-workstation`; virtualization/IOMMU enabled in firmware. Run the matching [Ansible host configuration](../ansible/README.md) first.
+1. **Physical hosts:** Proxmox VE 9 on `smallgpu` and `largegpu`, both joined to `HomeLab-Cluster`; Ubuntu 26.04 NFS server on `ubuntu-workstation`; virtualization/IOMMU enabled on the Proxmox hosts. Run the matching [Ansible host configuration](../ansible/README.md) first.
 2. **Proxmox root password** — used by the Proxmox provider for `root@pam` API authentication and provider-managed SSH operations; Terraform has no host-configuration `remote-exec` resources.
 3. **AWS account** with an IAM role that can manage the state and lockfile objects. Local AWS credentials need `sts:AssumeRole` on that role.
-4. **Workstation tools:** Ansible Core 2.16+, `terraform >= 1.7`, `terragrunt`, `talosctl`, `kubectl`, `helm`, `genisoimage`, `qemu-img`, and `zstd`.
+4. **Administration tools:** Ansible Core 2.16+, `terraform >= 1.7`, `terragrunt`, `talosctl`, `kubectl`, and `helm`.
 5. **For Windows VM install:** `Win11_25H2_*.iso` + `virtio-win.iso` (v0.1.271) uploaded to the largegpu host's `local` ISO datastore.
 
 ### Deploy
@@ -787,7 +749,7 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 - [ ] Deploy ingress controller + cert-manager for TLS termination
 - [x] **Configure the bulk NTFS export on smallgpu** — UUID-based `ntfs3` mount and `fsid=1` export observed active on 2026-07-22; Ansible now owns and safety-checks this state
 - [ ] **Restore and verify critical NFS on Ubuntu** — run `configure-ubuntu-workstation.yml`, then verify the ext4 mount, LAN export, and a Talos client mount
-- [ ] **Prepare `gpu-1`** — activate `br0`, reboot into VFIO ownership, remove the manual `talos-worker` domain, and apply the cluster stack
+- [ ] **Restore workstation graphics** — run `configure-ubuntu-workstation.yml`, reboot, and verify the GTX 1060 uses `nvidia` and HDMI works
 - [x] **Verify the bulk NFS export from Talos** — read-only mount of `192.168.1.106:/mnt/data10tb` succeeded from a worker on 2026-07-24
 - [ ] Deploy media stack PVC(s) bound to `storage1-bulk-pv` (bulk tier)
 - [ ] Deploy Immich + any other personal/critical workloads with PVCs bound to `storage2-bulk-pv` (critical tier) — **never** point critical apps at `storage1-bulk-pv`, smallgpu is borrowed
@@ -810,4 +772,4 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 - **The `largegpu` mutex is enforced at runtime, not config time.** Two VMs sharing one GPU = one runs, the other can't start. This lets you flip between them in seconds with no Terraform churn.
 - **Bulk media storage is NTFS+NFS, not Ceph/Longhorn.** The 10 TB drive on smallgpu has existing NTFS data worth preserving. Ansible safety-checks and mounts it with the kernel `ntfs3` driver, then manages its NFSv4 export.
 - **Two storage tiers are split by host permanence, not performance.** Critical data binds to `storage2-bulk-pv` on Ubuntu; reproducible bulk data binds to `storage1-bulk-pv` on borrowed `smallgpu`.
-- **VM sizing follows per-host headroom.** Production uses one `2 vCPU / 4 GiB` control plane and three GPU workers. `gpu-1` is capped at 6 GiB so the interactive Ubuntu host and NFS retain usable memory.
+- **VM sizing follows per-host headroom.** Production uses one `2 vCPU / 4 GiB` control plane and two GPU workers. The Ubuntu workstation runs no Kubernetes VM.

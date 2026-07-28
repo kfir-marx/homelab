@@ -1,7 +1,7 @@
 # immich-machine-learning — runs CLIP (smart search) + facial
 # recognition models. CPU-only image; switch to the `-cuda` or
 # `-openvino` variant + add a GPU toleration if you want to push it
-# onto gpu-1 or gpu-2. For now, CPU on a regular worker is fine for a
+# onto gpu-2 or gpu-3. For now, CPU on a regular worker is fine for a
 # personal-scale library; first-time indexing is the only slow part.
 #
 # Models are downloaded on first use into /cache (emptyDir). If you'd

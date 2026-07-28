@@ -37,8 +37,6 @@ locals {
       "cilium_load_balancer_ip_start",
       "cilium_load_balancer_ip_stop",
       "talos_image_datastore",
-      "libvirt_uri",
-      "libvirt_asset_dir",
       "network_bridge",
       "network_nameservers",
       "argocd_repo_url",
@@ -51,7 +49,6 @@ locals {
       "control_plane_nodes",
       "worker_nodes",
       "gpu_nodes",
-      "libvirt_gpu_nodes",
     ]
     windows-workstation = [
       "proxmox_api_url",

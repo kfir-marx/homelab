@@ -2,8 +2,8 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  Production environment                                                    ║
 # ║                                                                            ║
-# ║  1 control plane + 3 GPU workers on the home LAN (192.168.1.0/24).        ║
-# ║  Two workers use Proxmox; gpu-1 uses libvirt on the Ubuntu workstation.   ║
+# ║  1 control plane + 2 GPU workers on the home LAN (192.168.1.0/24).        ║
+# ║  All Talos nodes run on the two remaining Proxmox hosts.                  ║
 # ║                                                                            ║
 # ║  IP convention (matches the rest of the homelab):                          ║
 # ║    192.168.1.101–199  → physical machines (Proxmox hosts, etc.)            ║
@@ -88,27 +88,3 @@ gpu_nodes:
     pci_devices:
       - id: "09:00"
         pcie: true
-
-# ── Ubuntu workstation GPU node (QEMU/KVM + libvirt) ────────────────────────
-# The former gpunvdgtx1060 Proxmox node no longer exists. Ubuntu runs directly
-# on the laptop and uses Intel UHD 630 for its display. The GTX 1060 functions
-# are bound to vfio-pci and assigned to this Talos worker.
-libvirt_gpu_nodes:
-  gpu-1:
-    ip_address: "192.168.1.231/24"
-    cores: 4
-    memory_mb: 6144
-    disk_size_gb: 50
-    dedicated: false
-    pool: "default"
-    bridge: "br0"
-    mac_address: "52:54:00:01:02:31"
-    pci_devices:
-      - domain: 0
-        bus: 1
-        slot: 0
-        function: 0
-      - domain: 0
-        bus: 1
-        slot: 0
-        function: 1

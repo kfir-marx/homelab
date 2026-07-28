@@ -8,9 +8,10 @@ directly attached UPS with Network UPS Tools (NUT).
 
 The former `gpunvdgtx1060` node is no longer a Proxmox host. The separate
 `configure-ubuntu-workstation.yml` play configures its replacement Ubuntu
-installation locally: libvirt tooling, the existing critical NFS filesystem
-and export, and boot-time VFIO ownership of the GTX 1060. Terraform, not
-Ansible or virt-manager, owns the final `gpu-1` domain definition.
+installation locally as an NFS-only homelab host. It mounts and exports the
+existing critical filesystem, removes the retired libvirt packages and VFIO
+boot configuration, and returns the GTX 1060 and HDMI output to Ubuntu after
+an explicit reboot.
 
 ## Prerequisites and credentials
 
@@ -54,53 +55,49 @@ inventory explicitly uses the already-installed, compatible
 `/usr/bin/sudo.ws` executable for Ansible become operations. This does not
 change the system-wide `sudo` alternative.
 
-This play is safe to run before the network bridge exists. It mounts
+This play is safe to run while the workstation still uses DHCP. It mounts
 `UUID=07445d19-37d4-4353-af1a-9511fb9c74e9` at
-`/mnt/storage2-bulk`, restores its LAN NFS export, and stages VFIO for the next
-reboot. It does not activate a bridge or reboot the workstation.
+`/mnt/storage2-bulk`, restores its LAN NFS export, removes the retired
+virtualization packages and VFIO boot files, and rebuilds initramfs/GRUB when
+required. It does not change the active network connection or reboot the
+workstation.
 
-## Ubuntu workstation LAN bridge
+## Ubuntu workstation recovery and network
 
-The Talos VM must be a first-class LAN peer. Libvirt's `default` network
-(`192.168.122.0/24`) is NAT-only and cannot satisfy the cluster's static
-`192.168.1.231` endpoint. From a local graphical session, create and activate
-the NetworkManager bridge below. This temporarily interrupts Ethernet, changes
-the workstation from its current DHCP address to its reserved
-`192.168.1.105`, and should not be run over SSH:
+Reboot after the Ubuntu play removes the VFIO boot configuration. The current
+kernel cannot return a boot-bound display GPU to the NVIDIA driver safely in
+place. After reboot, verify `01:00.0` uses `nvidia`, `01:00.1` uses
+`snd_hda_intel`, and HDMI appears in Ubuntu Displays.
+
+The Kubernetes PVs still require the workstation's reserved
+`192.168.1.105` address. No bridge is needed now that the Talos VM is retired.
+From a local graphical session, configure the existing Ethernet profile. This
+temporarily interrupts Ethernet and should not be run over SSH:
 
 ```bash
-sudo nmcli connection add \
-  type bridge ifname br0 con-name homelab-br0 \
-  bridge.stp no \
-  ipv4.method manual ipv4.addresses 192.168.1.105/24 \
-  ipv4.gateway 192.168.1.1 ipv4.dns "1.1.1.1,8.8.8.8" \
+sudo nmcli connection modify netplan-enp7s0f1 \
+  ipv4.method manual \
+  ipv4.addresses 192.168.1.105/24 \
+  ipv4.gateway 192.168.1.1 \
+  ipv4.dns "1.1.1.1,8.8.8.8" \
   ipv6.method auto
-
-sudo nmcli connection add \
-  type ethernet ifname enp7s0f1 con-name homelab-br0-port \
-  master br0 slave-type bridge
-
-sudo nmcli connection modify netplan-enp7s0f1 connection.autoconnect no
-sudo nmcli connection up homelab-br0
+sudo nmcli connection up netplan-enp7s0f1
 ```
 
-After reconnecting, verify `ip -br address show br0` reports
-`192.168.1.105/24`. If activation fails, restore the previous connection
-locally with `sudo nmcli connection up netplan-enp7s0f1`.
-
-Reboot after the Ubuntu play has staged VFIO. Before applying Terraform, verify:
+After reconnecting, verify:
 
 ```bash
-ip -br address show br0
+ip -br address show enp7s0f1
 findmnt /mnt/storage2-bulk
-systemctl is-active nfs-kernel-server libvirtd
+systemctl is-active nfs-kernel-server
 sudo exportfs -v
 lspci -nnk -s 01:00.0
 lspci -nnk -s 01:00.1
+nvidia-smi
 ```
 
-Both NVIDIA functions must report `Kernel driver in use: vfio-pci`; the Intel
-UHD 630 at `00:02.0` must remain on `i915`.
+The workstation runbook contains the complete recovery and NFS verification
+procedure.
 
 ## First execution
 

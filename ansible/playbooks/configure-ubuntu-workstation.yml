@@ -1,5 +1,5 @@
 ---
-- name: Configure the Ubuntu libvirt and NFS workstation
+- name: Configure the Ubuntu NFS workstation
   hosts: ubuntu_workstations
   become: true
   gather_facts: true
@@ -15,93 +15,59 @@
           {{ workstation_expected_hostname }}, found {{ ansible_distribution }}
           {{ ansible_hostname }}.
 
-    - name: Read the live workstation IOMMU group members
-      ansible.builtin.command:
-        argv:
-          - ls
-          - --format=single-column
-          - "/sys/kernel/iommu_groups/{{ vfio_passthrough_iommu_group }}/devices"
-      register: workstation_iommu_group
-      changed_when: false
+    - name: Install workstation NFS packages
+      ansible.builtin.apt:
+        name:
+          - nfs-common
+          - nfs-kernel-server
+        state: present
+        update_cache: true
 
-    - name: Require the exact declared IOMMU group
-      ansible.builtin.assert:
-        that:
-          - >-
-            (workstation_iommu_group.stdout_lines | sort)
-            ==
-            (vfio_passthrough_expected_group_members
-             | map(attribute='address')
-             | map('regex_replace', '^', '0000:')
-             | sort)
-        fail_msg: >-
-          IOMMU group {{ vfio_passthrough_iommu_group }} differs from inventory.
-          Refusing to stage GPU passthrough until every live group member is
-          understood.
-
-    - name: Install workstation virtualization, image, and NFS packages
+    - name: Remove retired Talos virtualization packages
       ansible.builtin.apt:
         name:
           - bridge-utils
-          - curl
           - genisoimage
           - libvirt-clients
           - libvirt-daemon-system
-          - nfs-common
-          - nfs-kernel-server
           - ovmf
           - qemu-system-x86
           - qemu-utils
           - virt-manager
-          - zstd
-        state: present
-        update_cache: true
+        state: absent
 
-    - name: Allow the workstation user to manage system libvirt
-      ansible.builtin.user:
-        name: "{{ workstation_primary_user }}"
-        groups:
-          - kvm
-          - libvirt
-        append: true
-
-    - name: Enable the system libvirt daemon
-      ansible.builtin.service:
-        name: libvirtd
-        enabled: true
-        state: started
+    - name: Remove retired workstation VFIO boot configuration
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/modules-load.d/homelab-vfio.conf
+        - /etc/modprobe.d/homelab-vfio.conf
+        - /etc/modprobe.d/homelab-gpu-blacklist.conf
+        - /etc/default/grub.d/99-homelab-vfio.cfg
+      register: workstation_vfio_cleanup
+      notify:
+        - Rebuild workstation initramfs
+        - Update workstation GRUB
 
   roles:
-    - role: vfio_passthrough
-      tags:
-        - vfio
     - role: nfs_server
       tags:
         - nfs
 
   post_tasks:
-    - name: Check for the required LAN bridge
-      ansible.builtin.command:
-        argv:
-          - ip
-          - link
-          - show
-          - "{{ workstation_bridge }}"
-      register: workstation_bridge_state
-      changed_when: false
-      failed_when: false
-
-    - name: Explain the remaining bridge prerequisite
+    - name: Report whether a reboot is required to return NVIDIA to Ubuntu
       ansible.builtin.debug:
         msg: >-
-          {{ workstation_bridge }} does not exist yet. Configure the explicit
-          NetworkManager bridge procedure in ansible/README.md from a local
-          session before Terraform apply. NFS can be configured independently.
-      when: workstation_bridge_state.rc != 0
+          {{ 'The retired VFIO configuration was removed. Reboot the workstation so the NVIDIA driver can reclaim the GTX 1060 and HDMI port.'
+             if (workstation_vfio_cleanup is changed)
+             else 'No retired VFIO files remain. If the GTX 1060 still uses vfio-pci, reboot once before troubleshooting the NVIDIA driver.' }}
 
-    - name: Report whether a VFIO reboot is required
-      ansible.builtin.debug:
-        msg: >-
-          {{ 'Reboot the workstation before Terraform apply so the GTX 1060 binds to vfio-pci.'
-             if (vfio_passthrough_reboot_required | default(false) | bool)
-             else 'GTX 1060 functions already use vfio-pci.' }}
+  handlers:
+    - name: Rebuild workstation initramfs
+      ansible.builtin.command: update-initramfs -u -k all
+      changed_when: true
+
+    - name: Update workstation GRUB
+      ansible.builtin.command: update-grub
+      changed_when: true

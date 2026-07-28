@@ -1,9 +1,8 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Atlantis repo-level config.
 #
-# Atlantis manages only the Proxmox-only Windows stack. The homelab cluster
-# stack now contains a qemu:///system libvirt provider and must be planned and
-# applied on ubuntu-workstation, where that socket and the PCI devices exist.
+# Atlantis watches both Terraform stacks and runs plan/apply through
+# Terragrunt. Apply requires explicit PR approval.
 #
 # Docs: https://www.runatlantis.io/docs/repo-level-atlantis-yaml.html
 #       https://www.runatlantis.io/docs/terragrunt.html
@@ -16,6 +15,24 @@ parallel_apply: false         # Apply one environment at a time for safety.
 abort_on_execution_order_fail: true
 
 projects:
+  - name: homelab-prod
+    dir: terraform/deployments/prod/homelab-cluster
+    workspace: default
+    terraform_version: v1.11.4
+    autoplan:
+      when_modified:
+        - "*.hcl"
+        - "../config.yml"
+        - "../../config.yml"
+        - "../../root.hcl"
+        - "../../../modules/stacks/homelab-cluster/**/*.tf"
+        - "../../../modules/stacks/homelab-cluster/**/*.yaml"
+      enabled: true
+    apply_requirements:
+      - approved
+      - mergeable
+    workflow: terragrunt
+
   - name: windows-workstation-prod
     dir: terraform/deployments/prod/windows-workstation
     workspace: default

@@ -4,11 +4,6 @@
 ansible_become_exe: /usr/bin/sudo.ws
 
 workstation_expected_hostname: kfir-Predator-PH315-51
-workstation_primary_user: kfir
-workstation_lan_interface: enp7s0f1
-workstation_bridge: br0
-workstation_management_address: 192.168.1.105/24
-workstation_gateway: 192.168.1.1
 
 nfs_server_mounts:
   - name: storage2-bulk
@@ -22,23 +17,3 @@ nfs_server_exports:
   - path: /mnt/storage2-bulk
     client: 192.168.1.0/24
     options: rw,sync,no_subtree_check,no_root_squash,fsid=10
-
-# Intel UHD 630 remains available to Ubuntu; both GTX 1060 functions are
-# reserved for the libvirt Talos VM after the explicitly scheduled reboot.
-vfio_passthrough_bootloader: grub
-vfio_passthrough_iommu_parameters:
-  - intel_iommu=on
-  - iommu=pt
-vfio_passthrough_iommu_group: 2
-vfio_passthrough_devices:
-  - address: "01:00.0"
-    id: 10de:1c20
-  - address: "01:00.1"
-    id: 10de:10f1
-vfio_passthrough_expected_group_members:
-  - address: "00:01.0"
-    id: 8086:1901
-  - address: "01:00.0"
-    id: 10de:1c20
-  - address: "01:00.1"
-    id: 10de:10f1
