@@ -30,7 +30,7 @@ variable "cluster_vip" {
 
 variable "talos_version" {
   type    = string
-  default = "v1.9.5"
+  default = "v1.13.7"
 }
 
 variable "kubernetes_version" {

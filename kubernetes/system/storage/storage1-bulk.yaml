@@ -12,7 +12,7 @@
 #
 # Storage tier: BULK / NON-CRITICAL. smallgpu is not a permanent host —
 # critical or personal data (Immich, etc.) should target the
-# `storage2-bulk` tier (on gpunvdgtx1060, the only permanent machine).
+# `storage2-bulk` tier (on the Ubuntu workstation, the only permanent machine).
 #
 # Physical-host setup is owned by ansible/roles/nfs_server using smallgpu's
 # inventory variables. Run ansible/playbooks/configure-proxmox.yml, then

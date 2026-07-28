@@ -1,6 +1,6 @@
 # Immich — self-hosted photo & video backup ("private Google Photos").
 # All persistent state lands on the CRITICAL tier (storage2-bulk-pv,
-# NFSv4 on gpunvdgtx1060) because the photo library and Postgres are
+# NFSv4 on ubuntu-workstation) because the photo library and Postgres are
 # irreplaceable personal data — see docs/architecture.md "Node ownership
 # and permanence" for why critical state must not touch borrowed hosts.
 #

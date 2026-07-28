@@ -45,6 +45,7 @@ locals {
     [for n in var.control_plane_nodes : split("/", n.ip_address)[0]],
     [for n in var.worker_nodes : split("/", n.ip_address)[0]],
     [for n in var.gpu_nodes : split("/", n.ip_address)[0]],
+    [for n in var.libvirt_gpu_nodes : split("/", n.ip_address)[0]],
   )
   gateway_api_crds = {
     gatewayclasses = {
@@ -144,6 +145,62 @@ module "gpu_vms" {
   )
 }
 
+# Prepare a deterministic local copy of the same GPU Image Factory artifact
+# used by Proxmox, plus a tiny NoCloud CIDATA ISO that supplies only the
+# first-boot static network. Talos machine configuration remains owned by the
+# Talos provider below.
+resource "terraform_data" "libvirt_talos_assets" {
+  for_each = var.libvirt_gpu_nodes
+
+  triggers_replace = [
+    talos_image_factory_schematic.this["gpu-pascal.yaml"].id,
+    var.talos_version,
+    each.key,
+    each.value.disk_size_gb,
+    each.value.ip_address,
+    var.network_gateway,
+    each.value.mac_address,
+    join(",", var.network_nameservers),
+  ]
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash"]
+    command     = "${path.module}/scripts/prepare-libvirt-talos-assets.sh"
+    environment = {
+      # Values are passed through the environment so URLs and paths are never
+      # interpolated into a shell command.
+      TALOS_IMAGE_URL = "https://factory.talos.dev/image/${talos_image_factory_schematic.this["gpu-pascal.yaml"].id}/${var.talos_version}/nocloud-amd64.raw.zst"
+      TALOS_ASSET_DIR = var.libvirt_asset_dir
+      TALOS_NODE_NAME = each.key
+      TALOS_DISK_GIB  = tostring(each.value.disk_size_gb)
+      TALOS_IP_CIDR   = each.value.ip_address
+      TALOS_GATEWAY   = var.network_gateway
+      TALOS_MAC       = each.value.mac_address
+      TALOS_DNS       = join(", ", [for address in var.network_nameservers : "\"${address}\""])
+    }
+  }
+}
+
+module "libvirt_gpu_vms" {
+  source   = "./modules/libvirt-talos-vm"
+  for_each = var.libvirt_gpu_nodes
+
+  hostname          = each.key
+  cores             = each.value.cores
+  memory_mb         = each.value.memory_mb
+  disk_size_gb      = each.value.disk_size_gb
+  pool              = each.value.pool
+  bridge            = each.value.bridge
+  mac_address       = each.value.mac_address
+  ovmf_code_path    = each.value.ovmf_code
+  ovmf_vars_path    = each.value.ovmf_vars
+  pci_devices       = each.value.pci_devices
+  system_image_path = "${var.libvirt_asset_dir}/${each.key}/system.qcow2"
+  cidata_image_path = "${var.libvirt_asset_dir}/${each.key}/cidata.iso"
+
+  depends_on = [terraform_data.libvirt_talos_assets]
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # 2. Talos cluster — generates configs, applies them, bootstraps etcd
 # ──────────────────────────────────────────────────────────────────────────────
@@ -172,13 +229,11 @@ module "talos_cluster" {
   }
 
   gpu_worker_nodes = {
-    for name, node in var.gpu_nodes : name => {
-      ip_address = node.ip_address
-      gpu        = true
-      dedicated  = node.dedicated
-      scratch_disk_serial = (
-        node.scratch_disk == null ? null : node.scratch_disk.serial
-      )
+    for name, node in merge(var.gpu_nodes, var.libvirt_gpu_nodes) : name => {
+      ip_address          = node.ip_address
+      gpu                 = true
+      dedicated           = node.dedicated
+      scratch_disk_serial = try(node.scratch_disk.serial, null)
     }
   }
 
@@ -186,6 +241,7 @@ module "talos_cluster" {
     module.control_plane_vms,
     module.worker_vms,
     module.gpu_vms,
+    module.libvirt_gpu_vms,
   ]
 }
 

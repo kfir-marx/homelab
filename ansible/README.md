@@ -1,10 +1,16 @@
-# Proxmox host configuration with Ansible
+# Physical host configuration with Ansible
 
 Ansible owns configuration of physical Proxmox hosts after they have been
 installed and joined to `HomeLab-Cluster`. It does not install Proxmox, create
 or change corosync membership, manage VMs, or reboot a host during the normal
 configuration play. On `smallgpu` and `largegpu`, it also configures each
 directly attached UPS with Network UPS Tools (NUT).
+
+The former `gpunvdgtx1060` node is no longer a Proxmox host. The separate
+`configure-ubuntu-workstation.yml` play configures its replacement Ubuntu
+installation locally: libvirt tooling, the existing critical NFS filesystem
+and export, and boot-time VFIO ownership of the GTX 1060. Terraform, not
+Ansible or virt-manager, owns the final `gpu-1` domain definition.
 
 ## Prerequisites and credentials
 
@@ -32,6 +38,69 @@ NUT server only listens on `127.0.0.1`, its shutdown monitor requires this
 credential. Secret-bearing templates suppress diff and task output. A host
 with `nut_automatic_shutdown_enabled: false` runs the driver and local data
 server without the shutdown monitor or its credential.
+
+For the local Ubuntu workstation, install Ansible first and use the current
+login user's sudo credential; the old Proxmox root password is not used:
+
+```bash
+sudo apt update
+sudo apt install -y ansible
+ansible-playbook playbooks/configure-ubuntu-workstation.yml --ask-become-pass
+```
+
+Ubuntu 26.04 selects `sudo-rs` by default. Its PAM prompt is not currently
+compatible with Ansible's password-prompt detection, so the workstation
+inventory explicitly uses the already-installed, compatible
+`/usr/bin/sudo.ws` executable for Ansible become operations. This does not
+change the system-wide `sudo` alternative.
+
+This play is safe to run before the network bridge exists. It mounts
+`UUID=07445d19-37d4-4353-af1a-9511fb9c74e9` at
+`/mnt/storage2-bulk`, restores its LAN NFS export, and stages VFIO for the next
+reboot. It does not activate a bridge or reboot the workstation.
+
+## Ubuntu workstation LAN bridge
+
+The Talos VM must be a first-class LAN peer. Libvirt's `default` network
+(`192.168.122.0/24`) is NAT-only and cannot satisfy the cluster's static
+`192.168.1.231` endpoint. From a local graphical session, create and activate
+the NetworkManager bridge below. This temporarily interrupts Ethernet, changes
+the workstation from its current DHCP address to its reserved
+`192.168.1.105`, and should not be run over SSH:
+
+```bash
+sudo nmcli connection add \
+  type bridge ifname br0 con-name homelab-br0 \
+  bridge.stp no \
+  ipv4.method manual ipv4.addresses 192.168.1.105/24 \
+  ipv4.gateway 192.168.1.1 ipv4.dns "1.1.1.1,8.8.8.8" \
+  ipv6.method auto
+
+sudo nmcli connection add \
+  type ethernet ifname enp7s0f1 con-name homelab-br0-port \
+  master br0 slave-type bridge
+
+sudo nmcli connection modify netplan-enp7s0f1 connection.autoconnect no
+sudo nmcli connection up homelab-br0
+```
+
+After reconnecting, verify `ip -br address show br0` reports
+`192.168.1.105/24`. If activation fails, restore the previous connection
+locally with `sudo nmcli connection up netplan-enp7s0f1`.
+
+Reboot after the Ubuntu play has staged VFIO. Before applying Terraform, verify:
+
+```bash
+ip -br address show br0
+findmnt /mnt/storage2-bulk
+systemctl is-active nfs-kernel-server libvirtd
+sudo exportfs -v
+lspci -nnk -s 01:00.0
+lspci -nnk -s 01:00.1
+```
+
+Both NVIDIA functions must report `Kernel driver in use: vfio-pci`; the Intel
+UHD 630 at `00:02.0` must remain on `i915`.
 
 ## First execution
 
@@ -90,10 +159,9 @@ attach a capped, disposable scratch disk to VM `402`.
 
 The `proxmox_backup` role owns node-scoped vzdump jobs. The durable Windows
 template VM `101` is backed up monthly to `largegpu-hdd` with one retained copy.
-Personal workstation VM `100` is backed up weekly to the existing
-`storage1-bulk` NFS target with two retained copies. The linked Windows VM `502`
-and all Terraform-managed Talos VMs are intentionally excluded because they can
-be recreated declaratively. VM `402`'s HDD scratch disk also has
+The retired workstation VM `100` backup job was removed. Linked Windows VM
+`502` and all Terraform-managed Talos VMs are intentionally excluded because
+they can be recreated declaratively. VM `402`'s HDD scratch disk also has
 `backup = false`.
 
 These backups primarily provide rollback from guest misconfiguration or
@@ -175,7 +243,7 @@ Each host file under `inventory/production/host_vars/` declares:
   that group;
 - the host-specific IOMMU kernel parameters.
 
-To add an already-joined node, add it to `proxmox_hosts` and the applicable
+To add an already-joined Proxmox node, add it to `proxmox_hosts` and the applicable
 `nfs_servers`/`nut_servers`/`vfio_hosts` inventory groups, then add a matching
 host-vars file.
 Record hardware facts from the live node; do not copy PCI IDs, UUIDs, or IOMMU
@@ -200,14 +268,9 @@ ansible-playbook playbooks/reboot-proxmox.yml \
   -e proxmox_reboot_approved=true
 ```
 
-The workstation host requires a second opt-in after coordinating with its user:
-
-```bash
-ansible-playbook playbooks/reboot-proxmox.yml \
-  --limit gpunvdgtx1060 \
-  -e proxmox_reboot_approved=true \
-  -e proxmox_workstation_reboot_approved=true
-```
+The Ubuntu workstation is not targeted by `reboot-proxmox.yml`; reboot it
+locally only after closing active work and confirming the Intel GPU drives the
+display.
 
 After a reboot, run `playbooks/verify-proxmox.yml`. Also verify both NFS exports
 from a Talos worker and confirm the NVIDIA device plugin reports the GPUs inside

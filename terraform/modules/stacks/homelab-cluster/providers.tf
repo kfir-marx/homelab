@@ -22,6 +22,10 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.38"
     }
+    libvirt = {
+      source  = "dmacvicar/libvirt"
+      version = "~> 0.9.8"
+    }
   }
 }
 
@@ -53,6 +57,13 @@ provider "proxmox" {
 # No explicit credentials needed; it uses the generated client config.
 # ──────────────────────────────────────────────────────────────────────────────
 provider "talos" {}
+
+# Local system libvirt on the Ubuntu workstation. Terraform is intentionally
+# run from that workstation, so no root SSH credential or remote libvirt TCP
+# listener is required.
+provider "libvirt" {
+  uri = var.libvirt_uri
+}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helm provider — used only for the initial ArgoCD bootstrap.

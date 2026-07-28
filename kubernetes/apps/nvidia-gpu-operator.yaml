@@ -31,7 +31,7 @@ spec:
           hostPaths:
             driverInstallDir: /usr/local
 
-          # NFD discovers both passed-through GPUs, including a node whose
+          # NFD discovers all passed-through GPUs, including a node whose
           # Terraform-owned convenience labels have not converged yet.
           nfd:
             enabled: true
@@ -66,4 +66,3 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
-

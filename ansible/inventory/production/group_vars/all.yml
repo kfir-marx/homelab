@@ -14,9 +14,8 @@ proxmox_base_packages:
   - pciutils
 
 # configure-proxmox.yml never reboots. The separate reboot playbook requires
-# both this global approval and the per-workstation approval when applicable.
+# this global approval.
 proxmox_reboot_approved: false
-proxmox_workstation_reboot_approved: false
 
 # NUT listens on localhost only, but its monitor protocol still requires a
 # credential. Export this alongside PROXMOX_SSH_PASSWORD; never commit it.

@@ -28,9 +28,9 @@ Create the retained NFS directory on the critical storage host before ArgoCD
 syncs the application:
 
 ```bash
-ssh root@192.168.1.105
-mkdir -p /mnt/storage2-bulk/adguard-home
-chmod 700 /mnt/storage2-bulk/adguard-home
+ssh kfir@192.168.1.105
+sudo mkdir -p /mnt/storage2-bulk/adguard-home
+sudo chmod 700 /mnt/storage2-bulk/adguard-home
 exit
 ```
 

@@ -40,8 +40,7 @@ proxmox_iso_relocations:
 
 # The Windows template is the durable, manually configured state on largegpu.
 # The linked Windows VM 502 and all Terraform-managed Talos VMs are disposable.
-# Workstation VM 100 runs on gpunvdgtx1060, where the existing storage1-bulk
-# NFS storage is already active; using it avoids creating a third NFS server.
+# The old workstation VM 100 and its Proxmox node no longer exist.
 proxmox_backup_jobs:
   - id: largegpu-windows-template
     vmid: 101
@@ -51,15 +50,6 @@ proxmox_backup_jobs:
     mode: stop
     compress: zstd
     keep_last: 1
-    enabled: true
-  - id: personal-workstation
-    vmid: 100
-    storage: storage1-bulk
-    node: gpunvdgtx1060
-    schedule: "sun 04:00"
-    mode: snapshot
-    compress: zstd
-    keep_last: 2
     enabled: true
 
 # Planned NUT configuration: add this host to nut_servers only after its UPS

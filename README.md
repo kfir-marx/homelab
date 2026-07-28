@@ -1,8 +1,9 @@
-# Homelab — GitOps Kubernetes on Proxmox
+# Homelab — GitOps Kubernetes on Proxmox and libvirt
 
-GitOps-driven Kubernetes cluster running Talos Linux on a three-host Proxmox
-fleet. Ansible configures the physical Proxmox hosts, Terraform provisions VMs
-and bootstraps Talos, and ArgoCD manages in-cluster workloads.
+GitOps-driven Kubernetes cluster running Talos Linux across two Proxmox hosts
+and one Ubuntu QEMU/KVM workstation. Ansible configures the physical hosts,
+Terraform provisions both Proxmox and libvirt VMs and bootstraps Talos, and
+ArgoCD manages in-cluster workloads.
 
 ## Documentation
 
@@ -14,13 +15,14 @@ and bootstraps Talos, and ArgoCD manages in-cluster workloads.
 | [AdGuard Home Runbook](docs/adguard-home-runbook.md) | Private split DNS, tailnet ad blocking, initial setup, and recovery |
 | [Monitoring Runbook](docs/monitoring-runbook.md) | Prometheus/Grafana deployment, NFS storage, private access, and verification |
 | [GPU Operator Runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, ArgoCD rollout, GPU validation, and metrics |
+| [Ubuntu Workstation Runbook](docs/ubuntu-workstation-runbook.md) | Rebuild `192.168.1.105` as the libvirt/VFIO Talos host and restore critical NFS |
 | [Proxmox Ansible](ansible/README.md) | Physical-host repositories, packages, NFS, VFIO, safety checks, and reboot workflow |
 
 ## Repository Structure
 
 ```
 .
-├── ansible/               # Physical Proxmox host configuration
+├── ansible/               # Physical Proxmox + Ubuntu host configuration
 ├── docs/                  # Documentation
 ├── terraform/             # VM provisioning + cluster bootstrap
 ├── kubernetes/            # ArgoCD-managed app manifests

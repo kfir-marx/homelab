@@ -3,7 +3,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 variable "proxmox_api_url" {
-  description = "Proxmox VE API endpoint (e.g. https://192.168.1.105:8006)"
+  description = "Proxmox VE API endpoint (e.g. https://192.168.1.106:8006)"
   type        = string
 }
 
@@ -42,7 +42,7 @@ variable "cluster_vip" {
 variable "talos_version" {
   description = "Talos Linux version to deploy"
   type        = string
-  default     = "v1.9.5"
+  default     = "v1.13.7"
 }
 
 variable "kubernetes_version" {
@@ -63,6 +63,18 @@ variable "talos_image_datastore" {
   description = "Proxmox datastore to download the Talos image to"
   type        = string
   default     = "local"
+}
+
+variable "libvirt_uri" {
+  description = "Libvirt connection URI for workstation-hosted Talos VMs"
+  type        = string
+  default     = "qemu:///system"
+}
+
+variable "libvirt_asset_dir" {
+  description = "Local cache for decompressed Talos raw images and NoCloud CIDATA images"
+  type        = string
+  default     = "/var/tmp/homelab-talos"
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -164,6 +176,29 @@ variable "gpu_nodes" {
     pci_devices = list(object({
       id   = string
       pcie = bool
+    }))
+  }))
+  default = {}
+}
+
+variable "libvirt_gpu_nodes" {
+  description = "GPU worker VMs hosted by local QEMU/KVM through libvirt"
+  type = map(object({
+    ip_address   = string
+    cores        = number
+    memory_mb    = number
+    disk_size_gb = number
+    dedicated    = optional(bool, false)
+    pool         = optional(string, "default")
+    bridge       = optional(string, "br0")
+    mac_address  = string
+    ovmf_code    = optional(string, "/usr/share/OVMF/OVMF_CODE_4M.fd")
+    ovmf_vars    = optional(string, "/usr/share/OVMF/OVMF_VARS_4M.fd")
+    pci_devices = list(object({
+      domain   = number
+      bus      = number
+      slot     = number
+      function = number
     }))
   }))
   default = {}

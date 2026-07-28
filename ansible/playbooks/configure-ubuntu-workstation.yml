@@ -1,0 +1,107 @@
+---
+- name: Configure the Ubuntu libvirt and NFS workstation
+  hosts: ubuntu_workstations
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Require the declared Ubuntu workstation
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_hostname == workstation_expected_hostname
+        fail_msg: >-
+          Refusing to configure {{ inventory_hostname }}: expected Ubuntu host
+          {{ workstation_expected_hostname }}, found {{ ansible_distribution }}
+          {{ ansible_hostname }}.
+
+    - name: Read the live workstation IOMMU group members
+      ansible.builtin.command:
+        argv:
+          - ls
+          - --format=single-column
+          - "/sys/kernel/iommu_groups/{{ vfio_passthrough_iommu_group }}/devices"
+      register: workstation_iommu_group
+      changed_when: false
+
+    - name: Require the exact declared IOMMU group
+      ansible.builtin.assert:
+        that:
+          - >-
+            (workstation_iommu_group.stdout_lines | sort)
+            ==
+            (vfio_passthrough_expected_group_members
+             | map(attribute='address')
+             | map('regex_replace', '^', '0000:')
+             | sort)
+        fail_msg: >-
+          IOMMU group {{ vfio_passthrough_iommu_group }} differs from inventory.
+          Refusing to stage GPU passthrough until every live group member is
+          understood.
+
+    - name: Install workstation virtualization, image, and NFS packages
+      ansible.builtin.apt:
+        name:
+          - bridge-utils
+          - curl
+          - genisoimage
+          - libvirt-clients
+          - libvirt-daemon-system
+          - nfs-common
+          - nfs-kernel-server
+          - ovmf
+          - qemu-system-x86
+          - qemu-utils
+          - virt-manager
+          - zstd
+        state: present
+        update_cache: true
+
+    - name: Allow the workstation user to manage system libvirt
+      ansible.builtin.user:
+        name: "{{ workstation_primary_user }}"
+        groups:
+          - kvm
+          - libvirt
+        append: true
+
+    - name: Enable the system libvirt daemon
+      ansible.builtin.service:
+        name: libvirtd
+        enabled: true
+        state: started
+
+  roles:
+    - role: vfio_passthrough
+      tags:
+        - vfio
+    - role: nfs_server
+      tags:
+        - nfs
+
+  post_tasks:
+    - name: Check for the required LAN bridge
+      ansible.builtin.command:
+        argv:
+          - ip
+          - link
+          - show
+          - "{{ workstation_bridge }}"
+      register: workstation_bridge_state
+      changed_when: false
+      failed_when: false
+
+    - name: Explain the remaining bridge prerequisite
+      ansible.builtin.debug:
+        msg: >-
+          {{ workstation_bridge }} does not exist yet. Configure the explicit
+          NetworkManager bridge procedure in ansible/README.md from a local
+          session before Terraform apply. NFS can be configured independently.
+      when: workstation_bridge_state.rc != 0
+
+    - name: Report whether a VFIO reboot is required
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Reboot the workstation before Terraform apply so the GTX 1060 binds to vfio-pci.'
+             if (vfio_passthrough_reboot_required | default(false) | bool)
+             else 'GTX 1060 functions already use vfio-pci.' }}

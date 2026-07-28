@@ -2,8 +2,8 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  Production environment                                                    ║
 # ║                                                                            ║
-# ║  1 control plane + 2 GPU workers on the home LAN (192.168.1.0/24).        ║
-# ║  Sized for the three remaining hosts and the existing workstation VM.     ║
+# ║  1 control plane + 3 GPU workers on the home LAN (192.168.1.0/24).        ║
+# ║  Two workers use Proxmox; gpu-1 uses libvirt on the Ubuntu workstation.   ║
 # ║                                                                            ║
 # ║  IP convention (matches the rest of the homelab):                          ║
 # ║    192.168.1.101–199  → physical machines (Proxmox hosts, etc.)            ║
@@ -32,9 +32,8 @@ argocd_target_revision: "main"
 # ── Control-plane node (single-node control plane; intentionally not HA) ─────
 # smallgpu is back online and has 15.5 GiB RAM. The CP gets 2c/4GiB and the
 # RTX 2060 worker gets 10c/8GiB, leaving ~3.5 GiB physical RAM for Proxmox,
-# QEMU overhead, and the planned bulk NFS service. Return to
-# 3 CPs only after gpunvdgtx1060 can host one without squeezing its workstation
-# and NFS.
+# QEMU overhead, and bulk NFS. Return to 3 CPs only after adding memory or
+# reducing worker allocations across the physical failure domains.
 control_plane_nodes:
   cp-1:
     proxmox_node: "smallgpu"
@@ -49,9 +48,7 @@ control_plane_nodes:
 # hosts and does not require a colocated general Kubernetes worker.
 worker_nodes: {}
 
-# ── GPU nodes (PCIe passthrough; ) ─────
-# The GTX 1060 on gpunvdgtx1060 is reserved for workstation VM 100 and is not
-# part of Kubernetes. 
+# ── Proxmox GPU nodes (PCIe passthrough) ────────────────────────────────────
 gpu_nodes:
   # largegpu: Ryzen 7 5800X (8c/16t), 62.7 GiB RAM, RTX 3080 at 08:00.
   # The Talos GPU VM is 16c/56GiB 
@@ -91,3 +88,27 @@ gpu_nodes:
     pci_devices:
       - id: "09:00"
         pcie: true
+
+# ── Ubuntu workstation GPU node (QEMU/KVM + libvirt) ────────────────────────
+# The former gpunvdgtx1060 Proxmox node no longer exists. Ubuntu runs directly
+# on the laptop and uses Intel UHD 630 for its display. The GTX 1060 functions
+# are bound to vfio-pci and assigned to this Talos worker.
+libvirt_gpu_nodes:
+  gpu-1:
+    ip_address: "192.168.1.231/24"
+    cores: 4
+    memory_mb: 6144
+    disk_size_gb: 50
+    dedicated: false
+    pool: "default"
+    bridge: "br0"
+    mac_address: "52:54:00:01:02:31"
+    pci_devices:
+      - domain: 0
+        bus: 1
+        slot: 0
+        function: 0
+      - domain: 0
+        bus: 1
+        slot: 0
+        function: 1

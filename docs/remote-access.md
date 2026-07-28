@@ -64,7 +64,7 @@ back to Tailscale's managed DERP relays when direct connectivity is unavailable.
 | AdGuard Home UI | `http://adguard.home.547600.xyz` / `192.168.1.220:80` | Cilium Gateway API |
 | AdGuard Home DNS | `192.168.1.221:53` TCP/UDP | Cilium LoadBalancer |
 | Kubernetes API | `192.168.1.210:6443` | API VIP |
-| Proxmox | `https://192.168.1.105:8006` and other host IPs | LAN subnet route |
+| Proxmox | `https://192.168.1.106:8006` and `https://192.168.1.107:8006` | LAN subnet route |
 | Other LAN services | `192.168.1.0/24` | LAN subnet route |
 
 AdGuard Home privately resolves `*.home.547600.xyz` to `192.168.1.220`.

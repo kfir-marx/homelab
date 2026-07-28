@@ -1,9 +1,9 @@
-# Cluster-scoped NFS PV backed by gpunvdgtx1060's gpu1-extra LVM-thin
-# pool. Carved out + ext4-formatted on the host, then exported over
+# Cluster-scoped NFS PV backed by the Ubuntu workstation's existing
+# gpu1-extra LVM-thin pool. Carved out + ext4-formatted on the host, then exported over
 # NFSv4 to the home LAN.
 #
-# Storage tier: CRITICAL / PERSONAL. gpunvdgtx1060 is the only permanent
-# host in the fleet — all other Proxmox nodes (incl. node6 which backs
+# Storage tier: CRITICAL / PERSONAL. ubuntu-workstation is the only permanent
+# host in the fleet — both Proxmox nodes (incl. smallgpu which backs
 # storage1-bulk) are borrowed hardware that may be reclaimed at any
 # time. Anything we can't afford to lose — personal cloud (Immich),
 # config snapshots, important app state — should bind here, not to
@@ -13,8 +13,8 @@
 # kept as the canonical critical-data tier going forward.
 #
 # Physical-host mount, package, service, and export configuration is owned by
-# ansible/roles/nfs_server using gpunvdgtx1060's inventory variables. Run
-# ansible/playbooks/configure-proxmox.yml and verify-proxmox.yml. Disk/LVM
+# ansible/roles/nfs_server using ubuntu-workstation's inventory variables. Run
+# ansible/playbooks/configure-ubuntu-workstation.yml. Disk/LVM
 # creation and formatting are deliberately outside automation because they are
 # destructive; the role only accepts the already-declared filesystem UUID.
 ---
@@ -37,7 +37,7 @@ spec:
     - nfsvers=4.2
     - hard
   nfs:
-    server: 192.168.1.105 # gpunvdgtx1060 Proxmox host (NFS server)
+    server: 192.168.1.105 # Ubuntu workstation (NFS server)
     path: /mnt/storage2-bulk
 ---
 # Static StorageClass — same pattern as nfs-storage1. No dynamic

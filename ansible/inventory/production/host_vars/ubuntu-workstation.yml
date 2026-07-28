@@ -1,6 +1,14 @@
 ---
-proxmox_expected_hostname: gpunvdgtx1060
-proxmox_sensitive_workstation_host: true
+# This is the permanent laptop that previously ran Proxmox as
+# gpunvdgtx1060. Ubuntu now runs directly on the hardware.
+ansible_become_exe: /usr/bin/sudo.ws
+
+workstation_expected_hostname: kfir-Predator-PH315-51
+workstation_primary_user: kfir
+workstation_lan_interface: enp7s0f1
+workstation_bridge: br0
+workstation_management_address: 192.168.1.105/24
+workstation_gateway: 192.168.1.1
 
 nfs_server_mounts:
   - name: storage2-bulk
@@ -15,10 +23,9 @@ nfs_server_exports:
     client: 192.168.1.0/24
     options: rw,sync,no_subtree_check,no_root_squash,fsid=10
 
+# Intel UHD 630 remains available to Ubuntu; both GTX 1060 functions are
+# reserved for the libvirt Talos VM after the explicitly scheduled reboot.
 vfio_passthrough_bootloader: grub
-# The GTX 1060 is reserved for workstation VM 100, not Kubernetes. Keeping the
-# host in vfio_hosts prepares the device for workstation passthrough; the VFIO
-# preflight will refuse changes if VM 100 is running with this slot attached.
 vfio_passthrough_iommu_parameters:
   - intel_iommu=on
   - iommu=pt

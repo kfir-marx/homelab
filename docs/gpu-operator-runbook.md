@@ -1,9 +1,10 @@
 # NVIDIA GPU Operator runbook
 
-The production cluster has two GPU workers:
+The production cluster has three GPU workers:
 
 | Node | GPU | Scheduling role |
 |------|-----|-----------------|
+| `gpu-1` | GeForce GTX 1060 Mobile | Mixed worker on Ubuntu/libvirt |
 | `gpu-2` | GeForce RTX 3080 | Dedicated GPU worker; mutually exclusive with the Windows gaming VM |
 | `gpu-3` | GeForce RTX 2060 | Mixed general-purpose and GPU worker |
 
@@ -11,11 +12,16 @@ The production cluster has two GPU workers:
 
 GPU enablement spans three independently managed layers:
 
-1. Ansible configures IOMMU and VFIO on each Proxmox host.
+1. Ansible configures IOMMU and VFIO on the Proxmox hosts and Ubuntu workstation.
 2. Terraform passes the PCI device to the Talos VM and applies the GPU Talos
-   machine configuration. The Talos image contains the version-matched
-   `nvidia-open-gpu-kernel-modules-production` and
-   `nvidia-container-toolkit-production` extensions.
+   machine configuration. `gpu-2` and `gpu-3` use the production open-driver
+   image profile. `gpu-1` uses `nonfree-kmod-nvidia-lts` and
+   `nvidia-container-toolkit-lts`; the proprietary R580 LTS driver is required
+   because the GTX 1060 is Pascal and
+   [open kernel modules require Turing+](https://docs.nvidia.com/datacenter/tesla/driver-installation-guide/kernel-modules.html).
+   The [NVIDIA architecture matrix](https://docs.nvidia.com/datacenter/tesla/drivers/cuda-toolkit-driver-and-architecture-matrix.html)
+   identifies R580 and CUDA 12.x as the last driver/toolkit line for Pascal.
+   See also the [Talos proprietary NVIDIA guide](https://docs.siderolabs.com/talos/v1.13/configure-your-talos-cluster/hardware-and-drivers/nvidia-gpu-proprietary).
 3. ArgoCD installs NVIDIA GPU Operator. The operator discovers GPU nodes,
    exposes `nvidia.com/gpu`, validates CUDA access, and exports DCGM metrics.
 
@@ -52,9 +58,9 @@ kubectl -n gpu-operator get pods -o wide -w
 The namespace deliberately enforces the privileged Pod Security profile because
 the device plugin, validators, node-feature-discovery, and DCGM need host access.
 
-## Verify both GPUs
+## Verify all GPUs
 
-Check that both nodes advertise one schedulable GPU:
+Check that all GPU nodes advertise one schedulable GPU:
 
 ```bash
 kubectl get nodes \
@@ -65,6 +71,7 @@ Expected:
 
 ```text
 cp-1    <none>
+gpu-1   1
 gpu-2   1
 gpu-3   1
 ```
@@ -79,18 +86,19 @@ kubectl get nodes -L nvidia.com/gpu.present,nvidia.com/gpu.product
 Run one CUDA validation pod per GPU node:
 
 ```bash
-for node in gpu-2 gpu-3; do
+for node in gpu-1 gpu-2 gpu-3; do
   kubectl run "nvidia-smi-${node}" \
     --restart=Never \
-    --image=nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04 \
+    --image=nvcr.io/nvidia/cuda:12.9.1-base-ubuntu24.04 \
     --overrides="$(
-      printf '{"spec":{"nodeName":"%s","restartPolicy":"Never","containers":[{"name":"nvidia-smi","image":"nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04","command":["nvidia-smi"],"resources":{"limits":{"nvidia.com/gpu":1}}}]}}' "$node"
+      printf '{"spec":{"nodeName":"%s","restartPolicy":"Never","containers":[{"name":"nvidia-smi","image":"nvcr.io/nvidia/cuda:12.9.1-base-ubuntu24.04","command":["nvidia-smi"],"resources":{"limits":{"nvidia.com/gpu":1}}}]}}' "$node"
     )"
 done
 
+kubectl logs -f pod/nvidia-smi-gpu-1
 kubectl logs -f pod/nvidia-smi-gpu-2
 kubectl logs -f pod/nvidia-smi-gpu-3
-kubectl delete pod nvidia-smi-gpu-2 nvidia-smi-gpu-3
+kubectl delete pod nvidia-smi-gpu-1 nvidia-smi-gpu-2 nvidia-smi-gpu-3
 ```
 
 These are explicit validation pods. Normal workloads should use node affinity
@@ -136,4 +144,3 @@ kubectl uncordon gpu-2
 
 GPU workloads must tolerate eviction and be able to restart on `gpu-3`. A
 workload requesting a GPU cannot move until the RTX 2060 is free.
-
