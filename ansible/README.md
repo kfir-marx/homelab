@@ -71,19 +71,24 @@ place. After reboot, verify `01:00.0` uses `nvidia`, `01:00.1` uses
 
 The Kubernetes PVs still require the workstation's reserved
 `192.168.1.105` address. No bridge is needed now that the Talos VM is retired.
-From a local graphical session, configure the existing Ethernet profile. This
-temporarily interrupts Ethernet and should not be run over SSH:
+The dedicated static profile is `homelab-enp7s0f1`; the original
+`netplan-enp7s0f1` DHCP profile is retained with autoconnect disabled as a
+recovery path. The one-time configuration was:
 
 ```bash
-sudo nmcli connection modify netplan-enp7s0f1 \
+sudo nmcli connection add \
+  type ethernet ifname enp7s0f1 con-name homelab-enp7s0f1 \
+  connection.autoconnect yes \
   ipv4.method manual \
   ipv4.addresses 192.168.1.105/24 \
   ipv4.gateway 192.168.1.1 \
   ipv4.dns "1.1.1.1,8.8.8.8" \
   ipv6.method auto
-sudo nmcli connection up netplan-enp7s0f1
+sudo nmcli connection modify netplan-enp7s0f1 connection.autoconnect no
+sudo nmcli connection up homelab-enp7s0f1
 ```
 
+Activate profiles only from the local desktop because Ethernet is interrupted.
 After reconnecting, verify:
 
 ```bash

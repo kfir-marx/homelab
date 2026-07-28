@@ -69,29 +69,41 @@ packages installed.
 ## 3. Assign the stable NFS address
 
 Kubernetes PVs use `192.168.1.105:/mnt/storage2-bulk`, so the workstation must
-own that address. No LAN bridge is required. The current connection is
-`netplan-enp7s0f1` on `enp7s0f1`.
+own that address. No LAN bridge is required. The dedicated
+`homelab-enp7s0f1` profile owns the static address on `enp7s0f1`; the original
+`netplan-enp7s0f1` DHCP profile remains available with autoconnect disabled.
 
-Run these commands only from the local desktop because activating the profile
-interrupts Ethernet and changes the current DHCP address:
+The one-time configuration was:
 
 ```bash
-sudo nmcli connection modify netplan-enp7s0f1 \
+sudo nmcli connection add \
+  type ethernet ifname enp7s0f1 con-name homelab-enp7s0f1 \
+  connection.autoconnect yes \
   ipv4.method manual \
   ipv4.addresses 192.168.1.105/24 \
   ipv4.gateway 192.168.1.1 \
   ipv4.dns "1.1.1.1,8.8.8.8" \
   ipv6.method auto
 
-sudo nmcli connection up netplan-enp7s0f1
+sudo nmcli connection modify netplan-enp7s0f1 connection.autoconnect no
+sudo nmcli connection up homelab-enp7s0f1
 ```
 
-After reconnecting:
+Run profile activation only from the local desktop because it interrupts
+Ethernet. Verify:
 
 ```bash
+nmcli -t -f NAME,TYPE,DEVICE connection show --active
 ip -br address show enp7s0f1
 ip route
 ping -c 3 192.168.1.1
+```
+
+To recover with DHCP from the local desktop:
+
+```bash
+sudo nmcli connection down homelab-enp7s0f1
+sudo nmcli connection up netplan-enp7s0f1
 ```
 
 ## 4. Verify NFS
