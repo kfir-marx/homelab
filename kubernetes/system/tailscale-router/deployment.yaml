@@ -41,6 +41,8 @@ spec:
               value: "true"
             - name: TS_ROUTES
               value: 192.168.1.0/24
+            - name: TS_DEBUG_FIREWALL_MODE
+              value: nftables
             # Tagged auth key created in the official Tailscale admin console.
             # See docs/tailscale-runbook.md.
             - name: TS_AUTHKEY
