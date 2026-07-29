@@ -5,13 +5,17 @@ metadata:
   namespace: immich
 spec:
   parentRefs:
-    - name: private
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
       namespace: argocd
       sectionName: private-http
   hostnames:
     - immich.home.547600.xyz
   rules:
     - backendRefs:
-        - name: immich-server
+        - group: ""
+          kind: Service
+          name: immich-server
           port: 2283
-
+          weight: 1
