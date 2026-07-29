@@ -1,4 +1,4 @@
-# Redis — Immich uses it as a BullMQ job queue + cache. State is
+# Valkey — Immich uses it as a BullMQ job queue + cache. State is
 # rebuildable from Postgres on restart, so emptyDir is fine. No PV
 # wanted: any NFS hop here would tax storage2-bulk for no durability
 # win, and a restart wiping the queue just re-enqueues pending jobs.
@@ -33,7 +33,7 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    # Redis is stateful-ish (queue can drop in-flight jobs on a hard
+    # Valkey is stateful-ish (queue can drop in-flight jobs on a hard
     # cut); Recreate avoids two replicas briefly racing on the same
     # client connections during a rollout.
     type: Recreate
@@ -53,20 +53,24 @@ spec:
         runAsGroup: 999
       containers:
         - name: redis
-          image: docker.io/redis:6.2-alpine
+          image: docker.io/valkey/valkey:9@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
           imagePullPolicy: IfNotPresent
           ports:
             - name: redis
               containerPort: 6379
               protocol: TCP
           readinessProbe:
-            tcpSocket:
-              port: redis
+            exec:
+              command:
+                - valkey-cli
+                - ping
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
-              port: redis
+            exec:
+              command:
+                - valkey-cli
+                - ping
             initialDelaySeconds: 30
             periodSeconds: 30
           resources:

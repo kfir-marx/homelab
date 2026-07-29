@@ -21,11 +21,11 @@
 #   sudo chmod 700 /mnt/storage2-bulk/immich/postgres
 #   EOF
 #
-# NFS-backed Postgres is a known tradeoff: fsync over NFSv4 is slower
-# than local disk, and on host loss the WAL may have unflushed writes.
-# For a homelab photo backup the durability cost is acceptable; the
-# critical-tier survivability requirement (data must outlive any
-# borrowed-host return) trumps the IOPS hit.
+# NFS-backed Postgres is outside Immich's supported storage guidance:
+# network interruptions can cause corruption, and fsync is slower than
+# local storage. Keep verified logical backups and migrate this PVC to
+# local SSD-backed storage when the cluster has a permanent local-storage
+# failure domain.
 ---
 apiVersion: v1
 kind: PersistentVolume

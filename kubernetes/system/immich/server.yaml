@@ -53,15 +53,13 @@ spec:
     spec:
       containers:
         - name: immich-server
-          image: ghcr.io/immich-app/immich-server:v1.123.0
+          image: ghcr.io/immich-app/immich-server:v3.0.3@sha256:c716dc20f957aafd89fa9d284a2ec63e25c9e2d8d8e87c6197d540a3dce237db
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
               value: UTC
             - name: NODE_ENV
               value: production
-            - name: UPLOAD_LOCATION
-              value: /usr/src/app/upload
             - name: DB_HOSTNAME
               value: immich-postgres
             - name: DB_USERNAME
@@ -83,7 +81,13 @@ spec:
               protocol: TCP
           volumeMounts:
             - name: library
-              mountPath: /usr/src/app/upload
+              mountPath: /data
+          startupProbe:
+            httpGet:
+              path: /api/server/ping
+              port: http
+            periodSeconds: 10
+            failureThreshold: 180
           readinessProbe:
             httpGet:
               path: /api/server/ping
