@@ -43,9 +43,12 @@ spec:
   hostnames:
     - bitwarden.home.547600.xyz
   rules:
-    - filters:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
         - type: RequestRedirect
           requestRedirect:
             scheme: https
             statusCode: 301
-
