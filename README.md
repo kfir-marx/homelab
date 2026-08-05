@@ -190,6 +190,7 @@ once the hardware and memory budget support it.
 | Document | Focus |
 |---|---|
 | [Architecture](docs/architecture.md) | Hardware, topology, networking, storage, Terraform modules, CI/CD, and design rationale |
+| [Kubernetes network policies](docs/network-policies.md) | Default-deny application isolation, allowed-flow matrix, exceptions, and rollout verification |
 | [Remote access](docs/remote-access.md) | Public Cloudflare routes, private Tailscale access, and security boundaries |
 | [Tailscale runbook](docs/tailscale-runbook.md) | Subnet-router enrollment, route approval, client setup, and troubleshooting |
 | [AdGuard Home runbook](docs/adguard-home-runbook.md) | Private split DNS, tailnet filtering, setup, and recovery |

@@ -44,6 +44,7 @@ Do not silently edit code to match prose. Establish which side is stale first.
 | Physical Proxmox hosts | `ansible/README.md` and the relevant playbook | matching inventory host vars and role |
 | Ubuntu workstation or critical NFS | `docs/ubuntu-workstation-runbook.md` | `ansible/playbooks/configure-ubuntu-workstation.yml`, Ubuntu host vars, `nfs_server` role |
 | Kubernetes application | matching file in `kubernetes/apps/` | its directory under `kubernetes/system/` and matching runbook |
+| Kubernetes network policy | `docs/network-policies.md` | matching workload manifests and Cilium bootstrap configuration |
 | Storage placement or PV changes | storage section in `docs/architecture.md` | `kubernetes/system/storage/`, app storage manifest, NFS host vars |
 | Remote access or DNS | `docs/remote-access.md` | Tailscale/AdGuard runbook and matching manifests |
 | Monitoring or GPUs | matching runbook | Argo CD application and system manifests |

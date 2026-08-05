@@ -81,6 +81,9 @@ application traffic remains WireGuard encrypted between peers.
 ## Security boundaries
 
 - Cloudflare Tunnel is limited to explicitly public services.
+- The cloudflared network policy permits only the documented Jellyfin origin
+  and Cloudflare tunnel endpoints. Adding a dashboard origin also requires a
+  matching declarative policy change or it fails closed.
 - Bitwarden has no Cloudflare rule, public DNS address, LoadBalancer, NodePort,
   or Funnel. It uses the shared private Cilium Gateway like the other private
   applications, with HTTPS added for password-manager clients.
@@ -92,9 +95,10 @@ application traffic remains WireGuard encrypted between peers.
   `192.168.1.0/24` does not by itself authorize every tailnet identity.
 - The router namespace uses privileged Pod Security because kernel Tailscale
   needs `NET_ADMIN`, `NET_RAW`, and `/dev/net/tun`.
-- Kubernetes NetworkPolicies remain useful for pod traffic, but Tailscale
-  grants are the primary policy boundary for clients entering through the
-  subnet router.
+- Kubernetes network policies default-deny application pod traffic. The router
+  is allowed to forward only its declared `192.168.1.0/24` route, while
+  Tailscale grants remain the primary per-client policy boundary for traffic
+  entering through it. See [Kubernetes network policies](network-policies.md).
 - Auth keys and Cloudflare credentials are created out-of-band and never
   committed to Git.
 

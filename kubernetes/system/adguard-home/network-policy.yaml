@@ -1,0 +1,110 @@
+# AdGuard is reachable only through its two declared entry points: DNS from the
+# LAN/Tailscale route and the admin UI through the Cilium Gateway. Outbound
+# traffic is limited to DNS resolution and public HTTP(S) for encrypted
+# upstreams and filter-list updates; private address space stays unreachable.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: adguard-home
+  annotations:
+    # Establish allow rules first on the initial Argo CD rollout.
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: adguard-home
+  namespace: adguard-home
+spec:
+  endpointSelector:
+    matchLabels:
+      app: adguard-home
+  ingress:
+    # Gateway API backends see Cilium's reserved ingress identity rather than
+    # the Gateway's implementation-owned pod labels.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    # Direct LAN clients retain their source address when Cilium can preserve
+    # it. With externalTrafficPolicy=Cluster, the forwarding node can instead
+    # be the visible source, so host and remote-node are also admitted.
+    - fromCIDR:
+        - 192.168.1.0/24
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+    # The subnet router normally source-NATs tailnet clients to its pod
+    # identity before forwarding their DNS requests to the LoadBalancer VIP.
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": tailscale-router
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+  egress:
+    # AdGuard uses cluster DNS to bootstrap hostname-based encrypted upstreams.
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+    # Plain-DNS bootstrap/fallback resolvers documented for this homelab.
+    - toCIDR:
+        - 1.1.1.1/32
+        - 8.8.8.8/32
+        - 9.9.9.9/32
+        - 149.112.112.112/32
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+    # Public-only web access supports DoH upstreams and block-list downloads
+    # without giving a compromised resolver an HTTP path into the LAN/cluster.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            - 0.0.0.0/8
+            - 10.0.0.0/8
+            - 100.64.0.0/10
+            - 127.0.0.0/8
+            - 169.254.0.0/16
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
