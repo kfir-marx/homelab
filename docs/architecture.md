@@ -755,7 +755,7 @@ ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
 - [x] Define NVIDIA GPU Operator through ArgoCD with Talos-managed driver/toolkit
 - [x] Prepare and verify `smallgpu` RTX 2060 passthrough — all four functions use `vfio-pci` and `/dev/vfio/18` exists after the explicitly approved reboot
 - [x] Prepare and verify `largegpu` RTX 3080 passthrough — both functions use `vfio-pci` and `/dev/vfio/21` exists; Windows VMs remained stopped during convergence
-- [ ] Deploy ingress controller + cert-manager for TLS termination
+- [ ] Deploy and verify cert-manager DNS-01 issuance for private Gateway TLS
 - [x] **Configure the bulk NTFS export on smallgpu** — UUID-based `ntfs3` mount and `fsid=1` export observed active on 2026-07-22; Ansible now owns and safety-checks this state
 - [ ] **Restore and verify critical NFS on Ubuntu** — run `configure-ubuntu-workstation.yml`, then verify the ext4 mount, LAN export, and a Talos client mount
 - [ ] **Restore workstation graphics** — run `configure-ubuntu-workstation.yml`, reboot, and verify the GTX 1060 uses `nvidia` and HDMI works

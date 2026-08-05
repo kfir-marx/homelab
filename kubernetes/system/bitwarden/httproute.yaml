@@ -1,0 +1,51 @@
+# HTTPS is terminated on the shared private Cilium Gateway. The Gateway VIP is
+# available on the LAN and through the existing Tailscale subnet router, but it
+# has no public route or Cloudflare Tunnel rule.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bitwarden
+  namespace: bitwarden
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-https
+  hostnames:
+    - bitwarden.home.547600.xyz
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: bitwarden
+          port: 8080
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+---
+# Redirect accidental HTTP requests to the HTTPS listener.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bitwarden-http-redirect
+  namespace: bitwarden
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-http
+  hostnames:
+    - bitwarden.home.547600.xyz
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+

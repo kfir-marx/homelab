@@ -4,7 +4,7 @@ metadata:
   name: bitwarden
   namespace: bitwarden
 spec:
-  # The Tailscale ingress proxy is the only external entry point.
+  # The private Cilium Gateway is the only external entry point.
   type: ClusterIP
   selector:
     app: bitwarden
@@ -113,4 +113,3 @@ spec:
         - name: app-data
           persistentVolumeClaim:
             claimName: bitwarden-app
-

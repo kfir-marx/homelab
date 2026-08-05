@@ -1,0 +1,24 @@
+# Replace the ACME email before syncing. The Cloudflare token Secret is created
+# out-of-band in the cert-manager namespace; see docs/bitwarden-runbook.md.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-cloudflare
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  acme:
+    email: REPLACE_WITH_ACME_EMAIL
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-cloudflare-account-key
+    solvers:
+      - selector:
+          dnsZones:
+            - 547600.xyz
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-dns-api-token
+              key: api-token
+

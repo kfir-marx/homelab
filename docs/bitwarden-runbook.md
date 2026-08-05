@@ -4,16 +4,18 @@ This deployment runs the official Bitwarden Lite image with PostgreSQL. Lite is
 Bitwarden's single-container distribution for individuals and homelabs; it is
 used instead of the much larger multi-service Helm/MSSQL deployment.
 
-The only external entry point is Tailscale's Kubernetes ingress at:
+The only external entry point is the shared private Cilium Gateway at:
 
 ```text
-https://bitwarden.ghoul-slowworm.ts.net
+https://bitwarden.home.547600.xyz
 ```
 
-The Service is `ClusterIP`, there is no route on the LAN Cilium Gateway, and
-there is no Cloudflare Tunnel rule. Tailscale terminates HTTPS with a publicly
-trusted certificate, but the endpoint is not a Funnel and is reachable only by
-tailnet identities allowed by policy.
+The Service is `ClusterIP` and has no Cloudflare Tunnel rule or public DNS
+address. On the home LAN, AdGuard resolves the private wildcard to the Gateway
+VIP `192.168.1.220`. Remote clients reach that same VIP through the existing
+Tailscale subnet router. cert-manager obtains a publicly trusted wildcard
+certificate with a Cloudflare DNS-01 challenge; certificate issuance does not
+make the Gateway or Bitwarden publicly reachable.
 
 Bitwarden vault records, attachments, identity material, PostgreSQL, and local
 logical backups use retained static PVs on the critical NFS export at
@@ -23,59 +25,46 @@ Upstream references:
 
 - [Bitwarden Lite deployment](https://bitwarden.com/help/install-and-deploy-lite/)
 - [Bitwarden database options](https://bitwarden.com/help/database-options/)
-- [Tailscale Kubernetes Operator installation](https://tailscale.com/docs/kubernetes-operator/install-operator)
-- [Tailscale layer-7 cluster ingress](https://tailscale.com/docs/kubernetes-operator/ingress/expose-workload-to-tailnet-l7)
+- [cert-manager Cloudflare DNS-01](https://cert-manager.io/docs/configuration/acme/dns01/cloudflare/)
+- [Cilium Gateway API](https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/gateway-api/)
 - [Bitwarden LastPass import](https://bitwarden.com/help/import-from-lastpass/)
 
-## 1. Prepare Tailscale
+## 1. Prepare private HTTPS
 
-In **DNS** in the Tailscale admin console, keep MagicDNS enabled and enable
-HTTPS certificates. The operator uses this to issue the certificate for the
-`bitwarden` MagicDNS name.
+No new Tailscale tag, OAuth client, or operator is needed. The existing
+`tailscale-router` continues to advertise `192.168.1.0/24`; existing tailnet
+grants that allow the private Gateway apply to Bitwarden as they do to ArgoCD
+and the other private services.
 
-Merge these tag owners into the tailnet policy; do not replace existing
-`tag:router` rules:
+Replace `REPLACE_WITH_ACME_EMAIL` in
+`kubernetes/system/cert-manager/clusterissuer.yaml` with the email address for
+Let's Encrypt expiry and account notices.
 
-```json
-"tagOwners": {
-  "tag:k8s-operator": [],
-  "tag:bitwarden": ["tag:k8s-operator"]
-}
-```
+In Cloudflare, create a scoped API token for the `547600.xyz` zone with:
 
-Grant only the intended identities HTTPS access. For example, replace the
-email below with the owner of the vault and merge this entry into the existing
-`grants` array:
+- **Zone → DNS → Edit**;
+- **Zone → Zone → Read**;
+- zone resource restricted to `547600.xyz`.
 
-```json
-{
-  "src": ["your-email@example.com"],
-  "dst": ["tag:bitwarden"],
-  "ip": ["tcp:443"]
-}
-```
-
-Create an OAuth client in **Trust credentials**. Give it the
-`tag:k8s-operator` tag and write scope for **General/Services**,
-**Devices/Core**, and **Keys/Auth Keys**. Store it out-of-band before the
-ArgoCD Application syncs:
+Create the token Secret out-of-band before cert-manager syncs:
 
 ```bash
-kubectl create namespace tailscale --dry-run=client -o yaml | kubectl apply -f -
-read -r -p "Tailscale OAuth client ID: " tailscale_client_id
-read -r -s -p "Tailscale OAuth client secret: " tailscale_client_secret
+kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
+read -r -s -p "Cloudflare DNS API token: " cloudflare_dns_api_token
 printf '\n'
-kubectl -n tailscale create secret generic operator-oauth \
-  --from-literal=client_id="$tailscale_client_id" \
-  --from-literal=client_secret="$tailscale_client_secret"
-unset tailscale_client_id tailscale_client_secret
+kubectl -n cert-manager create secret generic cloudflare-dns-api-token \
+  --from-literal=api-token="$cloudflare_dns_api_token"
+unset cloudflare_dns_api_token
 ```
 
-The shell history contains variable names, not the credential values. Do not
-run these commands with shell tracing enabled.
+The shell history contains the variable name, not the token value. Do not run
+the command with shell tracing enabled. This token is only for ACME TXT record
+updates; do not reuse a Cloudflare Tunnel token or a global API key.
 
-The existing `tailscale-router` remains responsible for the LAN subnet route.
-The operator is separate and creates a dedicated HTTPS proxy for Bitwarden.
+cert-manager issues `*.home.547600.xyz` into the
+`argocd/private-home-wildcard-tls` Secret. The shared Gateway terminates HTTPS
+on port 443. The existing AdGuard wildcard already maps the hostname to
+`192.168.1.220`, so no public A or CNAME record is required.
 
 ## 2. Prepare critical NFS
 
@@ -112,6 +101,9 @@ kubectl create namespace bitwarden --dry-run=client -o yaml | kubectl apply -f -
 read -r -p "Bitwarden installation ID: " bitwarden_installation_id
 read -r -s -p "Bitwarden installation key: " bitwarden_installation_key
 printf '\n'
+read -r -p "SMTP username: " bitwarden_smtp_username
+read -r -s -p "SMTP password: " bitwarden_smtp_password
+printf '\n'
 bitwarden_db_password="$(openssl rand -base64 48 | tr -d '\n')"
 bitwarden_internal_key="$(openssl rand -hex 32)"
 bitwarden_oidc_key="$(openssl rand -hex 32)"
@@ -124,10 +116,13 @@ kubectl -n bitwarden create secret generic bitwarden-secrets \
   --from-literal=globalSettings__internalIdentityKey="$bitwarden_internal_key" \
   --from-literal=globalSettings__oidcIdentityClientKey="$bitwarden_oidc_key" \
   --from-literal=globalSettings__duo__aKey="$bitwarden_duo_key" \
-  --from-literal=globalSettings__identityServer__certificatePassword="$bitwarden_identity_password"
+  --from-literal=globalSettings__identityServer__certificatePassword="$bitwarden_identity_password" \
+  --from-literal=globalSettings__mail__smtp__username="$bitwarden_smtp_username" \
+  --from-literal=globalSettings__mail__smtp__password="$bitwarden_smtp_password"
 unset bitwarden_installation_id bitwarden_installation_key \
   bitwarden_db_password bitwarden_internal_key bitwarden_oidc_key \
-  bitwarden_duo_key bitwarden_identity_password
+  bitwarden_duo_key bitwarden_identity_password bitwarden_smtp_username \
+  bitwarden_smtp_password
 ```
 
 Back up this Secret through an encrypted, access-controlled process. It lives
@@ -137,33 +132,23 @@ this repository.
 SMTP is required for a complete self-hosted deployment, including account email
 verification, new-device verification, invitations, and System Administrator
 Portal login. Before onboarding, add the SMTP username and password to
-`bitwarden-secrets`, and add the non-secret reply-to address, host, port, SSL,
-and STARTTLS values to `bitwarden-config`. Bitwarden recommends authenticated
-submission on port 587 with STARTTLS. Keep certificate validation enabled.
+`bitwarden-secrets`. Replace `REPLACE_WITH_REPLY_TO_EMAIL` and
+`REPLACE_WITH_SMTP_HOST` in `bitwarden-config`. The port, SSL, STARTTLS, and
+certificate-validation settings are already populated for authenticated port
+587 submission.
 
-For a port-587 provider, add entries like these to the ConfigMap's `data` map:
+The checked-in placeholders are:
 
 ```yaml
-globalSettings__mail__replyToEmail: no-reply@example.com
-globalSettings__mail__smtp__host: smtp.example.com
+globalSettings__mail__replyToEmail: REPLACE_WITH_REPLY_TO_EMAIL
+globalSettings__mail__smtp__host: REPLACE_WITH_SMTP_HOST
 globalSettings__mail__smtp__port: "587"
 globalSettings__mail__smtp__ssl: "false"
 globalSettings__mail__smtp__startTls: "true"
+globalSettings__mail__smtp__trustServer: "false"
 ```
 
-Add the credentials to the Secret creation command in the same shell session:
-
-```bash
-read -r -p "SMTP username: " bitwarden_smtp_username
-read -r -s -p "SMTP password: " bitwarden_smtp_password
-printf '\n'
-# Add these two arguments to `kubectl create secret generic` above:
-# --from-literal=globalSettings__mail__smtp__username="$bitwarden_smtp_username"
-# --from-literal=globalSettings__mail__smtp__password="$bitwarden_smtp_password"
-```
-
-Unset both variables with the other temporary values after creating the
-Secret. Do not commit SMTP credentials.
+Do not commit SMTP credentials.
 
 The System Administrator Portal is disabled by default in this deployment. If
 it is needed, first configure SMTP, add an explicit comma-separated
@@ -172,41 +157,47 @@ it is needed, first configure SMTP, add an explicit comma-separated
 
 ## 4. Deploy and verify
 
-Commit and push the manifests. The root ArgoCD Application discovers both
-child Applications. To bootstrap them manually without applying workload
-resources directly:
+Commit and push the manifests. The root ArgoCD Application discovers the
+cert-manager and Bitwarden child Applications and updates the existing private
+Gateway Application. To bootstrap the new child Applications manually without
+applying workload resources directly:
 
 ```bash
-kubectl apply -f kubernetes/apps/tailscale-operator.yaml
+kubectl apply -f kubernetes/apps/cert-manager.yaml
 kubectl apply -f kubernetes/apps/bitwarden.yaml
 ```
 
-Wait for the operator, storage, database, and Bitwarden:
+Wait for certificate issuance, storage, database, and Bitwarden:
 
 ```bash
-kubectl -n tailscale rollout status deployment/operator --timeout=5m
+kubectl -n cert-manager rollout status deployment/cert-manager --timeout=5m
+kubectl get clusterissuer letsencrypt-cloudflare
+kubectl -n argocd get certificate private-home-wildcard
+kubectl -n argocd get gateway private
 kubectl -n bitwarden get pvc
 kubectl -n bitwarden rollout status statefulset/bitwarden-postgres --timeout=10m
 kubectl -n bitwarden rollout status deployment/bitwarden --timeout=10m
-kubectl -n bitwarden get ingress bitwarden
+kubectl -n bitwarden get httproute
 ```
 
-The ingress `ADDRESS` must become
-`bitwarden.ghoul-slowworm.ts.net`. From an allowed tailnet device:
+The `ClusterIssuer` and `Certificate` must report `Ready=True`, and the Gateway
+must report an accepted HTTPS listener. From the LAN and then from a tailnet
+device away from home:
 
 ```bash
-curl --fail --show-error https://bitwarden.ghoul-slowworm.ts.net/alive
+curl --fail --show-error https://bitwarden.home.547600.xyz/alive
 ```
 
 Also verify the exposure model:
 
 ```bash
 kubectl -n bitwarden get service bitwarden
-rg -n "bitwarden" kubernetes/system/cloudflared kubernetes/system/argocd-private-access
+rg -n "bitwarden" kubernetes/system/cloudflared
 ```
 
-The Service must remain `ClusterIP`, and the search must find no Cloudflare or
-private-LAN Gateway route.
+The Service must remain `ClusterIP`, and the search must find no Cloudflare
+Tunnel rule. The only application route should be the `HTTPRoute` attached to
+the shared private Gateway.
 
 Open the web vault, create the intended account, and record the master password
 in a safe offline recovery location. Once all intended accounts exist, change
@@ -217,11 +208,12 @@ Configure each browser, desktop, mobile, or CLI client to use the self-hosted
 server URL before signing in:
 
 ```text
-https://bitwarden.ghoul-slowworm.ts.net
+https://bitwarden.home.547600.xyz
 ```
 
-Those clients must be connected to Tailscale when syncing. Cached vault data
-remains usable offline according to the normal Bitwarden client behavior.
+Away from the home LAN, those clients must be connected to Tailscale when
+syncing. Cached vault data remains usable offline according to normal Bitwarden
+client behavior.
 
 ## 5. Import LastPass data
 
@@ -301,7 +293,7 @@ over the live database while Bitwarden is running.
 
 ## 7. Upgrades
 
-Both application images and the Tailscale chart are pinned. Before changing a
+The application images and cert-manager chart are pinned. Before changing a
 version:
 
 1. confirm a fresh backup exists;

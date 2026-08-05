@@ -1,12 +1,12 @@
-# Non-secret Bitwarden Lite settings. TLS terminates at the Tailscale ingress
-# proxy, so the application listens on plain HTTP only inside the cluster.
+# Non-secret Bitwarden Lite settings. TLS terminates at the private Cilium
+# Gateway, so the application listens on plain HTTP only inside the cluster.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: bitwarden-config
   namespace: bitwarden
 data:
-  BW_DOMAIN: bitwarden.ghoul-slowworm.ts.net
+  BW_DOMAIN: bitwarden.home.547600.xyz
   BW_DB_PROVIDER: postgresql
   BW_DB_SERVER: bitwarden-postgres
   BW_DB_PORT: "5432"
@@ -23,6 +23,14 @@ data:
   PUID: "1000"
   PGID: "1000"
   globalSettings__enableCloudCommunication: "false"
+  # SMTP placeholders: replace the two REPLACE values before onboarding.
+  # Port 587 uses STARTTLS, so smtp.ssl stays false.
+  globalSettings__mail__replyToEmail: REPLACE_WITH_REPLY_TO_EMAIL
+  globalSettings__mail__smtp__host: REPLACE_WITH_SMTP_HOST
+  globalSettings__mail__smtp__port: "587"
+  globalSettings__mail__smtp__ssl: "false"
+  globalSettings__mail__smtp__startTls: "true"
+  globalSettings__mail__smtp__trustServer: "false"
   # Leave registration open only for the initial account creation. Change this
   # to "true" and let ArgoCD reconcile after the intended accounts exist.
   globalSettings__disableUserRegistration: "false"

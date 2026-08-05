@@ -29,6 +29,25 @@ spec:
           selector:
             matchLabels:
               homelab.kfir.dev/private-gateway-access: "true"
+    # Trusted TLS for private applications. cert-manager renews the wildcard
+    # certificate with a Cloudflare DNS-01 challenge; this listener still uses
+    # only the private LAN VIP.
+    - name: private-https
+      protocol: HTTPS
+      port: 443
+      hostname: "*.home.547600.xyz"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: private-home-wildcard-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              homelab.kfir.dev/private-gateway-access: "true"
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -45,3 +64,17 @@ spec:
     - backendRefs:
         - name: argocd-server
           port: 80
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: private-home-wildcard
+  namespace: argocd
+spec:
+  secretName: private-home-wildcard-tls
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-cloudflare
+  dnsNames:
+    - "*.home.547600.xyz"
