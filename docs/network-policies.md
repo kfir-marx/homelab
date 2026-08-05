@@ -22,8 +22,8 @@ apply step is required.
 | `bitwarden/server` | Gateway to TCP/8080 | PostgreSQL TCP/5432; cluster DNS; `smtp.gmail.com` TCP/587 |
 | `bitwarden/backup` | None | PostgreSQL TCP/5432 and cluster DNS |
 | `bitwarden/postgres` | Server and backup to TCP/5432 | None |
-| `cloudflared` | None | Cluster DNS; Cloudflare tunnel domains on TCP/UDP 7844; `media` namespace on TCP/8096 for Jellyfin |
-| `immich/server` | Gateway to TCP/2283 | PostgreSQL 5432, Valkey 6379, ML 3003, cluster DNS, and public-only HTTPS |
+| `cloudflared` | None | Cluster DNS; Cloudflare tunnel domains on TCP/UDP 7844; Jellyfin on TCP/8096 and Immich on TCP/2283 |
+| `immich/server` | Gateway and Cloudflared to TCP/2283 | PostgreSQL 5432, Valkey 6379, ML 3003, cluster DNS, and public-only HTTPS |
 | `immich/machine-learning` | Server to TCP/3003 | Cluster DNS and public-only HTTPS for model downloads |
 | `immich/postgres` | Server to TCP/5432 | None |
 | `immich/redis` | Server to TCP/6379 | None |
@@ -78,7 +78,7 @@ curl --fail https://bitwarden.home.547600.xyz/alive
 kubectl -n bitwarden create job --from=cronjob/bitwarden-backup network-policy-test
 
 kubectl -n immich rollout status deployment/immich-server
-curl --fail http://immich.home.547600.xyz/api/server/ping
+curl --fail https://immich.home.547600.xyz/api/server/ping
 
 kubectl -n cloudflared logs deployment/cloudflared
 kubectl -n tailscale-router logs deployment/tailscale-router

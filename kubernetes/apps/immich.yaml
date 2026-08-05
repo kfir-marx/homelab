@@ -7,8 +7,9 @@
 # Public exposure: configure a Cloudflare Tunnel ingress rule in the
 # Cloudflare dashboard pointing at
 #   http://immich-server.immich.svc.cluster.local:2283
-# (same pattern as Jellyfin). Or reach it over the Tailscale subnet at the
-# in-cluster Service address — no public exposure needed for personal use.
+# (same pattern as Jellyfin). Private access uses the shared Gateway at
+#   https://immich.home.547600.xyz
+# over the LAN or Tailscale subnet route.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

@@ -16,9 +16,9 @@ infrastructure.
 ```text
 Family and friends
         |
-        | HTTPS: jellyfin.547600.xyz
+        | HTTPS: jellyfin.547600.xyz / immich.547600.xyz
         v
-Cloudflare edge --- outbound Cloudflare Tunnel ---> Jellyfin service
+Cloudflare edge --- outbound Cloudflare Tunnel ---> Jellyfin / Immich services
 
 Administrator devices
         |
@@ -45,6 +45,7 @@ Cloudflare. No inbound port forwarding or public home IP is required.
 | Service | Public hostname | Internal target | Authentication |
 |---------|-----------------|-----------------|----------------|
 | Jellyfin | `jellyfin.547600.xyz` | `jellyfin.media.svc:8096` | Jellyfin account |
+| Immich | `immich.547600.xyz` | `immich-server.immich.svc:2283` | Immich account |
 
 Add only applications intended for external users to the tunnel. Do not put
 ArgoCD, Proxmox, the Kubernetes API, or other administrative endpoints on it.
@@ -64,6 +65,7 @@ back to Tailscale's managed DERP relays when direct connectivity is unavailable.
 | ArgoCD | `http://argocd.home.547600.xyz` / `192.168.1.220:80` | Cilium Gateway API |
 | AdGuard Home UI | `http://adguard.home.547600.xyz` / `192.168.1.220:80` | Cilium Gateway API |
 | Bitwarden | `https://bitwarden.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
+| Immich | `https://immich.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | AdGuard Home DNS | `192.168.1.221:53` TCP/UDP | Cilium LoadBalancer |
 | Kubernetes API | `192.168.1.210:6443` | API VIP |
 | Proxmox | `https://192.168.1.106:8006` and `https://192.168.1.107:8006` | LAN subnet route |
@@ -81,9 +83,9 @@ application traffic remains WireGuard encrypted between peers.
 ## Security boundaries
 
 - Cloudflare Tunnel is limited to explicitly public services.
-- The cloudflared network policy permits only the documented Jellyfin origin
-  and Cloudflare tunnel endpoints. Adding a dashboard origin also requires a
-  matching declarative policy change or it fails closed.
+- The cloudflared network policy permits only the documented Jellyfin and
+  Immich origins and Cloudflare tunnel endpoints. Adding a dashboard origin
+  also requires a matching declarative policy change or it fails closed.
 - Bitwarden has no Cloudflare rule, public DNS address, LoadBalancer, NodePort,
   or Funnel. It uses the shared private Cilium Gateway like the other private
   applications, with HTTPS added for password-manager clients.

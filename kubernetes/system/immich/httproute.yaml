@@ -10,6 +10,11 @@ spec:
       name: private
       namespace: argocd
       sectionName: private-http
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-https
   hostnames:
     - immich.home.547600.xyz
   rules:

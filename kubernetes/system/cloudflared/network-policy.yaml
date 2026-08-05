@@ -1,6 +1,6 @@
 # cloudflared accepts no inbound connections. It can establish tunnel sessions
-# only to Cloudflare's documented edge endpoints and proxy only to the current
-# public origin declared in docs/remote-access.md.
+# only to Cloudflare's documented edge endpoints and proxy only to the public
+# origins declared in docs/remote-access.md.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -18,7 +18,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: jellyfin-origin
+  name: public-origins
   namespace: cloudflared
 spec:
   podSelector:
@@ -33,6 +33,17 @@ spec:
               kubernetes.io/metadata.name: media
       ports:
         - port: 8096
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: immich
+          podSelector:
+            matchLabels:
+              app: immich
+              component: server
+      ports:
+        - port: 2283
           protocol: TCP
 ---
 apiVersion: cilium.io/v2
