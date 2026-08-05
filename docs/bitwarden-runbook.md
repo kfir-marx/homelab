@@ -168,10 +168,12 @@ Do not commit SMTP credentials or print the generated Secret. Google displays
 App Passwords in groups; the command removes display whitespace before storing
 the 16-character password.
 
-The System Administrator Portal is disabled by default in this deployment. If
-it is needed, first configure SMTP, add an explicit comma-separated
-`adminSettings__admins` email allow-list, and then set `BW_ENABLE_ADMIN` to
-`"true"` in `kubernetes/system/bitwarden/config.yaml`.
+The Bitwarden Lite Admin process must remain enabled because it owns database
+initialization and migrations. Portal login is controlled separately: with no
+`adminSettings__admins` value, no address is authorized to log in. To use the
+System Administrator Portal, first configure SMTP and then add an explicit
+comma-separated `adminSettings__admins` email allow-list to the out-of-band
+`bitwarden-smtp` Secret.
 
 ## 4. Deploy and verify
 
@@ -197,6 +199,20 @@ kubectl -n bitwarden rollout status statefulset/bitwarden-postgres --timeout=10m
 kubectl -n bitwarden rollout status deployment/bitwarden --timeout=10m
 kubectl -n bitwarden get httproute
 ```
+
+On initial deployment and after upgrades, confirm that the Admin process
+completed the database migration before using the vault:
+
+```bash
+kubectl -n bitwarden exec deployment/bitwarden -- \
+  sh -c 'grep -Ei "migrat|database" /etc/bitwarden/logs/admin-*.log | tail -50'
+kubectl -n bitwarden exec statefulset/bitwarden-postgres -- \
+  psql -U bitwarden -d bitwarden_vault -X \
+  -c "SELECT to_regclass('\"User\"'), to_regclass('\"OrganizationDomain\"');"
+```
+
+Both table names must be returned. An empty result means the schema migration
+did not complete; inspect the Admin log instead of creating tables manually.
 
 The `ClusterIssuer` and `Certificate` must report `Ready=True`, and the Gateway
 must report an accepted HTTPS listener. From the LAN and then from a tailnet

@@ -13,9 +13,9 @@ data:
   BW_DB_DATABASE: bitwarden_vault
   BW_DB_USERNAME: bitwarden
   BW_ENABLE_SSL: "false"
-  # Keep the email-link-based System Administrator Portal disabled until SMTP
-  # and an explicit adminSettings__admins allow-list are configured.
-  BW_ENABLE_ADMIN: "false"
+  # The Admin process owns Lite database migrations and must remain enabled.
+  # Portal login remains unavailable until adminSettings__admins is configured.
+  BW_ENABLE_ADMIN: "true"
   BW_ENABLE_EVENTS: "false"
   BW_ENABLE_SCIM: "false"
   BW_ENABLE_SSO: "false"
