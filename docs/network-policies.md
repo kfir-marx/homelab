@@ -18,7 +18,7 @@ apply step is required.
 
 | Namespace/workload | Ingress | Egress |
 |---|---|---|
-| `adguard-home` | Gateway to TCP/3000; LAN, Tailscale router, and forwarding nodes to TCP/UDP 53 | Cluster DNS; named public fallback resolvers on 53; public-only TCP 80/443 for DoH and filter lists |
+| `adguard-home` | Gateway to TCP/3000; external/LAN, Tailscale router, and forwarding nodes to TCP/UDP 53 through the private DNS VIP | Cluster DNS; named public fallback resolvers on 53; public-only TCP 80/443 for DoH and filter lists |
 | `bitwarden/server` | Gateway to TCP/8080 | PostgreSQL TCP/5432; cluster DNS; `smtp.gmail.com` TCP/587 |
 | `bitwarden/backup` | None | PostgreSQL TCP/5432 and cluster DNS |
 | `bitwarden/postgres` | Server and backup to TCP/5432 | None |
@@ -40,6 +40,11 @@ these policies do not change the critical/bulk storage paths.
 - The Tailscale router must reach every protocol and port in
   `192.168.1.0/24`; Tailscale grants remain the per-user authorization boundary
   for this deliberate bridge.
+- AdGuard admits Cilium's `world` identity only on TCP/UDP 53. With VXLAN,
+  Cilium assigns that identity to north/south LoadBalancer traffic even when
+  the original client is on the LAN. The resolver remains reachable only on
+  private LAN addresses and through the Tailscale subnet route; do not expose
+  its LoadBalancer or node ports with public NAT.
 - Monitoring has ingress isolation only. A fixed egress allow-list would
   conflict with Prometheus's cluster-wide service and pod discovery.
 - Cilium may not apply ordinary pod policy to host-networked node-exporter
@@ -92,4 +97,5 @@ hubble observe --verdict DROPPED --since 10m
 ```
 
 Prefer adding one specific identity/selector and destination port. Do not
-replace a failed rule with namespace-wide or `0.0.0.0/0` private-network access.
+replace a failed rule with namespace-wide access, arbitrary destination ports,
+or unrestricted private-network egress.

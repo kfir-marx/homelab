@@ -34,9 +34,12 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
-    # Direct LAN clients retain their source address when Cilium can preserve
-    # it. With externalTrafficPolicy=Cluster, the forwarding node can instead
-    # be the visible source, so host and remote-node are also admitted.
+    # This resolver is exposed only on the private 192.168.1.221 LoadBalancer
+    # VIP. In VXLAN mode Cilium assigns north/south Service traffic the `world`
+    # identity, including LAN requests that externalTrafficPolicy=Cluster
+    # forwards across nodes. Keep that identity limited to DNS ports; LAN and
+    # tailnet reachability remain bounded by the private VIP and Tailscale
+    # grants.
     - fromCIDR:
         - 192.168.1.0/24
       toPorts:
@@ -46,6 +49,7 @@ spec:
             - port: "53"
               protocol: UDP
     - fromEntities:
+        - world
         - host
         - remote-node
       toPorts:
