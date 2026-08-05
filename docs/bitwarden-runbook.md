@@ -92,38 +92,42 @@ available.
 ## 3. Create the Bitwarden Secret
 
 Generate an installation ID and key at <https://bitwarden.com/host/>. Select
-the same Bitwarden cloud region used by any self-hosted license.
+the same Bitwarden cloud region used by any self-hosted license, then store
+them in the repository-root `.env`:
+
+```dotenv
+BITWARDEN_INSTALLATION_ID="your-installation-id"
+BITWARDEN_INSTALLATION_KEY="your-installation-key"
+```
 
 Create the namespace and secret without committing any value to Git:
 
 ```bash
 kubectl create namespace bitwarden --dry-run=client -o yaml | kubectl apply -f -
-read -r -p "Bitwarden installation ID: " bitwarden_installation_id
-read -r -s -p "Bitwarden installation key: " bitwarden_installation_key
-printf '\n'
-read -r -p "SMTP username: " bitwarden_smtp_username
-read -r -s -p "SMTP password: " bitwarden_smtp_password
-printf '\n'
+. ./.env
 bitwarden_db_password="$(openssl rand -base64 48 | tr -d '\n')"
 bitwarden_internal_key="$(openssl rand -hex 32)"
 bitwarden_oidc_key="$(openssl rand -hex 32)"
 bitwarden_duo_key="$(openssl rand -hex 32)"
 bitwarden_identity_password="$(openssl rand -base64 48 | tr -d '\n')"
-kubectl -n bitwarden create secret generic bitwarden-secrets \
-  --from-literal=BW_INSTALLATION_ID="$bitwarden_installation_id" \
-  --from-literal=BW_INSTALLATION_KEY="$bitwarden_installation_key" \
-  --from-literal=BW_DB_PASSWORD="$bitwarden_db_password" \
-  --from-literal=globalSettings__internalIdentityKey="$bitwarden_internal_key" \
-  --from-literal=globalSettings__oidcIdentityClientKey="$bitwarden_oidc_key" \
-  --from-literal=globalSettings__duo__aKey="$bitwarden_duo_key" \
-  --from-literal=globalSettings__identityServer__certificatePassword="$bitwarden_identity_password" \
-  --from-literal=globalSettings__mail__smtp__username="$bitwarden_smtp_username" \
-  --from-literal=globalSettings__mail__smtp__password="$bitwarden_smtp_password"
-unset bitwarden_installation_id bitwarden_installation_key \
+printf '%s=%s\n' \
+  BW_INSTALLATION_ID "$BITWARDEN_INSTALLATION_ID" \
+  BW_INSTALLATION_KEY "$BITWARDEN_INSTALLATION_KEY" \
+  BW_DB_PASSWORD "$bitwarden_db_password" \
+  globalSettings__internalIdentityKey "$bitwarden_internal_key" \
+  globalSettings__oidcIdentityClientKey "$bitwarden_oidc_key" \
+  globalSettings__duo__aKey "$bitwarden_duo_key" \
+  globalSettings__identityServer__certificatePassword "$bitwarden_identity_password" | \
+  kubectl -n bitwarden create secret generic bitwarden-secrets \
+    --from-env-file=/dev/stdin
+unset BITWARDEN_INSTALLATION_ID BITWARDEN_INSTALLATION_KEY \
   bitwarden_db_password bitwarden_internal_key bitwarden_oidc_key \
-  bitwarden_duo_key bitwarden_identity_password bitwarden_smtp_username \
-  bitwarden_smtp_password
+  bitwarden_duo_key bitwarden_identity_password
 ```
+
+This is intentionally a create-only command. If `bitwarden-secrets` already
+exists, stop and investigate instead of regenerating it: rotating
+`BW_DB_PASSWORD` without coordinating PostgreSQL would break database access.
 
 Back up this Secret through an encrypted, access-controlled process. It lives
 in Kubernetes etcd by necessity; do not copy it as plaintext onto NFS or into
@@ -131,24 +135,38 @@ this repository.
 
 SMTP is required for a complete self-hosted deployment, including account email
 verification, new-device verification, invitations, and System Administrator
-Portal login. Before onboarding, add the SMTP username and password to
-`bitwarden-secrets`. Replace `REPLACE_WITH_REPLY_TO_EMAIL` and
-`REPLACE_WITH_SMTP_HOST` in `bitwarden-config`. The port, SSL, STARTTLS, and
-certificate-validation settings are already populated for authenticated port
-587 submission.
+Portal login. Gmail's host, port, SSL, STARTTLS, and certificate-validation
+settings are checked into `bitwarden-config`. The Gmail address and App
+Password stay in a separate `bitwarden-smtp` Secret so they can be rotated
+without replacing Bitwarden's installation and database credentials.
 
-The checked-in placeholders are:
+Populate these two variables in the repository-root `.env`:
 
-```yaml
-globalSettings__mail__replyToEmail: REPLACE_WITH_REPLY_TO_EMAIL
-globalSettings__mail__smtp__host: REPLACE_WITH_SMTP_HOST
-globalSettings__mail__smtp__port: "587"
-globalSettings__mail__smtp__ssl: "false"
-globalSettings__mail__smtp__startTls: "true"
-globalSettings__mail__smtp__trustServer: "false"
+```dotenv
+GOOGLE_HOMELAB_GMAIL="your-homelab-account@gmail.com"
+GOOGLE_APP_PASSWORD_FOR_SMTP_SERVER="your-google-app-password"
 ```
 
-Do not commit SMTP credentials.
+Create or update the SMTP Secret without printing either value:
+
+```bash
+set -a
+. ./.env
+set +a
+smtp_app_password="$(printf '%s' "$GOOGLE_APP_PASSWORD_FOR_SMTP_SERVER" | tr -d '[:space:]')"
+kubectl create namespace bitwarden --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n bitwarden create secret generic bitwarden-smtp \
+  --from-literal=globalSettings__mail__replyToEmail="$GOOGLE_HOMELAB_GMAIL" \
+  --from-literal=globalSettings__mail__smtp__username="$GOOGLE_HOMELAB_GMAIL" \
+  --from-literal=globalSettings__mail__smtp__password="$smtp_app_password" \
+  --dry-run=client -o yaml | \
+  kubectl apply --server-side --field-manager=bitwarden-smtp-bootstrap -f -
+unset GOOGLE_HOMELAB_GMAIL GOOGLE_APP_PASSWORD_FOR_SMTP_SERVER smtp_app_password
+```
+
+Do not commit SMTP credentials or print the generated Secret. Google displays
+App Passwords in groups; the command removes display whitespace before storing
+the 16-character password.
 
 The System Administrator Portal is disabled by default in this deployment. If
 it is needed, first configure SMTP, add an explicit comma-separated

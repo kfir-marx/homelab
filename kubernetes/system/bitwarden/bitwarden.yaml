@@ -67,6 +67,8 @@ spec:
                 name: bitwarden-config
             - secretRef:
                 name: bitwarden-secrets
+            - secretRef:
+                name: bitwarden-smtp
           ports:
             - name: http
               containerPort: 8080

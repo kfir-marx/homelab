@@ -23,10 +23,10 @@ data:
   PUID: "1000"
   PGID: "1000"
   globalSettings__enableCloudCommunication: "false"
-  # SMTP placeholders: replace the two REPLACE values before onboarding.
-  # Port 587 uses STARTTLS, so smtp.ssl stays false.
-  globalSettings__mail__replyToEmail: REPLACE_WITH_REPLY_TO_EMAIL
-  globalSettings__mail__smtp__host: REPLACE_WITH_SMTP_HOST
+  # Gmail SMTP uses a dedicated out-of-band bitwarden-smtp Secret for the
+  # account address, reply-to address, and App Password. Port 587 uses
+  # STARTTLS, so smtp.ssl stays false.
+  globalSettings__mail__smtp__host: smtp.gmail.com
   globalSettings__mail__smtp__port: "587"
   globalSettings__mail__smtp__ssl: "false"
   globalSettings__mail__smtp__startTls: "true"
