@@ -1,0 +1,116 @@
+# Bitwarden's database, attachments, identity certificate, and logical backups
+# all live on the permanent critical NFS host. Each PV is hard-bound to its PVC
+# and retained independently if the Application or claim is removed.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: bitwarden-app-pv
+  labels:
+    app: bitwarden
+    component: app-data
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: bitwarden
+    name: bitwarden-app
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/bitwarden/app
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bitwarden-app
+  namespace: bitwarden
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 10Gi
+  volumeName: bitwarden-app-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: bitwarden-postgres-pv
+  labels:
+    app: bitwarden
+    component: postgres
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: bitwarden
+    name: bitwarden-postgres
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/bitwarden/postgres
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bitwarden-postgres
+  namespace: bitwarden
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 10Gi
+  volumeName: bitwarden-postgres-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: bitwarden-backups-pv
+  labels:
+    app: bitwarden
+    component: backups
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: bitwarden
+    name: bitwarden-backups
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/bitwarden/backups
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bitwarden-backups
+  namespace: bitwarden
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 50Gi
+  volumeName: bitwarden-backups-pv

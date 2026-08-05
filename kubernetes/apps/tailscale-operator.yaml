@@ -1,0 +1,49 @@
+# The operator provides tailnet-only HTTPS ingress for workloads that must not
+# be reachable through the LAN Cilium Gateway or Cloudflare Tunnel. OAuth
+# credentials are created out-of-band as the `operator-oauth` Secret.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tailscale-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://pkgs.tailscale.com/helmcharts
+    chart: tailscale-operator
+    targetRevision: 1.98.9
+    helm:
+      releaseName: tailscale-operator
+      valuesObject:
+        operatorConfig:
+          image:
+            tag: v1.98.9
+            pullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+        proxyConfig:
+          # This operator is introduced for the password vault. A dedicated
+          # tag lets the tailnet grant only HTTPS access to this workload.
+          defaultTags: tag:bitwarden
+          image:
+            tag: v1.98.9
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tailscale
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+

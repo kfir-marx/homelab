@@ -1,0 +1,28 @@
+# Non-secret Bitwarden Lite settings. TLS terminates at the Tailscale ingress
+# proxy, so the application listens on plain HTTP only inside the cluster.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bitwarden-config
+  namespace: bitwarden
+data:
+  BW_DOMAIN: bitwarden.ghoul-slowworm.ts.net
+  BW_DB_PROVIDER: postgresql
+  BW_DB_SERVER: bitwarden-postgres
+  BW_DB_PORT: "5432"
+  BW_DB_DATABASE: bitwarden_vault
+  BW_DB_USERNAME: bitwarden
+  BW_ENABLE_SSL: "false"
+  # Keep the email-link-based System Administrator Portal disabled until SMTP
+  # and an explicit adminSettings__admins allow-list are configured.
+  BW_ENABLE_ADMIN: "false"
+  BW_ENABLE_EVENTS: "false"
+  BW_ENABLE_SCIM: "false"
+  BW_ENABLE_SSO: "false"
+  BW_ICONS_PROXY_TO_CLOUD: "false"
+  PUID: "1000"
+  PGID: "1000"
+  globalSettings__enableCloudCommunication: "false"
+  # Leave registration open only for the initial account creation. Change this
+  # to "true" and let ArgoCD reconcile after the intended accounts exist.
+  globalSettings__disableUserRegistration: "false"

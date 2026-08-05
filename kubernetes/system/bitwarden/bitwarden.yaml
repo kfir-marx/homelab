@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: bitwarden
+  namespace: bitwarden
+spec:
+  # The Tailscale ingress proxy is the only external entry point.
+  type: ClusterIP
+  selector:
+    app: bitwarden
+    component: server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bitwarden
+  namespace: bitwarden
+  labels:
+    app: bitwarden
+    component: server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: bitwarden
+      component: server
+  template:
+    metadata:
+      labels:
+        app: bitwarden
+        component: server
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-bitwarden-data
+          image: busybox:1.37.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - mkdir -p /etc/bitwarden/attachments /etc/bitwarden/data-protection /etc/bitwarden/licenses && chown -R 1000:1000 /etc/bitwarden
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+          volumeMounts:
+            - name: app-data
+              mountPath: /etc/bitwarden
+      containers:
+        - name: bitwarden
+          image: ghcr.io/bitwarden/lite:2026.7.0@sha256:be200b8701ea0e1bad94553285769e87225c681d578b7438677aa86eebc18840
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: bitwarden-config
+            - secretRef:
+                name: bitwarden-secrets
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /alive
+              port: http
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /alive
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /alive
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - SETGID
+                - SETUID
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: app-data
+              mountPath: /etc/bitwarden
+      volumes:
+        - name: app-data
+          persistentVolumeClaim:
+            claimName: bitwarden-app
+

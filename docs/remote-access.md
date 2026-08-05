@@ -5,7 +5,8 @@ The homelab uses two independent hosted services:
 - **Cloudflare Tunnel** exposes intentionally public applications such as
   Jellyfin.
 - **Official Tailscale** provides private administrative access through a
-  kernel-mode subnet router in Kubernetes.
+  kernel-mode subnet router in Kubernetes and tailnet-only application ingress
+  through the Tailscale Kubernetes Operator.
 
 Using Tailscale's hosted control plane removes a public coordination-server
 dependency from the homelab and provides managed coordination and DERP relay
@@ -30,6 +31,10 @@ Tailscale tailnet ---> k8s-router advertises 192.168.1.0/24
                                 +--> AdGuard DNS: 192.168.1.221
                                 +--> Kubernetes API: 192.168.1.210:6443
                                 +--> Proxmox and other LAN services
+
+Tailscale tailnet ---> dedicated operator ingress proxy
+                                |
+                                +--> Bitwarden ClusterIP: HTTPS, tailnet only
 ```
 
 The two paths do not depend on one another. A Cloudflare Tunnel outage does not
@@ -67,6 +72,15 @@ back to Tailscale's managed DERP relays when direct connectivity is unavailable.
 | Proxmox | `https://192.168.1.106:8006` and `https://192.168.1.107:8006` | LAN subnet route |
 | Other LAN services | `192.168.1.0/24` | LAN subnet route |
 
+Bitwarden is intentionally different from the services in this table. The
+Tailscale Kubernetes Operator gives it a dedicated MagicDNS name and HTTPS
+proxy, so it is not reachable directly from the LAN and does not use the shared
+Cilium Gateway:
+
+| Service | Tailnet-only address | Access path |
+|---------|----------------------|-------------|
+| Bitwarden | `https://bitwarden.ghoul-slowworm.ts.net` | Tailscale L7 ingress; tailnet grant to `tag:bitwarden` |
+
 AdGuard Home privately resolves `*.home.547600.xyz` to `192.168.1.220`.
 Cilium Gateway API then routes each exact hostname to its backend service.
 DNS does not grant access: the private address is reachable only from the LAN
@@ -79,6 +93,8 @@ application traffic remains WireGuard encrypted between peers.
 ## Security boundaries
 
 - Cloudflare Tunnel is limited to explicitly public services.
+- Bitwarden has no Cloudflare rule, LAN Gateway route, LoadBalancer, NodePort,
+  or Funnel. Its external boundary is the Tailscale ingress proxy.
 - Tailscale device enrollment, tags, route approval, and grants are managed in
   the official admin console.
 - `tag:router` owns the subnet-router identity; it should receive only the
@@ -115,6 +131,8 @@ See [Tailscale subnet-router runbook](tailscale-runbook.md) for tailnet policy,
 auth Secret creation, route approval, client enrollment, and troubleshooting.
 See [AdGuard Home runbook](adguard-home-runbook.md) for storage preparation,
 initial setup, split DNS, ad blocking, and resilience.
+See [Bitwarden runbook](bitwarden-runbook.md) for Tailscale Operator bootstrap,
+critical storage, LastPass migration, and backup handling.
 
 ArgoCD manages:
 
@@ -122,6 +140,8 @@ ArgoCD manages:
 - `kubernetes/apps/tailscale-router.yaml`
 - `kubernetes/apps/argocd-private-access.yaml`
 - `kubernetes/apps/adguard-home.yaml`
+- `kubernetes/apps/tailscale-operator.yaml`
+- `kubernetes/apps/bitwarden.yaml`
 
 The official Tailscale and Cloudflare dashboards manage their respective
 hosted control-plane configuration.

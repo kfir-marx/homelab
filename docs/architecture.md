@@ -232,9 +232,11 @@ mounts the existing ext4 LV; it is not registered as Proxmox storage.
 
 ### Kubernetes storage
 
-Two static NFS-backed `PersistentVolume`s are declared, one per tier. The
-smallgpu export was previously verified; the Ubuntu export must be re-verified
-after the fresh OS is configured.
+Two base static NFS-backed `PersistentVolume`s define the storage tiers, one
+per export. Applications may declare smaller, hard-bound static PVs beneath an
+export so claims have independent retention and cannot bind to another app's
+path. The smallgpu export was previously verified; the Ubuntu export must be
+re-verified after the fresh OS is configured.
 
 | PV name             | StorageClass     | Backed by                                       | Size   | Tier — use case                                                                            |
 |---------------------|------------------|-------------------------------------------------|--------|--------------------------------------------------------------------------------------------|
@@ -242,6 +244,13 @@ after the fresh OS is configured.
 | `storage2-bulk-pv`  | `nfs-storage2`   | `ubuntu-workstation:/mnt/storage2-bulk` (`192.168.1.105`) | 800 Gi | **Critical** — Immich, config snapshots, and personal data |
 
 Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests.
+
+Applications that need hard binding and independent retention declare smaller
+static PVs beneath the same export. Bitwarden uses separate retained paths for
+application/attachment state, PostgreSQL, and logical backups under
+`/mnt/storage2-bulk/bitwarden`. All three use `nfs-storage2`; none may be moved
+to a borrowed-host or scratch tier. The backup path shares the source failure
+domain and must also be copied to an encrypted off-host destination.
 
 The separate `gpu2-scratch-pv` is node-local rather than NFS. It is a static
 `390 GiB`, `ReadWriteOnce` PV backed by the capped 400 GiB virtual HDD attached

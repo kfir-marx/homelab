@@ -1,0 +1,48 @@
+# Even inside the cluster, only the Tailscale ingress proxy may reach the web
+# service. PostgreSQL accepts only the Bitwarden server and its backup job.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bitwarden-ingress
+  namespace: bitwarden
+spec:
+  podSelector:
+    matchLabels:
+      app: bitwarden
+      component: server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tailscale
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: bitwarden
+spec:
+  podSelector:
+    matchLabels:
+      app: bitwarden
+      component: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: component
+                operator: In
+                values:
+                  - server
+                  - backup
+      ports:
+        - port: 5432
+          protocol: TCP
+

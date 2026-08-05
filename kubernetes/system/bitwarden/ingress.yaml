@@ -1,0 +1,24 @@
+# Tailscale's operator creates a dedicated tailnet proxy and publicly trusted
+# certificate for bitwarden.ghoul-slowworm.ts.net. This is not Funnel: the
+# endpoint is reachable only by identities allowed in the tailnet policy.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bitwarden
+  namespace: bitwarden
+spec:
+  ingressClassName: tailscale
+  tls:
+    - hosts:
+        - bitwarden
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bitwarden
+                port:
+                  number: 8080
+
