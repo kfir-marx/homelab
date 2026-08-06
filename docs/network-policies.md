@@ -19,7 +19,7 @@ apply step is required.
 | Namespace/workload | Ingress | Egress |
 |---|---|---|
 | `adguard-home` | Gateway to TCP/3000; external/LAN, Tailscale router, and forwarding nodes to TCP/UDP 53 through the private DNS VIP | Cluster DNS; named public fallback resolvers on 53; public-only TCP 80/443 for DoH and filter lists |
-| `bitwarden/server` | Gateway to TCP/8080 | PostgreSQL TCP/5432; cluster DNS; `smtp.gmail.com` TCP/587 |
+| `bitwarden/server` | Gateway to TCP/8080 | PostgreSQL TCP/5432; cluster DNS; public-only TCP 80/443 for website icons; `smtp.gmail.com` TCP/587 |
 | `bitwarden/backup` | None | PostgreSQL TCP/5432 and cluster DNS |
 | `bitwarden/postgres` | Server and backup to TCP/5432 | None |
 | `cloudflared` | None | Cluster DNS; Cloudflare tunnel domains on TCP/UDP 7844; Jellyfin on TCP/8096 and Immich on TCP/2283 |
@@ -49,6 +49,9 @@ these policies do not change the critical/bulk storage paths.
   the original client is on the LAN. The resolver remains reachable only on
   private LAN addresses and through the Tailscale subnet route; do not expose
   its LoadBalancer or node ports with public NAT.
+- Bitwarden's website-icon service fetches icons from arbitrary vault entry
+  domains. Its TCP 80/443 egress excludes private, link-local, loopback, and
+  CGNAT ranges so icon fetching cannot be used to reach internal services.
 - Monitoring has ingress isolation only. A fixed egress allow-list would
   conflict with Prometheus's cluster-wide service and pod discovery.
 - Cilium may not apply ordinary pod policy to host-networked node-exporter

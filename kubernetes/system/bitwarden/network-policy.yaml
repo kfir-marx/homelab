@@ -113,6 +113,25 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
+    # The enabled website-icon service fetches favicons from vault entry
+    # domains. Keep that web access public-only so a crafted entry cannot use
+    # the Bitwarden server to reach LAN, cluster, or link-local addresses.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            - 0.0.0.0/8
+            - 10.0.0.0/8
+            - 100.64.0.0/10
+            - 127.0.0.0/8
+            - 169.254.0.0/16
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
     - toFQDNs:
         - matchName: smtp.gmail.com
       toPorts:
