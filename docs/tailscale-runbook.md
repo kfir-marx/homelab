@@ -104,7 +104,7 @@ Verify from a remote client:
 ```bash
 tailscale status
 getent hosts argocd.home.547600.xyz
-curl -I http://argocd.home.547600.xyz
+curl -I https://argocd.home.547600.xyz
 ```
 
 ## Operations

@@ -9,7 +9,7 @@ AdGuard Home provides:
 
 The DNS service uses Cilium LoadBalancer VIP `192.168.1.221`. Its admin UI is
 available only through the private Gateway at
-`http://adguard.home.547600.xyz`.
+`https://adguard.home.547600.xyz`.
 
 Cilium L2 announcements use `externalTrafficPolicy: Cluster`, and Tailscale's
 subnet router normally source-NATs routed clients. AdGuard Home may therefore
@@ -122,8 +122,8 @@ Test from a tailnet client away from the home LAN:
 
 ```bash
 getent hosts argocd.home.547600.xyz
-curl -I http://argocd.home.547600.xyz
-curl -I http://adguard.home.547600.xyz
+curl -I https://argocd.home.547600.xyz
+curl -I https://adguard.home.547600.xyz
 ```
 
 This stage changes only the private zone. If Kubernetes or AdGuard Home is

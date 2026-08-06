@@ -9,7 +9,7 @@ The `monitoring` ArgoCD Application installs the pinned
 - kube-state-metrics
 - node-exporter on every Kubernetes node
 
-Grafana is private at `http://grafana.home.547600.xyz`. AdGuard Home's
+Grafana is private at `https://grafana.home.547600.xyz`. AdGuard Home's
 `*.home.547600.xyz` rewrite resolves it to the shared private Gateway at
 `192.168.1.220`.
 
@@ -109,7 +109,7 @@ rules are also disabled.
 Finally open:
 
 ```text
-http://grafana.home.547600.xyz
+https://grafana.home.547600.xyz
 ```
 
 Log in with the credentials stored in the password manager. Start with the

@@ -26,9 +26,9 @@ Administrator devices
         v
 Tailscale tailnet ---> k8s-router advertises 192.168.1.0/24
                                 |
-                                +--> ArgoCD Gateway: 192.168.1.220
+                                +--> Private HTTPS Gateway: 192.168.1.220:443
+                                |    ArgoCD / AdGuard UI / Grafana / Bitwarden / Immich
                                 +--> AdGuard DNS: 192.168.1.221
-                                +--> Bitwarden Gateway: 192.168.1.220:443
                                 +--> Kubernetes API: 192.168.1.210:6443
                                 +--> Proxmox and other LAN services
 ```
@@ -62,8 +62,9 @@ back to Tailscale's managed DERP relays when direct connectivity is unavailable.
 
 | Service | Private address | Access path |
 |---------|-----------------|-------------|
-| ArgoCD | `http://argocd.home.547600.xyz` / `192.168.1.220:80` | Cilium Gateway API |
-| AdGuard Home UI | `http://adguard.home.547600.xyz` / `192.168.1.220:80` | Cilium Gateway API |
+| ArgoCD | `https://argocd.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
+| AdGuard Home UI | `https://adguard.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
+| Grafana | `https://grafana.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | Bitwarden | `https://bitwarden.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | Immich | `https://immich.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | AdGuard Home DNS | `192.168.1.221:53` TCP/UDP | Cilium LoadBalancer |
@@ -87,8 +88,8 @@ application traffic remains WireGuard encrypted between peers.
   Immich origins and Cloudflare tunnel endpoints. Adding a dashboard origin
   also requires a matching declarative policy change or it fails closed.
 - Bitwarden has no Cloudflare rule, public DNS address, LoadBalancer, NodePort,
-  or Funnel. It uses the shared private Cilium Gateway like the other private
-  applications, with HTTPS added for password-manager clients.
+  or Funnel. All private web applications use the shared Cilium Gateway with
+  HTTPS terminated by its cert-manager-managed wildcard certificate.
 - Tailscale device enrollment, tags, route approval, and grants are managed in
   the official admin console.
 - `tag:router` owns the subnet-router identity; it should receive only the

@@ -60,7 +60,7 @@ spec:
             grafana.ini:
               server:
                 domain: grafana.home.547600.xyz
-                root_url: http://grafana.home.547600.xyz
+                root_url: https://grafana.home.547600.xyz
               users:
                 allow_sign_up: false
             resources:

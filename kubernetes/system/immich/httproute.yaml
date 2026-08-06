@@ -9,11 +9,6 @@ spec:
       kind: Gateway
       name: private
       namespace: argocd
-      sectionName: private-http
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: private
-      namespace: argocd
       sectionName: private-https
   hostnames:
     - immich.home.547600.xyz
@@ -28,3 +23,28 @@ spec:
         - path:
             type: PathPrefix
             value: /
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: immich-http-redirect
+  namespace: immich
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-http
+  hostnames:
+    - immich.home.547600.xyz
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301

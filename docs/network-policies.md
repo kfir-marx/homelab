@@ -71,7 +71,7 @@ kubectl get networkpolicy,ciliumnetworkpolicy -A
 
 kubectl -n adguard-home rollout status statefulset/adguard-home
 dig @192.168.1.221 example.com
-curl --fail http://adguard.home.547600.xyz
+curl --fail https://adguard.home.547600.xyz
 
 kubectl -n bitwarden rollout status deployment/bitwarden
 curl --fail https://bitwarden.home.547600.xyz/alive
@@ -85,7 +85,7 @@ kubectl -n tailscale-router logs deployment/tailscale-router
 tailscale ping k8s-router
 
 kubectl -n monitoring rollout status deployment/monitoring-grafana
-curl --fail http://grafana.home.547600.xyz/api/health
+curl --fail https://grafana.home.547600.xyz/api/health
 ```
 
 Delete the one-off `network-policy-test` Job after checking its result. If an
