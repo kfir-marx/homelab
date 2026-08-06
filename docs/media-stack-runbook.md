@@ -51,6 +51,51 @@ qBittorrent peer traffic uses `192.168.1.222:6881` TCP and UDP. Forward that
 port on the home router only if inbound peer reachability is desired. Never
 forward the WebUI port.
 
+## Manual completion checklist
+
+The in-cluster deployment is automated, but these account/router actions stay
+out of Git and require an operator:
+
+1. In Cloudflare Zero Trust, open the existing tunnel and add public hostname
+   `jellyfin.547600.xyz` with service URL
+   `http://jellyfin.media.svc.cluster.local:8096`. The initial deployment found
+   that this public hostname did not yet resolve; the private Jellyfin route
+   was healthy. Do not enable Cloudflare Access because native Jellyfin clients
+   cannot complete its browser redirect.
+2. Store the existing `media-backup-credentials` password in a password
+   manager. Retrieve it without printing it into shell history:
+
+   ```bash
+   umask 077
+   media_password_file="$(mktemp)"
+   kubectl --kubeconfig kubeconfig.yaml -n media get secret \
+     media-backup-credentials -o jsonpath='{.data.password}' \
+     | base64 -d > "${media_password_file}"
+   ```
+
+   Import `${media_password_file}` into the password manager and securely
+   remove the temporary plaintext file afterward.
+3. Complete the credential rotations in the order below. The restored
+   application state came from a repository that contained secret-bearing
+   databases.
+4. Configure Maintainerr and leave deletion actions disabled for at least one
+   complete candidate cycle. Apply the pin and cleanup policy below only after
+   reviewing its proposed collection.
+5. In Jellyfin, enable NVIDIA NVENC and run one real lower-bitrate transcode.
+   GPU discovery is already verified, but only playback exercises the complete
+   FFmpeg path.
+6. Optionally forward TCP and UDP `6881` on the home router to
+   `192.168.1.222` for better inbound peer connectivity. Do not expose port
+   `8080`.
+7. On the Ubuntu workstation, run the following once with the local sudo
+   password so Ansible confirms the already-created critical backup directory:
+
+   ```bash
+   cd ansible
+   ansible-playbook playbooks/configure-ubuntu-workstation.yml \
+     --ask-become-pass --tags nfs
+   ```
+
 ## Initial restore source
 
 The original private repository contains
