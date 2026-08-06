@@ -47,7 +47,10 @@ spec:
                   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
                   stage="$(mktemp -d)"
                   mkdir -p "${stage}/state"
-                  cp -a /state/. "${stage}/state/"
+                  # Staging ownership is irrelevant because restores reset it
+                  # explicitly. Avoid cp -a so this container needs no CHOWN
+                  # capability merely to copy UID 1000 application files.
+                  cp -R /state/. "${stage}/state/"
 
                   find "${stage}/state" -type f \
                     \( -name '*-wal' -o -name '*-shm' -o -name '*.pid' \) \
