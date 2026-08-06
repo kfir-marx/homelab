@@ -85,6 +85,13 @@ gpu_nodes:
     memory_mb: 8192
     disk_size_gb: 100
     dedicated: false
+    # Live SQLite/config state for the media stack. This stays local because
+    # the Servarr applications do not support their databases on NFS; an
+    # encrypted scheduled backup lands on the permanent critical NFS tier.
+    state_disk:
+      datastore_id: "local-lvm"
+      size_gb: 50
+      serial: "media-state"
     pci_devices:
       - id: "09:00"
         pcie: true

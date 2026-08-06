@@ -20,6 +20,7 @@ override.tf.json
 *.pem
 *.key
 talosconfig
+talosconfig.yaml
 kubeconfig
 kubeconfig.yaml
 

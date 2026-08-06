@@ -13,6 +13,17 @@ nfs_server_mounts:
     mount_options: defaults,nofail
     dump: 0
     passno: 2
+nfs_server_directories:
+  - path: /mnt/storage2-bulk/media
+    mount_point: /mnt/storage2-bulk
+    owner: root
+    group: root
+    mode: "0700"
+  - path: /mnt/storage2-bulk/media/backups
+    mount_point: /mnt/storage2-bulk
+    owner: root
+    group: root
+    mode: "0700"
 nfs_server_exports:
   - path: /mnt/storage2-bulk
     client: 192.168.1.0/24

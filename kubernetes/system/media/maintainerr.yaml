@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maintainerr
+  namespace: media
+  labels:
+    app: maintainerr
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: maintainerr
+  template:
+    metadata:
+      labels:
+        app: maintainerr
+    spec:
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-state
+          image: busybox:1.37.0
+          command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/maintainerr"]
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN]
+          volumeMounts:
+            - name: state
+              mountPath: /state
+      containers:
+        - name: maintainerr
+          image: ghcr.io/maintainerr/maintainerr:3.21.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: media-config
+                  key: TZ
+          ports:
+            - name: http
+              containerPort: 6246
+          readinessProbe:
+            httpGet:
+              path: /api/health/ready
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health/live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: state
+              mountPath: /opt/data
+              subPath: maintainerr
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: media-state
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: maintainerr
+  namespace: media
+spec:
+  selector:
+    app: maintainerr
+  ports:
+    - name: http
+      port: 6246
+      targetPort: http

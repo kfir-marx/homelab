@@ -22,6 +22,19 @@ nfs_server_mounts:
     mount_options: defaults,nofail,uid=0,gid=0,umask=0000
     dump: 0
     passno: 0
+nfs_server_directories:
+  - path: /mnt/data10tb/media
+    mount_point: /mnt/data10tb
+  - path: /mnt/data10tb/media/media
+    mount_point: /mnt/data10tb
+  - path: /mnt/data10tb/media/media/movies
+    mount_point: /mnt/data10tb
+  - path: /mnt/data10tb/media/media/tv
+    mount_point: /mnt/data10tb
+  - path: /mnt/data10tb/media/torrents
+    mount_point: /mnt/data10tb
+  - path: /mnt/data10tb/media/torrents/incomplete
+    mount_point: /mnt/data10tb
 nfs_server_exports:
   - path: /mnt/data10tb
     client: 192.168.1.0/24

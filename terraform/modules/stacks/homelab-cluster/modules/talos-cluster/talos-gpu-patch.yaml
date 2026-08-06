@@ -15,7 +15,3 @@ machine:
       - name: nvidia_uvm
       - name: nvidia_drm
       - name: nvidia_modeset
-
-  # Sysctls sometimes needed for large-memory GPU workloads.
-  sysctls:
-    vm.nr_hugepages: "1024"

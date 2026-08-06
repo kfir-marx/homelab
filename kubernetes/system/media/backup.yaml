@@ -1,0 +1,110 @@
+# Daily encrypted application-state backup. SQLite databases are copied with
+# SQLite's online backup command; live WAL/SHM files are never archived.
+# Provision the password Secret out-of-band as documented in the media runbook.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-state-backup
+  namespace: media
+spec:
+  schedule: "15 3 * * *"
+  timeZone: Asia/Jerusalem
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: media-state-backup
+        spec:
+          restartPolicy: Never
+          nodeSelector:
+            kubernetes.io/hostname: gpu-3
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: alpine:3.23.3
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: MEDIA_BACKUP_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-backup-credentials
+                      key: password
+              command:
+                - /bin/sh
+                - -ec
+              args:
+                - |
+                  umask 077
+                  apk add --no-cache openssl sqlite >/dev/null
+
+                  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                  stage="$(mktemp -d)"
+                  mkdir -p "${stage}/state"
+                  cp -a /state/. "${stage}/state/"
+
+                  find "${stage}/state" -type f \
+                    \( -name '*-wal' -o -name '*-shm' -o -name '*.pid' \) \
+                    -delete
+                  find "${stage}/state" -type d \
+                    \( -name logs -o -name cache -o -name Sentry \) \
+                    -prune -exec find {} -depth -delete \;
+
+                  backup_db() {
+                    source_path="$1"
+                    relative_path="$2"
+                    if [ -f "${source_path}" ]; then
+                      destination="${stage}/state/${relative_path}"
+                      mkdir -p "$(dirname "${destination}")"
+                      sqlite3 "${source_path}" ".timeout 30000" ".backup '${destination}'"
+                    fi
+                  }
+
+                  backup_db /state/jellyfin/data/jellyfin.db jellyfin/data/jellyfin.db
+                  backup_db /state/sonarr/sonarr.db sonarr/sonarr.db
+                  backup_db /state/radarr/radarr.db radarr/radarr.db
+                  backup_db /state/prowlarr/prowlarr.db prowlarr/prowlarr.db
+                  backup_db /state/seerr/db/db.sqlite3 seerr/db/db.sqlite3
+                  backup_db /state/maintainerr/maintainerr.db maintainerr/maintainerr.db
+                  backup_db /state/maintainerr/maintainerr.sqlite maintainerr/maintainerr.sqlite
+
+                  tar -C "${stage}" -czf - state \
+                    | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+                        -pass env:MEDIA_BACKUP_PASSWORD \
+                        -out "/backup/media-state-${timestamp}.tar.gz.enc"
+
+                  find /backup -maxdepth 1 -type f \
+                    -name 'media-state-*.tar.gz.enc' -mtime +30 -delete
+                  find "${stage}" -depth -delete
+              securityContext:
+                runAsUser: 0
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+              volumeMounts:
+                - name: state
+                  mountPath: /state
+                  readOnly: true
+                - name: backups
+                  mountPath: /backup
+          volumes:
+            - name: state
+              persistentVolumeClaim:
+                claimName: media-state
+            - name: backups
+              persistentVolumeClaim:
+                claimName: media-backups

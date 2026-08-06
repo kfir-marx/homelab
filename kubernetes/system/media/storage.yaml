@@ -1,0 +1,147 @@
+# Live application databases stay on a dedicated Talos user volume on gpu-3.
+# Servarr's SQLite databases must not live on NFS. This PV deliberately pins
+# every stateful media pod to gpu-3; encrypted backups go to the critical tier.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-media-state
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-state-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    app.kubernetes.io/part-of: media
+    homelab.kfir.dev/volume: media-state
+spec:
+  capacity:
+    storage: 45Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-media-state
+  claimRef:
+    namespace: media
+    name: media-state
+  local:
+    path: /var/mnt/media-state
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - gpu-3
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-state
+  namespace: media
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-media-state
+  resources:
+    requests:
+      storage: 45Gi
+  volumeName: media-state-pv
+---
+# A single filesystem and a single /data mount preserve hardlinks and atomic
+# imports between qBittorrent, Sonarr, and Radarr.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-data-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    app.kubernetes.io/part-of: media
+    homelab.kfir.dev/volume: media-data
+spec:
+  capacity:
+    storage: 7Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage1
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: media
+    name: media-data
+  nfs:
+    server: 192.168.1.106
+    path: /mnt/data10tb/media
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-data
+  namespace: media
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-storage1
+  resources:
+    requests:
+      storage: 7Ti
+  volumeName: media-data-pv
+---
+# Encrypted state archives are small but irreplaceable, so they live on the
+# permanent Ubuntu workstation rather than either borrowed Proxmox host.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-backups-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    app.kubernetes.io/part-of: media
+    homelab.kfir.dev/volume: media-backups
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+  claimRef:
+    namespace: media
+    name: media-backups
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/media/backups
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-backups
+  namespace: media
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: media-backups-pv

@@ -139,8 +139,17 @@ module "gpu_vms" {
   image_file_id = proxmox_download_file.talos_image["${each.value.proxmox_node}/gpu"].id
 
   pci_devices = each.value.pci_devices
-  scratch_disks = (
-    each.value.scratch_disk == null ? [] : [each.value.scratch_disk]
+  data_disks = concat(
+    each.value.scratch_disk == null ? [] : [merge(each.value.scratch_disk, {
+      file_format = "qcow2"
+      ssd         = false
+      backup      = false
+    })],
+    each.value.state_disk == null ? [] : [merge(each.value.state_disk, {
+      file_format = "raw"
+      ssd         = true
+      backup      = true
+    })],
   )
 }
 
@@ -173,10 +182,23 @@ module "talos_cluster" {
 
   gpu_worker_nodes = {
     for name, node in var.gpu_nodes : name => {
-      ip_address          = node.ip_address
-      gpu                 = true
-      dedicated           = node.dedicated
-      scratch_disk_serial = try(node.scratch_disk.serial, null)
+      ip_address = node.ip_address
+      gpu        = true
+      dedicated  = node.dedicated
+      user_volumes = concat(
+        node.scratch_disk == null ? [] : [{
+          name         = "gpu-scratch"
+          disk_size_gb = node.scratch_disk.size_gb
+          min_size     = "390GiB"
+          max_size     = "400GiB"
+        }],
+        node.state_disk == null ? [] : [{
+          name         = "media-state"
+          disk_size_gb = node.state_disk.size_gb
+          min_size     = "45GiB"
+          max_size     = "50GiB"
+        }],
+      )
     }
   }
 
