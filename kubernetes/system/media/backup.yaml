@@ -24,6 +24,8 @@ spec:
           nodeSelector:
             kubernetes.io/hostname: gpu-3
           securityContext:
+            supplementalGroups:
+              - 1000
             seccompProfile:
               type: RuntimeDefault
           containers:
@@ -42,12 +44,12 @@ spec:
               args:
                 - |
                   umask 077
-                  apk add --no-cache openssl sqlite >/dev/null
+                  apk add --no-cache coreutils openssl sqlite >/dev/null
 
                   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
                   stage="$(mktemp -d)"
                   mkdir -p "${stage}/state"
-                  cp -a /state/. "${stage}/state/"
+                  cp -R --no-preserve=all /state/. "${stage}/state/"
 
                   find "${stage}/state" -type f \
                     \( -name '*-wal' -o -name '*-shm' -o -name '*.pid' \) \
@@ -88,7 +90,7 @@ spec:
                 readOnlyRootFilesystem: false
                 capabilities:
                   drop: [ALL]
-                  add: [CHOWN, FOWNER]
+                  add: [DAC_OVERRIDE]
               resources:
                 requests:
                   cpu: 50m
