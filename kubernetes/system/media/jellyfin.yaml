@@ -39,6 +39,7 @@ spec:
                 - ALL
               add:
                 - CHOWN
+                - FOWNER
           volumeMounts:
             - name: state
               mountPath: /state

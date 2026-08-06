@@ -29,7 +29,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: [ALL]
-              add: [CHOWN]
+              add: [CHOWN, FOWNER]
           volumeMounts:
             - name: state
               mountPath: /state
