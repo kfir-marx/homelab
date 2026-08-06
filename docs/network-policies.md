@@ -27,7 +27,7 @@ apply step is required.
 | `immich/machine-learning` | Server to TCP/3003 | Cluster DNS and public-only HTTPS for model downloads |
 | `immich/postgres` | Server to TCP/5432 | None |
 | `immich/redis` | Server to TCP/6379 | None |
-| `tailscale-router` | Public/LAN UDP 41641 | Kubernetes API, cluster DNS, public HTTPS/UDP, and the declared `192.168.1.0/24` subnet route |
+| `tailscale-router` | Public/LAN UDP 41641 | Kubernetes API, cluster DNS, private Gateway TCP 80/443, public HTTPS/UDP, and the declared `192.168.1.0/24` subnet route |
 | `monitoring` | Same-namespace traffic, Gateway to Grafana, and API-server webhook traffic | Not isolated: Prometheus must discover and scrape changing cluster targets |
 
 Return packets for admitted connections are allowed by Cilium's stateful
@@ -40,6 +40,10 @@ these policies do not change the critical/bulk storage paths.
 - The Tailscale router must reach every protocol and port in
   `192.168.1.0/24`; Tailscale grants remain the per-user authorization boundary
   for this deliberate bridge.
+- Cilium translates traffic for the private Gateway VIP to its reserved
+  `ingress` identity before endpoint egress policy is enforced. The router must
+  therefore allow that identity on TCP 80/443 in addition to allowing the
+  original `192.168.1.0/24` destination.
 - AdGuard admits Cilium's `world` identity only on TCP/UDP 53. With VXLAN,
   Cilium assigns that identity to north/south LoadBalancer traffic even when
   the original client is on the LAN. The resolver remains reachable only on
@@ -65,6 +69,10 @@ dashboard-only origin will fail closed.
 Argo CD will reconcile these policies automatically after merge. Watch one
 application at a time and test its positive and negative paths before moving to
 the next:
+
+Run the private-application checks from a tailnet client outside
+`192.168.1.0/24` as well as from the LAN. A LAN client reaches the Gateway VIP
+directly and therefore cannot verify the Tailscale router's egress policy.
 
 ```bash
 kubectl get networkpolicy,ciliumnetworkpolicy -A

@@ -73,6 +73,17 @@ spec:
               protocol: TCP
             - port: "53"
               protocol: UDP
+    # Cilium translates the private Gateway LoadBalancer VIP to its reserved
+    # ingress identity before enforcing endpoint egress policy. The LAN CIDR
+    # rule below therefore does not admit routed HTTP(S) traffic by itself.
+    - toEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
     # Coordination and DERP use HTTPS. Direct peer traffic and STUN use UDP
     # across unpredictable destination ports, hence the full UDP range.
     - toCIDRSet:
