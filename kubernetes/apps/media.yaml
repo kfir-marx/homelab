@@ -1,0 +1,26 @@
+# Jellyfin and its request/download/maintenance stack. Application state is
+# local to gpu-3 and backed up to the permanent critical NFS tier; replaceable
+# media lives on the bulk NFS tier.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: media
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/media
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: media
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

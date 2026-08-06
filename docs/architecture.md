@@ -191,6 +191,8 @@ The configured runtime allocation is:
 - `gpu-2` requests 16 vCPUs and 56 GiB RAM; the Windows VM requests 16 vCPUs and 60 GiB RAM. They remain mutually exclusive because they share the RTX 3080. The Talos allocation leaves about 6.7 GiB nominal headroom for Proxmox and QEMU overhead instead of reserving half the host for no workload.
 - The largegpu host's 794 GB local NVMe LVM-thin is split ~80/20 — Windows gets `disk_size_gb: 635` for games, gpu-2 gets `disk_size_gb: 159` for the Talos rootfs.
 - A separate 400 GiB `qcow2` disk on `largegpu-hdd` is attached to `gpu-2` with backups disabled. Talos provisions it as the `gpu-scratch` user volume and mounts it at `/var/mnt/gpu-scratch`; Kubernetes exposes it through the static `local-gpu-scratch` StorageClass/PV.
+- A retained 50 GiB local-lvm disk is attached to `gpu-3` for the media stack's SQLite/config state. Talos mounts it at `/var/mnt/media-state`; encrypted daily backups land on the permanent critical NFS tier.
+- The 2 GiB hugepage pool is kept only on dedicated `gpu-2`. Mixed `gpu-3` sets `vm.nr_hugepages=0` so Jellyfin and ordinary workloads can use that memory.
 - `on_boot = true` for the Talos GPU worker (auto-start on Proxmox boot); `on_boot = false` for the Windows VM (manual).
 
 ### Windows VM lifecycle: retained template → linked workstation clone
@@ -242,6 +244,9 @@ re-verified after the fresh OS is configured.
 |---------------------|------------------|-------------------------------------------------|--------|--------------------------------------------------------------------------------------------|
 | `storage1-bulk-pv`  | `nfs-storage1`   | `smallgpu:/mnt/data10tb` (NTFS via `ntfs3`)        | 9 Ti   | **Bulk** — media (Plex/Jellyfin, *arr), model caches, anything reproducible                |
 | `storage2-bulk-pv`  | `nfs-storage2`   | `ubuntu-workstation:/mnt/storage2-bulk` (`192.168.1.105`) | 800 Gi | **Critical** — Immich, config snapshots, and personal data |
+| `media-data-pv` | `nfs-storage1` | `smallgpu:/mnt/data10tb/media` | 7 Ti | **Bulk** — Jellyfin library, torrents, and shared hardlink tree |
+| `media-state-pv` | `local-media-state` | `gpu-3:/var/mnt/media-state` | 45 Gi | **Local state** — SQLite/config; encrypted backups required |
+| `media-backups-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/media/backups` | 20 Gi | **Critical** — encrypted media-stack state archives |
 
 Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests.
 
@@ -251,6 +256,13 @@ application/attachment state, PostgreSQL, and logical backups under
 `/mnt/storage2-bulk/bitwarden`. All three use `nfs-storage2`; none may be moved
 to a borrowed-host or scratch tier. The backup path shares the source failure
 domain and must also be copied to an encrypted off-host destination.
+
+The media stack follows a three-part variant of this model. Replaceable media
+and torrents share one `media-data-pv` mount so Servarr imports can hardlink.
+Live SQLite databases use a retained local disk on `gpu-3`, because Servarr
+does not support application databases on NFS. A daily job performs consistent
+SQLite backups, encrypts the complete state archive, and stores it on
+`media-backups-pv` on the permanent workstation.
 
 The separate `gpu2-scratch-pv` is node-local rather than NFS. It is a static
 `390 GiB`, `ReadWriteOnce` PV backed by the capped 400 GiB virtual HDD attached

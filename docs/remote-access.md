@@ -27,7 +27,7 @@ Administrator devices
 Tailscale tailnet ---> k8s-router advertises 192.168.1.0/24
                                 |
                                 +--> Private HTTPS Gateway: 192.168.1.220:443
-                                |    ArgoCD / AdGuard UI / Grafana / Bitwarden / Immich
+                                |    ArgoCD / AdGuard / Grafana / Bitwarden / Immich / media UIs
                                 +--> AdGuard DNS: 192.168.1.221
                                 +--> Kubernetes API: 192.168.1.210:6443
                                 +--> Proxmox and other LAN services
@@ -67,7 +67,10 @@ back to Tailscale's managed DERP relays when direct connectivity is unavailable.
 | Grafana | `https://grafana.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | Bitwarden | `https://bitwarden.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | Immich | `https://immich.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
+| Jellyfin | `https://jellyfin.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
+| Media administration | `https://{seerr,sonarr,radarr,prowlarr,qbittorrent,maintainerr}.home.547600.xyz` | Cilium Gateway API with cert-manager TLS |
 | AdGuard Home DNS | `192.168.1.221:53` TCP/UDP | Cilium LoadBalancer |
+| qBittorrent peers | `192.168.1.222:6881` TCP/UDP | Cilium LoadBalancer; optional router port-forward |
 | Kubernetes API | `192.168.1.210:6443` | API VIP |
 | Proxmox | `https://192.168.1.106:8006` and `https://192.168.1.107:8006` | LAN subnet route |
 | Other LAN services | `192.168.1.0/24` | LAN subnet route |
@@ -129,6 +132,8 @@ See [AdGuard Home runbook](adguard-home-runbook.md) for storage preparation,
 initial setup, split DNS, ad blocking, and resilience.
 See [Bitwarden runbook](bitwarden-runbook.md) for private Gateway TLS, critical
 storage, LastPass migration, and backup handling.
+See [Jellyfin media stack runbook](media-stack-runbook.md) for restore,
+credential rotation, GPU verification, backups, and cleanup policy.
 
 ArgoCD manages:
 
@@ -138,6 +143,7 @@ ArgoCD manages:
 - `kubernetes/apps/adguard-home.yaml`
 - `kubernetes/apps/cert-manager.yaml`
 - `kubernetes/apps/bitwarden.yaml`
+- `kubernetes/apps/media.yaml`
 
 The official Tailscale and Cloudflare dashboards manage their respective
 hosted control-plane configuration.

@@ -161,6 +161,11 @@ variable "gpu_nodes" {
       size_gb      = number
       serial       = string
     }))
+    state_disk = optional(object({
+      datastore_id = string
+      size_gb      = number
+      serial       = string
+    }))
     pci_devices = list(object({
       id   = string
       pcie = bool

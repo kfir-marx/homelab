@@ -58,10 +58,15 @@ variable "worker_nodes" {
 
 variable "gpu_worker_nodes" {
   type = map(object({
-    ip_address          = string
-    gpu                 = bool
-    dedicated           = bool
-    scratch_disk_serial = optional(string)
+    ip_address = string
+    gpu        = bool
+    dedicated  = bool
+    user_volumes = optional(list(object({
+      name     = string
+      serial   = string
+      min_size = string
+      max_size = string
+    })), [])
   }))
   default = {}
 }
@@ -248,6 +253,12 @@ data "talos_machine_configuration" "gpu_worker" {
             "homelab.dev/role"       = "gpu-worker"
             "homelab.dev/gpu-node"   = each.key
           }
+          # Large AI workloads on the dedicated RTX 3080 node retain the 2 GiB
+          # hugepage pool. The mixed RTX 2060/Jellyfin node needs that memory
+          # for ordinary pods instead.
+          sysctls = {
+            "vm.nr_hugepages" = each.value.dedicated ? "1024" : "0"
+          }
           # no need for a taint right now as all the nodes are with GPU, but if you want to dedicate a node for GPU workloads only, you can uncomment the following lines and set dedicated = true in the gpu_worker_nodes variable
           # nodeTaints = each.value.dedicated ? {
           #   "nvidia.com/gpu" = "true:NoSchedule"
@@ -255,23 +266,23 @@ data "talos_machine_configuration" "gpu_worker" {
         }
       }),
     ],
-    each.value.scratch_disk_serial == null ? [] : [
+    [for volume in each.value.user_volumes :
       yamlencode({
         apiVersion = "v1alpha1"
         kind       = "UserVolumeConfig"
-        name       = "gpu-scratch"
+        name       = volume.name
         provisioning = {
           diskSelector = {
-            match = "disk.serial == '${each.value.scratch_disk_serial}'"
+            match = "disk.serial == '${volume.serial}'"
           }
-          minSize = "390GiB"
-          maxSize = "400GiB"
+          minSize = volume.min_size
+          maxSize = volume.max_size
           grow    = false
         }
         mount = {
           disableAccessTime = true
         }
-      }),
+      })
     ],
   )
 }

@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qbittorrent
+  namespace: media
+  labels:
+    app: qbittorrent
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: qbittorrent
+  template:
+    metadata:
+      labels:
+        app: qbittorrent
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-state
+          image: busybox:1.37.0
+          command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/qbittorrent"]
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN]
+          volumeMounts:
+            - name: state
+              mountPath: /state
+      containers:
+        - name: qbittorrent
+          image: lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.13-ls469
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: media-config
+          env:
+            - name: WEBUI_PORT
+              value: "8080"
+            - name: TORRENTING_PORT
+              value: "6881"
+          ports:
+            - name: web
+              containerPort: 8080
+              protocol: TCP
+            - name: bittorrent-tcp
+              containerPort: 6881
+              protocol: TCP
+            - name: bittorrent-udp
+              containerPort: 6881
+              protocol: UDP
+          readinessProbe:
+            tcpSocket:
+              port: web
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: state
+              mountPath: /config
+              subPath: qbittorrent
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: media-state
+        - name: data
+          persistentVolumeClaim:
+            claimName: media-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qbittorrent
+  namespace: media
+spec:
+  type: ClusterIP
+  selector:
+    app: qbittorrent
+  ports:
+    - name: web
+      port: 8080
+      targetPort: web
+---
+# A stable LAN address for peer traffic. Internet reachability additionally
+# requires a router port-forward to 192.168.1.222:6881 TCP+UDP.
+apiVersion: v1
+kind: Service
+metadata:
+  name: qbittorrent-peer
+  namespace: media
+  annotations:
+    lbipam.cilium.io/ips: 192.168.1.222
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+  selector:
+    app: qbittorrent
+  ports:
+    - name: bittorrent-tcp
+      port: 6881
+      targetPort: bittorrent-tcp
+      protocol: TCP
+    - name: bittorrent-udp
+      port: 6881
+      targetPort: bittorrent-udp
+      protocol: UDP

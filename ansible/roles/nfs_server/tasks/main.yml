@@ -25,6 +25,18 @@
   loop_control:
     label: "{{ item.path }}"
 
+- name: Validate NFS data directory declarations
+  ansible.builtin.assert:
+    that:
+      - item.path is match('^/mnt/.+')
+      - item.path != item.mount_point
+      - (nfs_server_mounts | selectattr('mount_point', 'equalto', item.mount_point) | list | length) == 1
+      - item.path.startswith(item.mount_point + '/')
+    fail_msg: "Invalid or unsafe NFS data directory declaration: {{ item }}"
+  loop: "{{ nfs_server_directories }}"
+  loop_control:
+    label: "{{ item.path }}"
+
 - name: Preflight each NFS filesystem before persistent changes
   ansible.builtin.include_tasks: validate_mount.yml
   loop: "{{ nfs_server_mounts }}"
@@ -85,6 +97,17 @@
   loop_control:
     label: "{{ item.item.mount_point }}"
   when: not ansible_check_mode
+
+- name: Create declared directories on mounted NFS filesystems
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(omit) }}"
+    group: "{{ item.group | default(omit) }}"
+    mode: "{{ item.mode | default(omit) }}"
+  loop: "{{ nfs_server_directories }}"
+  loop_control:
+    label: "{{ item.path }}"
 
 - name: Ensure exports include directory exists
   ansible.builtin.file:

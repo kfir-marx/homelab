@@ -1,0 +1,124 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: media
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# The stack is one trust boundary: Prowlarr pushes indexers to the Arr apps,
+# Seerr and Maintainerr call several internal APIs, and the Arr apps call qBit.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: media-internal
+  namespace: media
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: media-web-ingress
+  namespace: media
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - jellyfin
+          - seerr
+          - sonarr
+          - radarr
+          - prowlarr
+          - qbittorrent
+          - maintainerr
+  ingress:
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - {port: "8096", protocol: TCP}
+            - {port: "5055", protocol: TCP}
+            - {port: "8989", protocol: TCP}
+            - {port: "7878", protocol: TCP}
+            - {port: "9696", protocol: TCP}
+            - {port: "8080", protocol: TCP}
+            - {port: "6246", protocol: TCP}
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": cloudflared
+            "k8s:app": cloudflared
+      toPorts:
+        - ports:
+            - {port: "8096", protocol: TCP}
+---
+# Metadata, indexer, tracker, and image/plugin access is public-only. Internal
+# service calls are authorized separately by media-internal above.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: media-public-egress
+  namespace: media
+spec:
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            - 0.0.0.0/8
+            - 10.0.0.0/8
+            - 100.64.0.0/10
+            - 127.0.0.0/8
+            - 169.254.0.0/16
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+      toPorts:
+        - ports:
+            - {port: "80", protocol: TCP}
+            - {port: "443", protocol: TCP}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: qbittorrent-peers
+  namespace: media
+spec:
+  endpointSelector:
+    matchLabels:
+      app: qbittorrent
+  ingress:
+    - fromEntities:
+        - world
+      toPorts:
+        - ports:
+            - {port: "6881", protocol: TCP}
+            - {port: "6881", protocol: UDP}
+  egress:
+    - toEntities:
+        - world

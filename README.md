@@ -55,7 +55,7 @@ flowchart TB
         GPU2["gpu-2<br/>RTX 3080 worker"]
         GPU3["gpu-3<br/>RTX 2060 mixed worker"]
         Platform["Cilium · Gateway API · GPU Operator"]
-        Apps["Immich · AdGuard Home · Monitoring"]
+        Apps["Immich · Jellyfin · Media automation · AdGuard Home · Monitoring"]
     end
 
     Git --> CI
@@ -95,6 +95,7 @@ makes failures easier to reason about.
 | Capability | Implementation | Why it is here |
 |---|---|---|
 | Private photo platform | Immich with PostgreSQL and Redis | A real stateful workload whose irreplaceable data must stay on permanent hardware |
+| Home streaming | Jellyfin, Seerr, Servarr, qBittorrent, and Maintainerr | GPU-accelerated streaming with recoverable bulk media and policy-driven retention |
 | Observability | kube-prometheus-stack, Grafana, Alertmanager, and NVIDIA DCGM metrics | Cluster, workload, and GPU visibility with explicit retention limits |
 | Private DNS | AdGuard Home | Split DNS for private services and optional network-wide filtering |
 | Private remote access | Official Tailscale subnet router | Administrative access without exposing management interfaces publicly |
@@ -196,6 +197,7 @@ once the hardware and memory budget support it.
 | [AdGuard Home runbook](docs/adguard-home-runbook.md) | Private split DNS, tailnet filtering, setup, and recovery |
 | [Monitoring runbook](docs/monitoring-runbook.md) | Prometheus/Grafana deployment, storage, access, and verification |
 | [GPU Operator runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, rollout, CUDA validation, and metrics |
+| [Jellyfin media stack runbook](docs/media-stack-runbook.md) | Backup restoration, storage, GPU transcoding, credential rotation, and cleanup policy |
 | [Ubuntu workstation runbook](docs/ubuntu-workstation-runbook.md) | Critical NFS service and local NVIDIA/HDMI recovery |
 | [Physical-host automation](ansible/README.md) | Ansible prerequisites, safety behavior, tags, backups, NFS, UPS, and VFIO |
 

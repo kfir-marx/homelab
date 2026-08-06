@@ -1,0 +1,156 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: jellyfin
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-https
+  hostnames: [jellyfin.home.547600.xyz]
+  rules:
+    - backendRefs:
+        - name: jellyfin
+          port: 8096
+      matches:
+        - path: {type: PathPrefix, value: /}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: seerr
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-https
+  hostnames: [seerr.home.547600.xyz]
+  rules:
+    - backendRefs:
+        - name: seerr
+          port: 5055
+      matches:
+        - path: {type: PathPrefix, value: /}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sonarr
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-https
+  hostnames: [sonarr.home.547600.xyz]
+  rules:
+    - backendRefs:
+        - name: sonarr
+          port: 8989
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: radarr
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-https
+  hostnames: [radarr.home.547600.xyz]
+  rules:
+    - backendRefs:
+        - name: radarr
+          port: 7878
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: prowlarr
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-https
+  hostnames: [prowlarr.home.547600.xyz]
+  rules:
+    - backendRefs:
+        - name: prowlarr
+          port: 9696
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: qbittorrent
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-https
+  hostnames: [qbittorrent.home.547600.xyz]
+  rules:
+    - backendRefs:
+        - name: qbittorrent
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: maintainerr
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-https
+  hostnames: [maintainerr.home.547600.xyz]
+  rules:
+    - backendRefs:
+        - name: maintainerr
+          port: 6246
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: media-http-redirect
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-http
+  hostnames:
+    - jellyfin.home.547600.xyz
+    - seerr.home.547600.xyz
+    - sonarr.home.547600.xyz
+    - radarr.home.547600.xyz
+    - prowlarr.home.547600.xyz
+    - qbittorrent.home.547600.xyz
+    - maintainerr.home.547600.xyz
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
