@@ -191,7 +191,7 @@ The configured runtime allocation is:
 - `gpu-2` requests 16 vCPUs and 56 GiB RAM; the Windows VM requests 16 vCPUs and 60 GiB RAM. They remain mutually exclusive because they share the RTX 3080. The Talos allocation leaves about 6.7 GiB nominal headroom for Proxmox and QEMU overhead instead of reserving half the host for no workload.
 - The largegpu host's 794 GB local NVMe LVM-thin is split ~80/20 — Windows gets `disk_size_gb: 635` for games, gpu-2 gets `disk_size_gb: 159` for the Talos rootfs.
 - A separate 400 GiB `qcow2` disk on `largegpu-hdd` is attached to `gpu-2` with backups disabled. Talos provisions it as the `gpu-scratch` user volume and mounts it at `/var/mnt/gpu-scratch`; Kubernetes exposes it through the static `local-gpu-scratch` StorageClass/PV.
-- A retained 50 GiB local-lvm disk is attached to `gpu-3` for the media stack's SQLite/config state. Talos mounts it at `/var/mnt/media-state`; encrypted daily backups land on the permanent critical NFS tier.
+- A retained 50 GiB local-lvm disk is attached to `gpu-3` for the media stack's SQLite/config state. Talos selects the unique non-system disk by its declared size and mounts it at `/var/mnt/media-state`; encrypted daily backups land on the permanent critical NFS tier.
 - The 2 GiB hugepage pool is kept only on dedicated `gpu-2`. Mixed `gpu-3` sets `vm.nr_hugepages=0` so Jellyfin and ordinary workloads can use that memory.
 - `on_boot = true` for the Talos GPU worker (auto-start on Proxmox boot); `on_boot = false` for the Windows VM (manual).
 

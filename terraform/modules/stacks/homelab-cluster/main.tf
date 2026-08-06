@@ -187,16 +187,16 @@ module "talos_cluster" {
       dedicated  = node.dedicated
       user_volumes = concat(
         node.scratch_disk == null ? [] : [{
-          name     = "gpu-scratch"
-          serial   = node.scratch_disk.serial
-          min_size = "390GiB"
-          max_size = "400GiB"
+          name         = "gpu-scratch"
+          disk_size_gb = node.scratch_disk.size_gb
+          min_size     = "390GiB"
+          max_size     = "400GiB"
         }],
         node.state_disk == null ? [] : [{
-          name     = "media-state"
-          serial   = node.state_disk.serial
-          min_size = "45GiB"
-          max_size = "50GiB"
+          name         = "media-state"
+          disk_size_gb = node.state_disk.size_gb
+          min_size     = "45GiB"
+          max_size     = "50GiB"
         }],
       )
     }

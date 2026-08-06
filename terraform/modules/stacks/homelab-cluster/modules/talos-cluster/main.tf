@@ -62,10 +62,10 @@ variable "gpu_worker_nodes" {
     gpu        = bool
     dedicated  = bool
     user_volumes = optional(list(object({
-      name     = string
-      serial   = string
-      min_size = string
-      max_size = string
+      name         = string
+      disk_size_gb = number
+      min_size     = string
+      max_size     = string
     })), [])
   }))
   default = {}
@@ -273,7 +273,11 @@ data "talos_machine_configuration" "gpu_worker" {
         name       = volume.name
         provisioning = {
           diskSelector = {
-            match = "disk.serial == '${volume.serial}'"
+            # Proxmox's QEMU SCSI disks expose stable slot symlinks to Talos,
+            # but not the configured serial value. Match the declared,
+            # non-system disk size instead; these data disks have unique sizes
+            # on each VM and the system disk is explicitly excluded.
+            match = "!system_disk && disk.size == ${volume.disk_size_gb}u * GiB"
           }
           minSize = volume.min_size
           maxSize = volume.max_size
