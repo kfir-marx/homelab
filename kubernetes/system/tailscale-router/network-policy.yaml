@@ -60,6 +60,19 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
+    # Split-DNS queries target AdGuard's 192.168.1.221 LoadBalancer VIP, which
+    # Cilium translates to the backing pod before enforcing endpoint egress.
+    # Allow that translated path explicitly and keep it DNS-only.
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": adguard-home
+            "k8s:app": adguard-home
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
     # Coordination and DERP use HTTPS. Direct peer traffic and STUN use UDP
     # across unpredictable destination ports, hence the full UDP range.
     - toCIDRSet:
