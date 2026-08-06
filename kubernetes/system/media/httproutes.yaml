@@ -13,8 +13,11 @@ spec:
   hostnames: [jellyfin.home.547600.xyz]
   rules:
     - backendRefs:
-        - name: jellyfin
+        - group: ""
+          kind: Service
+          name: jellyfin
           port: 8096
+          weight: 1
       matches:
         - path: {type: PathPrefix, value: /}
 ---
@@ -33,8 +36,11 @@ spec:
   hostnames: [seerr.home.547600.xyz]
   rules:
     - backendRefs:
-        - name: seerr
+        - group: ""
+          kind: Service
+          name: seerr
           port: 5055
+          weight: 1
       matches:
         - path: {type: PathPrefix, value: /}
 ---
@@ -53,8 +59,13 @@ spec:
   hostnames: [sonarr.home.547600.xyz]
   rules:
     - backendRefs:
-        - name: sonarr
+        - group: ""
+          kind: Service
+          name: sonarr
           port: 8989
+          weight: 1
+      matches:
+        - path: {type: PathPrefix, value: /}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -71,8 +82,13 @@ spec:
   hostnames: [radarr.home.547600.xyz]
   rules:
     - backendRefs:
-        - name: radarr
+        - group: ""
+          kind: Service
+          name: radarr
           port: 7878
+          weight: 1
+      matches:
+        - path: {type: PathPrefix, value: /}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -89,8 +105,13 @@ spec:
   hostnames: [prowlarr.home.547600.xyz]
   rules:
     - backendRefs:
-        - name: prowlarr
+        - group: ""
+          kind: Service
+          name: prowlarr
           port: 9696
+          weight: 1
+      matches:
+        - path: {type: PathPrefix, value: /}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -107,8 +128,13 @@ spec:
   hostnames: [qbittorrent.home.547600.xyz]
   rules:
     - backendRefs:
-        - name: qbittorrent
+        - group: ""
+          kind: Service
+          name: qbittorrent
           port: 8080
+          weight: 1
+      matches:
+        - path: {type: PathPrefix, value: /}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -125,8 +151,13 @@ spec:
   hostnames: [maintainerr.home.547600.xyz]
   rules:
     - backendRefs:
-        - name: maintainerr
+        - group: ""
+          kind: Service
+          name: maintainerr
           port: 6246
+          weight: 1
+      matches:
+        - path: {type: PathPrefix, value: /}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -149,7 +180,9 @@ spec:
     - qbittorrent.home.547600.xyz
     - maintainerr.home.547600.xyz
   rules:
-    - filters:
+    - matches:
+        - path: {type: PathPrefix, value: /}
+      filters:
         - type: RequestRedirect
           requestRedirect:
             scheme: https
