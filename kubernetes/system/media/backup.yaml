@@ -24,9 +24,6 @@ spec:
           nodeSelector:
             kubernetes.io/hostname: gpu-3
           securityContext:
-            runAsNonRoot: true
-            runAsUser: 1000
-            runAsGroup: 1000
             seccompProfile:
               type: RuntimeDefault
           containers:
@@ -50,10 +47,7 @@ spec:
                   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
                   stage="$(mktemp -d)"
                   mkdir -p "${stage}/state"
-                  # Staging ownership is irrelevant because restores reset it
-                  # explicitly. Avoid cp -a so this container needs no CHOWN
-                  # capability merely to copy UID 1000 application files.
-                  cp -R /state/. "${stage}/state/"
+                  cp -a /state/. "${stage}/state/"
 
                   find "${stage}/state" -type f \
                     \( -name '*-wal' -o -name '*-shm' -o -name '*.pid' \) \
@@ -89,13 +83,12 @@ spec:
                     -name 'media-state-*.tar.gz.enc' -mtime +30 -delete
                   find "${stage}" -depth -delete
               securityContext:
-                runAsNonRoot: true
-                runAsUser: 1000
-                runAsGroup: 1000
+                runAsUser: 0
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: false
                 capabilities:
                   drop: [ALL]
+                  add: [CHOWN, FOWNER]
               resources:
                 requests:
                   cpu: 50m
