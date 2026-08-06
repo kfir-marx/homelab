@@ -27,7 +27,7 @@ apply step is required.
 | `immich/machine-learning` | Server to TCP/3003 | Cluster DNS and public-only HTTPS for model downloads |
 | `immich/postgres` | Server to TCP/5432 | None |
 | `immich/redis` | Server to TCP/6379 | None |
-| `tailscale-router` | Public/LAN UDP 41641 | Kubernetes API, cluster DNS, private Gateway TCP 80/443, public HTTPS/UDP, and the declared `192.168.1.0/24` subnet route |
+| `tailscale-router` | Public/LAN UDP 41641 (pinned in the Deployment) | Not isolated; see the Cilium Gateway hairpin exception below |
 | `monitoring` | Same-namespace traffic, Gateway to Grafana, and API-server webhook traffic | Not isolated: Prometheus must discover and scrape changing cluster targets |
 
 Return packets for admitted connections are allowed by Cilium's stateful
@@ -37,13 +37,20 @@ these policies do not change the critical/bulk storage paths.
 
 ## Intentional boundaries and exceptions
 
-- The Tailscale router must reach every protocol and port in
-  `192.168.1.0/24`; Tailscale grants remain the per-user authorization boundary
-  for this deliberate bridge.
-- Cilium translates traffic for the private Gateway VIP to its reserved
-  `ingress` identity before endpoint egress policy is enforced. The router must
-  therefore allow that identity on TCP 80/443 in addition to allowing the
-  original `192.168.1.0/24` destination.
+- The Tailscale router has ingress isolation but no pod egress policy. Cilium
+  1.19.6's Gateway L7 load-balancer returns HTTP 403 for pod-to-Gateway hairpin
+  traffic from an egress-policy-selected endpoint, including when an exact
+  destination identity or `0.0.0.0/0` is allowed. An unconstrained egress rule
+  succeeds, so a restrictive egress allow-list cannot currently coexist with
+  this kernel-mode subnet-router path. Re-test this exception after Cilium
+  upgrades before restoring egress isolation.
+- Tailscale grants and the advertised `192.168.1.0/24` route remain the
+  authorization boundary for traffic forwarded from tailnet clients. They do
+  not constrain a compromised router pod, so keep its image, capabilities,
+  service account, and out-of-band auth/state Secrets tightly scoped.
+- The router pins tailscaled's WireGuard listener to UDP 41641. Keep that
+  setting and the router ingress policy synchronized; an unpinned container
+  selects a random listen port that the default-deny policy will block.
 - AdGuard admits Cilium's `world` identity only on TCP/UDP 53. With VXLAN,
   Cilium assigns that identity to north/south LoadBalancer traffic even when
   the original client is on the LAN. The resolver remains reachable only on
@@ -75,7 +82,7 @@ the next:
 
 Run the private-application checks from a tailnet client outside
 `192.168.1.0/24` as well as from the LAN. A LAN client reaches the Gateway VIP
-directly and therefore cannot verify the Tailscale router's egress policy.
+directly and therefore cannot verify the tailnet-routed Gateway path.
 
 ```bash
 kubectl get networkpolicy,ciliumnetworkpolicy -A

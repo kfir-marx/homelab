@@ -37,6 +37,10 @@ spec:
               value: tailscale-router-state-official
             - name: TS_USERSPACE
               value: "false"
+            # Keep the WireGuard listener aligned with the NetworkPolicy.
+            # tailscaled otherwise selects a random port at each fresh start.
+            - name: TS_TAILSCALED_EXTRA_ARGS
+              value: --port=41641
             - name: TS_AUTH_ONCE
               value: "true"
             - name: TS_ROUTES

@@ -1,10 +1,13 @@
-# The subnet router is a deliberate LAN bridge. Its broad 192.168.1.0/24
-# egress is the advertised route and remains governed per-user by Tailscale
-# grants. Everything else is limited to Kubernetes API state, DNS, control/DERP
-# HTTPS, STUN/direct-peer UDP, and inbound WireGuard on the default port.
+# The subnet router is a deliberate LAN bridge governed per-user by Tailscale
+# grants. Keep ingress isolated to its pinned WireGuard listener. Do not select
+# this kernel router with egress policy: Cilium 1.19.6's Gateway L7 load-balancer
+# returns HTTP 403 for pod-to-Gateway hairpin traffic whenever constrained
+# egress policy is enabled, even when the destination identity is allowed.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  # Keep the existing name so Argo updates the live policy in place; this
+  # resource intentionally denies ingress only for the router exception.
   name: default-deny
   namespace: tailscale-router
   annotations:
@@ -14,7 +17,6 @@ spec:
   podSelector: {}
   policyTypes:
     - Ingress
-    - Egress
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -46,64 +48,3 @@ spec:
         - ports:
             - port: "41641"
               protocol: UDP
-  egress:
-    - toEntities:
-        - kube-apiserver
-    - toEndpoints:
-        - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": kube-system
-            "k8s:k8s-app": kube-dns
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: ANY
-          rules:
-            dns:
-              - matchPattern: "*"
-    # Split-DNS queries target AdGuard's 192.168.1.221 LoadBalancer VIP, which
-    # Cilium translates to the backing pod before enforcing endpoint egress.
-    # Allow that translated path explicitly and keep it DNS-only.
-    - toEndpoints:
-        - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": adguard-home
-            "k8s:app": adguard-home
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: TCP
-            - port: "53"
-              protocol: UDP
-    # Cilium translates the private Gateway LoadBalancer VIP to its reserved
-    # ingress identity before enforcing endpoint egress policy. The LAN CIDR
-    # rule below therefore does not admit routed HTTP(S) traffic by itself.
-    - toEntities:
-        - ingress
-      toPorts:
-        - ports:
-            - port: "80"
-              protocol: TCP
-            - port: "443"
-              protocol: TCP
-    # Coordination and DERP use HTTPS. Direct peer traffic and STUN use UDP
-    # across unpredictable destination ports, hence the full UDP range.
-    - toCIDRSet:
-        - cidr: 0.0.0.0/0
-          except:
-            - 0.0.0.0/8
-            - 10.0.0.0/8
-            - 100.64.0.0/10
-            - 127.0.0.0/8
-            - 169.254.0.0/16
-            - 172.16.0.0/12
-            - 192.168.0.0/16
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
-            - port: "1"
-              endPort: 65535
-              protocol: UDP
-    # This is the router's essential function, not generic private-network
-    # access: exactly the subnet declared by TS_ROUTES is reachable.
-    - toCIDR:
-        - 192.168.1.0/24

@@ -126,3 +126,19 @@ The namespace intentionally enforces the privileged Pod Security level because
 kernel networking requires `NET_ADMIN`, `NET_RAW`, and `/dev/net/tun`. Tailnet
 grants restrict remote access; Kubernetes NetworkPolicies should separately
 limit pod-to-pod traffic where applicable.
+
+The Deployment pins tailscaled's peer-to-peer listener to UDP 41641 through
+`TS_TAILSCALED_EXTRA_ARGS`. Its NetworkPolicy admits that exact port. Verify
+both stay aligned after any Tailscale container or policy change:
+
+```bash
+kubectl -n tailscale-router logs deploy/tailscale-router | grep onPortUpdate
+kubectl -n tailscale-router get ciliumnetworkpolicy tailscale-router -o yaml
+```
+
+The router intentionally has ingress isolation only. On Cilium 1.19.6, applying
+constrained egress policy to the router makes the Gateway's L7 load-balancer
+return `403 Access denied` for tailnet clients even when the policy explicitly
+allows the Gateway identity, VIP CIDR, or all IPv4 destinations on TCP 443. An
+unconstrained egress rule works, so do not restore a router egress allow-list
+until the pod-to-Gateway hairpin path has been re-tested after a Cilium upgrade.
