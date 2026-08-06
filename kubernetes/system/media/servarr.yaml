@@ -6,7 +6,7 @@ metadata:
   labels:
     app: sonarr
 spec:
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -93,7 +93,7 @@ metadata:
   labels:
     app: radarr
 spec:
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -180,7 +180,7 @@ metadata:
   labels:
     app: prowlarr
 spec:
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -262,7 +262,7 @@ metadata:
   labels:
     app: flaresolverr
 spec:
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app: flaresolverr
