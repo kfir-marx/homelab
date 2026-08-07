@@ -32,6 +32,10 @@ Sonarr, Radarr, and qBittorrent must all receive the single `/data` mount.
 Splitting downloads and media into different mounts prevents hardlinks and
 atomic imports even when both mounts ultimately refer to the same disk.
 
+The backing NTFS filesystem exposes fixed `root:root` ownership. Ansible keeps
+the declared media directories at mode `0777` so the UID-mapped media pods can
+write to the shared, replaceable bulk-data tree.
+
 ## Access
 
 Public Jellyfin uses `https://jellyfin.547600.xyz` through Cloudflare Tunnel.

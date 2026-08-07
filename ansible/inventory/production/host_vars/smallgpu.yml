@@ -23,18 +23,26 @@ nfs_server_mounts:
     dump: 0
     passno: 0
 nfs_server_directories:
+  # ntfs3 exposes this filesystem with fixed root:root ownership. Keep the
+  # shared, replaceable media tree writable by the UID-mapped media pods.
   - path: /mnt/data10tb/media
     mount_point: /mnt/data10tb
+    mode: "0777"
   - path: /mnt/data10tb/media/media
     mount_point: /mnt/data10tb
+    mode: "0777"
   - path: /mnt/data10tb/media/media/movies
     mount_point: /mnt/data10tb
+    mode: "0777"
   - path: /mnt/data10tb/media/media/tv
     mount_point: /mnt/data10tb
+    mode: "0777"
   - path: /mnt/data10tb/media/torrents
     mount_point: /mnt/data10tb
+    mode: "0777"
   - path: /mnt/data10tb/media/torrents/incomplete
     mount_point: /mnt/data10tb
+    mode: "0777"
 nfs_server_exports:
   - path: /mnt/data10tb
     client: 192.168.1.0/24
