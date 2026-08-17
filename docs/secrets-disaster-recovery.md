@@ -57,12 +57,17 @@ access. Do not paste the master passphrase into a shell command, chat, issue,
 or repository file; `age` prompts without echoing it.
 
 ```bash
-scripts/secrets.sh init
-scripts/secrets.sh capture-env
-scripts/secrets.sh capture-k8s
-scripts/secrets.sh check
+scripts/secrets.sh bootstrap
 git status --short
 ```
+
+On first use, `bootstrap` prompts once to set and confirm the master passphrase,
+retains the new plaintext identity only in its protected temporary directory,
+then performs initialization, environment capture, Kubernetes capture, and the
+full recovery check in one process. If a later capture step fails, rerun
+`bootstrap`; it unlocks the existing identity once and resumes the complete
+capture/check sequence. The granular `init`, `capture-env`, `capture-k8s`, and
+`check` commands remain available for troubleshooting and later maintenance.
 
 `capture-k8s` is read-only against the cluster. It removes server-owned
 metadata before encrypting each Secret, and never writes plaintext Secret data

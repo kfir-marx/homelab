@@ -3,8 +3,8 @@
 # identity is stored at secrets/age/homelab.agekey.age.
 creation_rules:
   - path_regex: ^secrets/infrastructure\.sops\.env$
-    age: AGE_RECIPIENT_PLACEHOLDER
+    age: age1092vrqeywp7h3gdksmg84wa46hpgxhxyfuhu7pw6et2677vmzskqzq5gly
 
   - path_regex: ^secrets/kubernetes/.*\.sops\.json$
     encrypted_regex: '^(data|stringData)$'
-    age: AGE_RECIPIENT_PLACEHOLDER
+    age: age1092vrqeywp7h3gdksmg84wa46hpgxhxyfuhu7pw6et2677vmzskqzq5gly

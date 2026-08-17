@@ -8,19 +8,27 @@ IDENTITY_CIPHERTEXT="$REPO_ROOT/secrets/age/homelab.agekey.age"
 ENV_CIPHERTEXT="$REPO_ROOT/secrets/infrastructure.sops.env"
 INVENTORY_FILE="$REPO_ROOT/secrets/inventory.tsv"
 PLAINTEXT_ENV="$REPO_ROOT/.env"
-ENV_TEMPLATE="$REPO_ROOT/.env-template"
 TASK_TEMP_DIR=""
 IDENTITY_FILE=""
 
 declare -a INVENTORY_TARGETS=()
 declare -A EXPECTED_KEYS=()
 declare -a SELECTED_TARGETS=()
+declare -a REQUIRED_ENV_KEYS=(
+  PROXMOX_APITOKEN_ID
+  PROXMOX_APITOKEN_SECRET
+  PROXMOX_SSH_PASSWORD
+  AWS_ACCESS_KEY_ID
+  AWS_SECRET_ACCESS_KEY
+  AWS_IAM_ROLE
+)
 
 usage() {
   cat <<'EOF'
 Usage: scripts/secrets.sh <command> [arguments]
 
 One-time setup:
+  bootstrap                    Initialize or resume capture, then run full checks
   init                         Create an age identity and protect it by passphrase
 
 Environment credentials:
@@ -94,6 +102,10 @@ require_configured() {
 }
 
 unlock_identity() {
+  if [[ -n "$IDENTITY_FILE" && -f "$IDENTITY_FILE" ]]; then
+    export SOPS_AGE_KEY_FILE="$IDENTITY_FILE"
+    return
+  fi
   require_command age
   require_configured
   ensure_temp_dir
@@ -146,25 +158,28 @@ show_cluster_context() {
 
 validate_env_plaintext() {
   local file="$1"
-  local line key value
+  local line key value required_key
   [[ -s "$file" ]] || die "environment file is empty: $file"
-  [[ -f "$ENV_TEMPLATE" ]] || die "missing environment contract: $ENV_TEMPLATE"
 
+  for required_key in "${REQUIRED_ENV_KEYS[@]}"; do
+    if ! grep -q "^${required_key}=" "$file"; then
+      die "environment is missing required variable: $required_key"
+    fi
+  done
+
+  # Reject accidental template placeholders in any variable that is present,
+  # while allowing optional credentials such as NUT in telemetry-only mode.
   while IFS= read -r line; do
     [[ -z "$line" || "$line" == \#* ]] && continue
     key="${line%%=*}"
     [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || continue
-    if ! grep -q "^${key}=" "$file"; then
-      die "environment is missing required variable: $key"
-    fi
-    value="$(grep -m 1 "^${key}=" "$file")"
-    value="${value#*=}"
+    value="${line#*=}"
     value="${value%\"}"
     value="${value#\"}"
     if [[ -z "$value" || "$value" == '...' || "$value" == *REPLACE_ME* ]]; then
       die "environment contains an empty or placeholder value: $key"
     fi
-  done < "$ENV_TEMPLATE"
+  done < "$file"
 }
 
 init_identity() {
@@ -190,8 +205,24 @@ init_identity() {
 
   install -m 0600 "$encrypted_identity" "$IDENTITY_CIPHERTEXT"
   install -m 0644 "$config_candidate" "$SOPS_CONFIG"
+  IDENTITY_FILE="$plain_identity"
+  export SOPS_AGE_KEY_FILE="$IDENTITY_FILE"
   note "Initialized SOPS recipient: $recipient"
-  note "Next: '$0 capture-env' and '$0 capture-k8s', then commit only ciphertext."
+  note "The passphrase-encrypted identity is ready; commit only ciphertext."
+}
+
+bootstrap_recovery() {
+  if [[ -f "$IDENTITY_CIPHERTEXT" ]]; then
+    require_configured
+    note "Resuming bootstrap with the existing encrypted age identity."
+    unlock_identity
+  else
+    init_identity
+  fi
+  capture_env
+  capture_k8s
+  check_recovery
+  note "Bootstrap complete. Review and commit the encrypted recovery artifacts."
 }
 
 capture_env() {
@@ -505,6 +536,7 @@ main() {
   shift
 
   case "$command" in
+    bootstrap) [[ $# -eq 0 ]] || die "bootstrap takes no arguments"; bootstrap_recovery ;;
     init) [[ $# -eq 0 ]] || die "init takes no arguments"; init_identity ;;
     capture-env) [[ $# -le 1 ]] || die "capture-env accepts at most one path"; capture_env "$@" ;;
     restore-env) restore_env "$@" ;;
