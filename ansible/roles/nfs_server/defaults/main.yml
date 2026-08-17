@@ -1,5 +1,6 @@
 ---
 nfs_server_mounts: []
+nfs_server_adopted_mount_points: []
 nfs_server_directories: []
 nfs_server_exports: []
 nfs_server_exports_file: /etc/exports.d/homelab.exports

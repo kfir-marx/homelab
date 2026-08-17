@@ -254,6 +254,10 @@
           - registration.get('options', '') ==
             (item.item.options | default('vers=4.2'))
           - (registration.content.split(',') | sort) == (item.item.content | sort)
+          - >-
+            (registration.get('nodes', '').split(',')
+             | reject('equalto', '') | sort | list)
+            == (item.item.nodes | sort)
         fail_msg: "Proxmox NFS storage {{ item.item.id }} does not match inventory."
       vars:
         registration: "{{ item.stdout | from_json }}"
@@ -309,21 +313,43 @@
     - name: Require managed Proxmox backup job definitions
       ansible.builtin.assert:
         that:
-          - backup_job.vmid | string == item.item.vmid | string
+          - >-
+            backup_job.get('all', 0) | int
+            == (item.item.all | default(false) | bool) | int
+          - >-
+            (item.item.all | default(false) | bool)
+            or backup_job.get('vmid', '') | string == item.item.vmid | string
+          - >-
+            (backup_job.get('exclude', '').split(',')
+             | reject('equalto', '') | sort | list)
+            == (item.item.exclude | default([]) | map('string') | sort | list)
           - backup_job.storage == item.item.storage
           - backup_job.node == item.item.node
           - backup_job.schedule == item.item.schedule
           - backup_job.mode == item.item.mode
           - backup_job.compress | string == item.item.compress | string
+          - backup_job.get('enabled', 1) | int ==
+            (item.item.enabled | default(true) | bool) | int
           - >-
             (
               backup_job.get('prune-backups', {}).get('keep-last', '')
               if backup_job.get('prune-backups', {}) is mapping
               else (
                 backup_job.get('prune-backups', '')
-                | regex_replace('^keep-last=', '')
+                | regex_search('(?:^|,)keep-last=([^,]+)', '\\1')
+                | default(['0'], true) | first
               )
-            ) | string == item.item.keep_last | string
+            ) | int == item.item.keep_last | int
+          - >-
+            (
+              backup_job.get('prune-backups', {}).get('keep-weekly', 0)
+              if backup_job.get('prune-backups', {}) is mapping
+              else (
+                backup_job.get('prune-backups', '')
+                | regex_search('(?:^|,)keep-weekly=([^,]+)', '\\1')
+                | default(['0'], true) | first
+              )
+            ) | int == item.item.keep_weekly | default(0) | int
         fail_msg: "Backup job {{ item.item.id }} does not match inventory."
       vars:
         backup_job: "{{ item.stdout | from_json }}"

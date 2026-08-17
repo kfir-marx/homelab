@@ -1,6 +1,22 @@
 ---
 proxmox_expected_hostname: largegpu
 
+# The ext4 mount remains owned by proxmox_storage. nfs_server adopts the live
+# mount only to create and export the opposite-node backup destination.
+nfs_server_adopted_mount_points:
+  - /mnt/pve/largegpu-hdd
+nfs_server_directories:
+  - path: /mnt/pve/largegpu-hdd/proxmox-backups/from-smallgpu
+    mount_point: /mnt/pve/largegpu-hdd
+    owner: root
+    group: root
+    mode: "0700"
+nfs_server_exports:
+  - path: /mnt/pve/largegpu-hdd/proxmox-backups/from-smallgpu
+    mount_point: /mnt/pve/largegpu-hdd
+    client: 192.168.1.106
+    options: rw,sync,no_subtree_check,no_root_squash,fsid=21
+
 proxmox_directory_storages:
   - id: largegpu-hdd
     uuid: 84e5ba00-6169-4082-b453-ec93f693f167
@@ -27,6 +43,24 @@ proxmox_nfs_storages:
       - backup
       - iso
       - vztmpl
+    nodes:
+      - largegpu
+  - id: backup-on-largegpu
+    server: 192.168.1.107
+    export: /mnt/pve/largegpu-hdd/proxmox-backups/from-smallgpu
+    options: vers=4.2
+    content:
+      - backup
+    nodes:
+      - smallgpu
+  - id: backup-on-smallgpu
+    server: 192.168.1.106
+    export: /mnt/data10tb/proxmox-backups/from-largegpu
+    options: vers=4.2
+    content:
+      - backup
+    nodes:
+      - largegpu
 
 # These assets are independent of the Terraform-managed, per-node Talos images.
 # The role copies, verifies SHA-256, and only then removes the NVMe source.
@@ -51,6 +85,31 @@ proxmox_backup_jobs:
     compress: zstd
     keep_last: 1
     enabled: true
+  - id: smallgpu-cross-node
+    all: true
+    exclude:
+      - 990
+    storage: backup-on-largegpu
+    node: smallgpu
+    schedule: "02:15"
+    mode: snapshot
+    compress: zstd
+    keep_last: 3
+    keep_weekly: 2
+    enabled: true
+  - id: largegpu-cross-node
+    all: true
+    storage: backup-on-smallgpu
+    node: largegpu
+    schedule: "04:15"
+    mode: snapshot
+    compress: zstd
+    keep_last: 3
+    keep_weekly: 2
+    enabled: true
+
+proxmox_backup_retired_job_ids:
+  - personal-workstation
 
 # Planned NUT configuration: add this host to nut_servers only after its UPS
 # arrives, connect the USB data cable, and replace both empty values with the

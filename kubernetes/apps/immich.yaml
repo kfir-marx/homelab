@@ -33,8 +33,9 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-  # The Postgres password Secret is created out-of-band so it never lands
-  # in Git (this repo is public). Provision once with:
+  # The Postgres password Secret is created out-of-band. Its disaster-recovery
+  # copy is committed only as SOPS ciphertext; see the secrets runbook.
+  # Provision once with:
   #   kubectl -n immich create secret generic immich-postgres \
   #     --from-literal=password="$(openssl rand -base64 32)"
   # ArgoCD will keep the rest of the resources in sync but leave the

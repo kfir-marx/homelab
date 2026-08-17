@@ -29,7 +29,18 @@
         if proxmox_backup_job_current.get('prune-backups', {}) is mapping
         else (
           proxmox_backup_job_current.get('prune-backups', '')
-          | regex_replace('^keep-last=', '')
+          | regex_search('(?:^|,)keep-last=([^,]+)', '\\1')
+          | default([''], true) | first
+        )
+      }}
+    proxmox_backup_job_current_keep_weekly: >-
+      {{
+        proxmox_backup_job_current.get('prune-backups', {}).get('keep-weekly', '')
+        if proxmox_backup_job_current.get('prune-backups', {}) is mapping
+        else (
+          proxmox_backup_job_current.get('prune-backups', '')
+          | regex_search('(?:^|,)keep-weekly=([^,]+)', '\\1')
+          | default([''], true) | first
         )
       }}
 
@@ -38,8 +49,19 @@
     proxmox_backup_job_needs_update: >-
       {{
         proxmox_backup_job_read.rc != 0
-        or proxmox_backup_job_current.get('vmid', '') | string
-           != proxmox_backup_job.vmid | string
+        or proxmox_backup_job_current.get('all', 0) | int
+           != (proxmox_backup_job.all | default(false) | bool) | int
+        or (
+          not (proxmox_backup_job.all | default(false) | bool)
+          and proxmox_backup_job_current.get('vmid', '') | string
+              != proxmox_backup_job.vmid | string
+        )
+        or (
+          proxmox_backup_job_current.get('exclude', '').split(',')
+          | reject('equalto', '') | sort | list
+        ) != (
+          proxmox_backup_job.exclude | default([]) | map('string') | sort | list
+        )
         or proxmox_backup_job_current.get('storage', '')
            != proxmox_backup_job.storage
         or proxmox_backup_job_current.get('node', '')
@@ -52,8 +74,10 @@
            != proxmox_backup_job.compress | string
         or proxmox_backup_job_current.get('enabled', 1) | int
            != (proxmox_backup_job.enabled | default(true) | bool) | int
-        or proxmox_backup_job_current_keep_last | string
-           != proxmox_backup_job.keep_last | string
+        or proxmox_backup_job_current_keep_last | default(0, true) | int
+           != proxmox_backup_job.keep_last | int
+        or proxmox_backup_job_current_keep_weekly | default(0, true) | int
+           != proxmox_backup_job.keep_weekly | default(0) | int
       }}
 
 - name: Build backup job command for {{ proxmox_backup_job.id }}
@@ -75,17 +99,29 @@
           else ['--id', proxmox_backup_job.id]
         )
         + [
-          '--vmid', proxmox_backup_job.vmid | string,
+          ('--all' if (proxmox_backup_job.all | default(false) | bool) else '--vmid'),
+          ('1' if (proxmox_backup_job.all | default(false) | bool) else proxmox_backup_job.vmid | string),
           '--storage', proxmox_backup_job.storage,
           '--node', proxmox_backup_job.node,
           '--schedule', proxmox_backup_job.schedule,
           '--mode', proxmox_backup_job.mode,
           '--compress', proxmox_backup_job.compress,
           '--enabled', ((proxmox_backup_job.enabled | default(true) | bool) | int) | string,
-          '--prune-backups', 'keep-last=' ~ (proxmox_backup_job.keep_last | string),
+          '--prune-backups',
+          'keep-last=' ~ (proxmox_backup_job.keep_last | string)
+          ~ (
+              ',keep-weekly=' ~ (proxmox_backup_job.keep_weekly | string)
+              if proxmox_backup_job.keep_weekly | default(0) | int > 0
+              else ''
+            ),
           '--remove', '1',
           '--repeat-missed', '0'
         ]
+        + (
+          ['--exclude', proxmox_backup_job.exclude | map('string') | join(',')]
+          if proxmox_backup_job.exclude | default([]) | length > 0
+          else []
+        )
       }}
 
 - name: Reconcile backup job {{ proxmox_backup_job.id }}

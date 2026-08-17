@@ -21,6 +21,14 @@
         else {}
       }}
 
+- name: Normalize NFS registration nodes for {{ proxmox_nfs_storage.id }}
+  ansible.builtin.set_fact:
+    proxmox_nfs_storage_current_nodes: >-
+      {{
+        proxmox_nfs_storage_current.get('nodes', '').split(',')
+        | reject('equalto', '') | sort | list
+      }}
+
 - name: Determine whether NFS registration needs reconciliation for {{ proxmox_nfs_storage.id }}
   ansible.builtin.set_fact:
     proxmox_nfs_storage_needs_recreate: >-
@@ -42,6 +50,8 @@
            != (proxmox_nfs_storage.content | sort)
         or proxmox_nfs_storage_current.get('options', '')
            != proxmox_nfs_storage.options | default('vers=4.2')
+        or proxmox_nfs_storage_current_nodes
+           != (proxmox_nfs_storage.nodes | sort)
       }}
 
 - name: Remove NFS registration with immutable identity drift - {{ proxmox_nfs_storage.id }}
@@ -104,6 +114,8 @@
       - "{{ proxmox_nfs_storage.content | join(',') }}"
       - --options
       - "{{ proxmox_nfs_storage.options | default('vers=4.2') }}"
+      - --nodes
+      - "{{ proxmox_nfs_storage.nodes | join(',') }}"
   when:
     - >-
       proxmox_nfs_storage_registration.rc != 0
@@ -121,6 +133,8 @@
       - "{{ proxmox_nfs_storage.content | join(',') }}"
       - --options
       - "{{ proxmox_nfs_storage.options | default('vers=4.2') }}"
+      - --nodes
+      - "{{ proxmox_nfs_storage.nodes | join(',') }}"
   when:
     - proxmox_nfs_storage_registration.rc == 0
     - proxmox_nfs_storage_needs_update | bool
@@ -136,7 +150,7 @@
       - --storage
       - "{{ proxmox_nfs_storage.id }}"
   delegate_to: "{{ item }}"
-  loop: "{{ groups['proxmox_hosts'] | default([inventory_hostname]) }}"
+  loop: "{{ proxmox_nfs_storage.nodes }}"
   changed_when: false
   check_mode: false
   when: not ansible_check_mode

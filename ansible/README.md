@@ -161,14 +161,19 @@ attach a capped, disposable scratch disk to VM `402`.
 
 The `proxmox_backup` role owns node-scoped vzdump jobs. The durable Windows
 template VM `101` is backed up monthly to `largegpu-hdd` with one retained copy.
-The retired workstation VM `100` backup job was removed. Linked Windows VM
-`502` and all Terraform-managed Talos VMs are intentionally excluded because
-they can be recreated declaratively. VM `402`'s HDD scratch disk also has
-`backup = false`.
+The retired workstation VM `100` backup job is explicitly removed. Two daily
+cross-node jobs also protect every current guest: `smallgpu-cross-node` writes
+to `backup-on-largegpu` at 02:15, and `largegpu-cross-node` writes to
+`backup-on-smallgpu` at 04:15. Both use snapshot mode, Zstandard, three recent
+copies, and two weekly copies. Temporary repair VM `990` is excluded. Disks
+declared with Proxmox `backup=0`, including disposable GPU scratch, remain
+excluded by `vzdump`.
 
-These backups primarily provide rollback from guest misconfiguration or
-accidental deletion. They are not full disaster recovery: `largegpu-hdd` and
-`storage1-bulk` are both on borrowed physical hosts.
+The opposite-node exports are dedicated root-owned `0700` directories. Native
+restoration is handled separately by `playbooks/restore-proxmox-node.yml`; it
+selects the latest archive per declared VM, refuses existing VM IDs or volumes,
+and requires `proxmox_restore_confirm=true`. See
+[`docs/proxmox-node-disaster-recovery.md`](../docs/proxmox-node-disaster-recovery.md).
 
 ## UPS shutdown and recovery
 

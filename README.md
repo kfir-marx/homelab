@@ -149,7 +149,7 @@ under [`kubernetes/system/`](kubernetes/system/).
 | Static NFS volumes | Simple and transparent data placement, but no dynamic provisioning and the server remains a dependency |
 | Borrowed GPU hosts | Adds substantial compute capacity, but only reproducible data may depend on those machines |
 | RTX 3080 shared by Talos and Windows | Maximizes hardware use, but only one VM can own the GPU at a time |
-| Public Git repository | Makes the architecture reviewable; all credentials and generated access files must stay out of Git |
+| Public Git repository | Makes the architecture reviewable; plaintext credentials and generated access files stay out of Git, while recovery material is committed only as SOPS/age ciphertext |
 
 These constraints are documented rather than hidden. The target for future
 high availability is three control-plane nodes across distinct physical hosts
@@ -169,6 +169,8 @@ once the hardware and memory budget support it.
 ├── kubernetes/
 │   ├── apps/                 Argo CD Application manifests (app-of-apps)
 │   └── system/               Workloads, networking, monitoring, and storage
+├── secrets/                  SOPS-encrypted disaster-recovery material
+├── scripts/secrets.sh        Capture, validate, and restore encrypted secrets
 ├── docs/                     Architecture notes and operational runbooks
 ├── .github/workflows/        Pull-request checks and infrastructure plans
 └── atlantis.yaml             Reviewed Terragrunt plan/apply workflow
@@ -191,6 +193,7 @@ once the hardware and memory budget support it.
 | Document | Focus |
 |---|---|
 | [Architecture](docs/architecture.md) | Hardware, topology, networking, storage, Terraform modules, CI/CD, and design rationale |
+| [Secrets disaster recovery](docs/secrets-disaster-recovery.md) | SOPS + age setup, capture, rotation, validation, and bare-metal recovery |
 | [Kubernetes network policies](docs/network-policies.md) | Default-deny application isolation, allowed-flow matrix, exceptions, and rollout verification |
 | [Remote access](docs/remote-access.md) | Public Cloudflare routes, private Tailscale access, and security boundaries |
 | [Tailscale runbook](docs/tailscale-runbook.md) | Subnet-router enrollment, route approval, client setup, and troubleshooting |
@@ -203,8 +206,9 @@ once the hardware and memory budget support it.
 
 ## Security note
 
-Secrets are supplied out of band through a gitignored `.env`, CI secret stores,
-and manually created Kubernetes Secrets. Kubeconfig, Talos credentials, private
-keys, Terraform state, and generated plans are also excluded from version
-control. No credential is required to review the architecture or code in this
-repository.
+Secrets are supplied at runtime through a gitignored `.env`, CI secret stores,
+and manually created Kubernetes Secrets. Their disaster-recovery copies are
+SOPS-encrypted to an age identity whose private key is itself protected by a
+human-held passphrase. Only ciphertext is committed. Kubeconfig, plaintext age
+keys, Talos access files, Terraform state, and generated plans remain excluded
+from version control. See the [secrets recovery runbook](docs/secrets-disaster-recovery.md).

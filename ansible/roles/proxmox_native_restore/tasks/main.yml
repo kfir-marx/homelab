@@ -1,0 +1,227 @@
+---
+- name: Derive native restore scope
+  ansible.builtin.set_fact:
+    proxmox_native_restore_backup_storage: >-
+      {{ proxmox_native_restore_backup_storage_by_node.get(inventory_hostname, '') }}
+    proxmox_native_restore_vm_ids: >-
+      {{ proxmox_native_restore_vm_ids_by_node.get(inventory_hostname, []) }}
+
+- name: Require an exact, explicitly confirmed restore scope
+  ansible.builtin.assert:
+    that:
+      - ansible_play_hosts_all | length == 1
+      - proxmox_native_restore_backup_storage | length > 0
+      - proxmox_native_restore_vm_ids | length > 0
+      - proxmox_native_restore_vm_ids | unique | length == proxmox_native_restore_vm_ids | length
+      - ansible_check_mode or proxmox_restore_confirm | bool
+    fail_msg: >-
+      Limit this play to exactly one replacement node and pass
+      -e proxmox_restore_confirm=true for a live restore. Check mode may inspect
+      and select archives without confirmation.
+
+- name: Require the standard Proxmox bridge
+  ansible.builtin.command:
+    argv:
+      - ip
+      - link
+      - show
+      - vmbr0
+  changed_when: false
+  check_mode: false
+
+- name: Read opposite-node backup storage status
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ inventory_hostname }}/storage/{{ proxmox_native_restore_backup_storage }}/status"
+      - --output-format
+      - json
+  register: proxmox_native_restore_backup_status
+  changed_when: false
+  check_mode: false
+
+- name: Require active opposite-node backup storage
+  ansible.builtin.assert:
+    that:
+      - backup_status.active | int == 1
+      - backup_status.enabled | int == 1
+      - "'backup' in backup_status.content.split(',')"
+    fail_msg: >-
+      {{ proxmox_native_restore_backup_storage }} is not active and
+      backup-capable on {{ inventory_hostname }}.
+  vars:
+    backup_status: "{{ proxmox_native_restore_backup_status.stdout | from_json }}"
+
+- name: Read cluster VM inventory
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - /cluster/resources
+      - --type
+      - vm
+      - --output-format
+      - json
+  register: proxmox_native_restore_cluster_vms
+  changed_when: false
+  check_mode: false
+
+- name: Refuse to overwrite an existing VM ID anywhere in the cluster
+  ansible.builtin.assert:
+    that:
+      - ansible_check_mode or
+        (proxmox_native_restore_cluster_vms.stdout | from_json
+         | selectattr('vmid', 'equalto', item) | list | length) == 0
+    fail_msg: >-
+      VM {{ item }} already exists in cluster configuration. This role never
+      overwrites, destroys, or replaces an existing VM.
+  loop: "{{ proxmox_native_restore_vm_ids }}"
+
+- name: Read target-storage volumes for each restore VM ID
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ inventory_hostname }}/storage/{{ proxmox_native_restore_target_storage }}/content"
+      - --content
+      - images
+      - --vmid
+      - "{{ item | string }}"
+      - --output-format
+      - json
+  register: proxmox_native_restore_target_volumes
+  changed_when: false
+  check_mode: false
+  loop: "{{ proxmox_native_restore_vm_ids }}"
+
+- name: Refuse unexpected pre-existing target volumes
+  ansible.builtin.assert:
+    that:
+      - ansible_check_mode or item.stdout | from_json | length == 0
+    fail_msg: >-
+      Target storage already contains volume(s) owned by VM {{ item.item }}.
+      Refusing to guess, overwrite, free, or delete them.
+  loop: "{{ proxmox_native_restore_target_volumes.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: List native backups for each restore VM ID
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ inventory_hostname }}/storage/{{ proxmox_native_restore_backup_storage }}/content"
+      - --content
+      - backup
+      - --vmid
+      - "{{ item | string }}"
+      - --output-format
+      - json
+  register: proxmox_native_restore_backup_lists
+  changed_when: false
+  check_mode: false
+  loop: "{{ proxmox_native_restore_vm_ids }}"
+
+- name: Require at least one native backup for every VM
+  ansible.builtin.assert:
+    that:
+      - item.stdout | from_json | length > 0
+    fail_msg: >-
+      No backup for VM {{ item.item }} exists on
+      {{ proxmox_native_restore_backup_storage }}.
+  loop: "{{ proxmox_native_restore_backup_lists.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Select the latest backup for each VM in declared restore order
+  ansible.builtin.set_fact:
+    proxmox_native_restore_selected: >-
+      {{
+        proxmox_native_restore_selected | default({})
+        | combine({
+            item.item | string:
+              ((item.stdout | from_json | sort(attribute='ctime', reverse=true) | first).volid)
+          })
+      }}
+  loop: "{{ proxmox_native_restore_backup_lists.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Show exact archives selected for restoration
+  ansible.builtin.debug:
+    msg: >-
+      VM {{ item }} <- {{ proxmox_native_restore_selected[item | string] }}
+  loop: "{{ proxmox_native_restore_vm_ids }}"
+
+- name: Restore VMs in declared order without overwriting
+  ansible.builtin.command:
+    argv:
+      - qmrestore
+      - "{{ proxmox_native_restore_selected[item | string] }}"
+      - "{{ item | string }}"
+      - --storage
+      - "{{ proxmox_native_restore_target_storage }}"
+  loop: "{{ proxmox_native_restore_vm_ids }}"
+  when:
+    - not ansible_check_mode
+    - proxmox_restore_confirm | bool
+  changed_when: true
+
+- name: Read restored VM configurations
+  ansible.builtin.command:
+    argv:
+      - qm
+      - config
+      - "{{ item | string }}"
+  register: proxmox_native_restore_configs
+  changed_when: false
+  check_mode: false
+  loop: "{{ proxmox_native_restore_vm_ids }}"
+  when:
+    - not ansible_check_mode
+    - proxmox_restore_confirm | bool
+
+- name: Verify declared PCI passthrough survives restoration
+  ansible.builtin.assert:
+    that:
+      - item.stdout is search('(?m)^hostpci[0-9]+:.*host=' ~ (expected_hostpci | regex_escape))
+    fail_msg: >-
+      Restored VM {{ item.item }} is missing expected PCI passthrough device
+      {{ expected_hostpci }}; leave it stopped and reconcile host hardware first.
+  vars:
+    expected_hostpci: "{{ proxmox_native_restore_expected_hostpci[item.item] }}"
+  loop: "{{ proxmox_native_restore_configs.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - item.item in proxmox_native_restore_expected_hostpci
+    - not ansible_check_mode
+    - proxmox_restore_confirm | bool
+
+- name: Start restored VMs only when explicitly enabled
+  ansible.builtin.command:
+    argv:
+      - qm
+      - start
+      - "{{ item | string }}"
+  loop: "{{ proxmox_native_restore_vm_ids }}"
+  when:
+    - not ansible_check_mode
+    - proxmox_restore_confirm | bool
+    - proxmox_native_restore_start | bool
+  changed_when: true
+
+- name: Wait for declared restored VM addresses
+  ansible.builtin.wait_for:
+    host: "{{ proxmox_native_restore_expected_ips[item] }}"
+    port: 50000
+    connect_timeout: 3
+    timeout: 180
+  delegate_to: localhost
+  loop: "{{ proxmox_native_restore_vm_ids }}"
+  when:
+    - item in proxmox_native_restore_expected_ips
+    - not ansible_check_mode
+    - proxmox_restore_confirm | bool
+    - proxmox_native_restore_start | bool

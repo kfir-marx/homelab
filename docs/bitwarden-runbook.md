@@ -61,6 +61,12 @@ The shell history contains the variable name, not the token value. Do not run
 the command with shell tracing enabled. This token is only for ACME TXT record
 updates; do not reuse a Cloudflare Tunnel token or a global API key.
 
+Capture it into the encrypted recovery bundle after creation:
+
+```bash
+scripts/secrets.sh capture-k8s cert-manager/cloudflare-dns-api-token
+```
+
 cert-manager issues `*.home.547600.xyz` into the
 `argocd/private-home-wildcard-tls` Secret. The shared Gateway terminates HTTPS
 on port 443. The existing AdGuard wildcard already maps the hostname to
@@ -129,9 +135,14 @@ This is intentionally a create-only command. If `bitwarden-secrets` already
 exists, stop and investigate instead of regenerating it: rotating
 `BW_DB_PASSWORD` without coordinating PostgreSQL would break database access.
 
-Back up this Secret through an encrypted, access-controlled process. It lives
-in Kubernetes etcd by necessity; do not copy it as plaintext onto NFS or into
-this repository.
+Capture this Secret with:
+
+```bash
+scripts/secrets.sh capture-k8s bitwarden/bitwarden-secrets
+```
+
+It lives in Kubernetes etcd by necessity; do not copy it as plaintext onto NFS
+or into this repository. Only the SOPS ciphertext belongs in Git.
 
 SMTP is required for a complete self-hosted deployment, including account email
 verification, new-device verification, invitations, and System Administrator
@@ -167,6 +178,13 @@ unset GOOGLE_HOMELAB_GMAIL GOOGLE_APP_PASSWORD_FOR_SMTP_SERVER smtp_app_password
 Do not commit SMTP credentials or print the generated Secret. Google displays
 App Passwords in groups; the command removes display whitespace before storing
 the 16-character password.
+
+Capture the environment and SMTP Secret after creating or rotating them:
+
+```bash
+scripts/secrets.sh capture-env
+scripts/secrets.sh capture-k8s bitwarden/bitwarden-smtp
+```
 
 The Bitwarden Lite Admin process must remain enabled because it owns database
 initialization and migrations. Portal login is controlled separately: with no

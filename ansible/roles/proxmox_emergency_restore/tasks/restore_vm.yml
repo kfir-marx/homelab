@@ -1,0 +1,305 @@
+---
+- name: Read VM {{ proxmox_emergency_restore_vmid }} status
+  ansible.builtin.command:
+    argv:
+      - qm
+      - status
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+  register: proxmox_emergency_restore_vm_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read existing VM {{ proxmox_emergency_restore_vmid }} configuration
+  ansible.builtin.command:
+    argv:
+      - qm
+      - config
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+  register: proxmox_emergency_restore_existing_config
+  changed_when: false
+  when: proxmox_emergency_restore_vm_status.rc == 0
+  check_mode: false
+
+- name: Reject an unexpected existing VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.assert:
+    that:
+      - "proxmox_emergency_restore_vm_status.stdout == 'status: stopped'"
+      - >-
+        proxmox_emergency_restore_existing_config.stdout is
+        search('(?m)^name:\s+' ~ (proxmox_emergency_restore_vm.name | regex_escape) ~ '$')
+      - >-
+        proxmox_emergency_restore_existing_config.stdout is
+        search('(?m)^machine:\s+' ~ (proxmox_emergency_restore_vm.machine | regex_escape) ~ '$')
+      - >-
+        proxmox_emergency_restore_existing_config.stdout is
+        search('(?m)^bios:\s+' ~ (proxmox_emergency_restore_vm.bios | regex_escape) ~ '$')
+      - >-
+        proxmox_emergency_restore_existing_config.stdout is
+        search('(?m)^net0:\s+virtio=.*bridge=' ~
+        (proxmox_emergency_restore_vm.bridge | regex_escape) ~ '([,\n]|$)')
+    fail_msg: >-
+      VM {{ proxmox_emergency_restore_vmid }} exists in an unexpected state.
+      This role never stops, destroys, or replaces an unexpected VM.
+  when: proxmox_emergency_restore_vm_status.rc == 0
+
+- name: Report creation of an absent VM {{ proxmox_emergency_restore_vmid }} in check mode
+  ansible.builtin.debug:
+    msg: "VM {{ proxmox_emergency_restore_vmid }} would be created with the declared recovery configuration."
+  when:
+    - proxmox_emergency_restore_vm_status.rc != 0
+    - ansible_check_mode
+
+- name: Create absent VM {{ proxmox_emergency_restore_vmid }} safely
+  ansible.builtin.command:
+    argv:
+      - qm
+      - create
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --name
+      - "{{ proxmox_emergency_restore_vm.name }}"
+      - --machine
+      - "{{ proxmox_emergency_restore_vm.machine }}"
+      - --bios
+      - "{{ proxmox_emergency_restore_vm.bios }}"
+      - --cpu
+      - host
+      - --cores
+      - "{{ proxmox_emergency_restore_vm.cores | string }}"
+      - --memory
+      - "{{ proxmox_emergency_restore_vm.memory_mb | string }}"
+      - --scsihw
+      - virtio-scsi-pci
+      - --net0
+      - "virtio,bridge={{ proxmox_emergency_restore_vm.bridge }}"
+      - --agent
+      - enabled=1,fstrim_cloned_disks=1,type=virtio
+      - --ostype
+      - l26
+      - --onboot
+      - "1"
+  when:
+    - proxmox_emergency_restore_vm_status.rc != 0
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Reconcile safe VM {{ proxmox_emergency_restore_vmid }} hardware settings
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --name
+      - "{{ proxmox_emergency_restore_vm.name }}"
+      - --machine
+      - "{{ proxmox_emergency_restore_vm.machine }}"
+      - --bios
+      - "{{ proxmox_emergency_restore_vm.bios }}"
+      - --cpu
+      - host
+      - --cores
+      - "{{ proxmox_emergency_restore_vm.cores | string }}"
+      - --memory
+      - "{{ proxmox_emergency_restore_vm.memory_mb | string }}"
+      - --scsihw
+      - virtio-scsi-pci
+      - --agent
+      - enabled=1,fstrim_cloned_disks=1,type=virtio
+      - --ostype
+      - l26
+      - --onboot
+      - "1"
+  when: not ansible_check_mode
+  changed_when: false
+
+- name: Restore declared disks for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.include_tasks: restore_disk.yml
+  loop: "{{ proxmox_emergency_restore_vm.disks }}"
+  loop_control:
+    loop_var: proxmox_emergency_restore_disk
+    label: "{{ proxmox_emergency_restore_disk.interface }} <- {{ proxmox_emergency_restore_disk.image }}"
+
+- name: Read VM {{ proxmox_emergency_restore_vmid }} configuration after disk imports
+  ansible.builtin.command:
+    argv:
+      - qm
+      - config
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+  register: proxmox_emergency_restore_post_disk_config
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Read VM {{ proxmox_emergency_restore_vmid }} storage volumes after disk imports
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ inventory_hostname }}/storage/{{ proxmox_emergency_restore_storage }}/content"
+      - --content
+      - images
+      - --vmid
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --output-format
+      - json
+  register: proxmox_emergency_restore_post_disk_content
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Derive cloud-init and EFI volume state for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.set_fact:
+    proxmox_emergency_restore_cloudinit_volid: >-
+      {{ (proxmox_emergency_restore_post_disk_config.stdout
+          | regex_findall('(?m)^ide2:\s*([^,\s]+)')
+          | first) | default('') }}
+    proxmox_emergency_restore_efi_volid: >-
+      {{ (proxmox_emergency_restore_post_disk_config.stdout
+          | regex_findall('(?m)^efidisk0:\s*([^,\s]+)')
+          | first) | default('') }}
+    proxmox_emergency_restore_post_disk_volids: >-
+      {{ proxmox_emergency_restore_post_disk_content.stdout
+         | from_json | map(attribute='volid') | list }}
+    proxmox_emergency_restore_restored_disk_volids: >-
+      {{ proxmox_emergency_restore_post_disk_config.stdout
+         | regex_findall('(?m)^scsi[0-9]+:\s*([^,\s]+)') }}
+  when: not ansible_check_mode
+
+- name: Identify stale unused references with no backing volume for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.set_fact:
+    proxmox_emergency_restore_unused_references: >-
+      {{ proxmox_emergency_restore_post_disk_config.stdout
+         | regex_findall('(?m)^(unused[0-9]+):\s*([^,\s]+)') }}
+  when: not ansible_check_mode
+
+- name: Remove only stale unused references proven to have no backing volume
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --delete
+      - "{{ item.0 }}"
+  loop: "{{ proxmox_emergency_restore_unused_references | default([]) }}"
+  loop_control:
+    label: "{{ item.0 }} -> {{ item.1 }}"
+  when:
+    - not ansible_check_mode
+    - item.1 not in proxmox_emergency_restore_post_disk_volids
+  changed_when: true
+
+- name: Remove only a proven-missing cloud-init reference for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --delete
+      - ide2
+  when:
+    - not ansible_check_mode
+    - proxmox_emergency_restore_vm.cloud_init | default(false) | bool
+    - proxmox_emergency_restore_cloudinit_volid | length > 0
+    - proxmox_emergency_restore_cloudinit_volid not in proxmox_emergency_restore_post_disk_volids
+  changed_when: true
+
+- name: Create a fresh required cloud-init disk for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --ide2
+      - "{{ proxmox_emergency_restore_storage }}:cloudinit"
+  when:
+    - not ansible_check_mode
+    - proxmox_emergency_restore_vm.cloud_init | default(false) | bool
+    - proxmox_emergency_restore_cloudinit_volid | length == 0
+      or proxmox_emergency_restore_cloudinit_volid not in proxmox_emergency_restore_post_disk_volids
+  changed_when: true
+
+- name: Remove only a proven-missing EFI variables reference for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --delete
+      - efidisk0
+  when:
+    - not ansible_check_mode
+    - proxmox_emergency_restore_vm.fresh_efi | default(false) | bool
+    - proxmox_emergency_restore_efi_volid | length > 0
+    - >-
+      proxmox_emergency_restore_efi_volid not in proxmox_emergency_restore_post_disk_volids
+      or proxmox_emergency_restore_efi_volid in proxmox_emergency_restore_restored_disk_volids
+  changed_when: true
+
+- name: Create fresh EFI variables for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --efidisk0
+      - "{{ proxmox_emergency_restore_storage }}:1,efitype=4m,pre-enrolled-keys=0"
+  when:
+    - not ansible_check_mode
+    - proxmox_emergency_restore_vm.fresh_efi | default(false) | bool
+    - proxmox_emergency_restore_efi_volid | length == 0
+      or proxmox_emergency_restore_efi_volid not in proxmox_emergency_restore_post_disk_volids
+      or proxmox_emergency_restore_efi_volid in proxmox_emergency_restore_restored_disk_volids
+  changed_when: true
+
+- name: Configure cloud-init network metadata for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --ipconfig0
+      - "ip={{ proxmox_emergency_restore_vm.ip_address }},gw={{ proxmox_emergency_restore_vm.gateway }}"
+  when:
+    - not ansible_check_mode
+    - proxmox_emergency_restore_vm.cloud_init | default(false) | bool
+  changed_when: false
+
+- name: Configure declared PCI passthrough for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --hostpci0
+      - "{{ proxmox_emergency_restore_vm.hostpci0 }}"
+  when:
+    - not ansible_check_mode
+    - proxmox_emergency_restore_vm.hostpci0 is defined
+  changed_when: false
+
+- name: Configure boot order for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --boot
+      - order=scsi0;net0
+  when: not ansible_check_mode
+  changed_when: false
+
+- name: Show final VM {{ proxmox_emergency_restore_vmid }} configuration
+  ansible.builtin.command:
+    argv:
+      - qm
+      - config
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+  register: proxmox_emergency_restore_final_config
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Report final VM {{ proxmox_emergency_restore_vmid }} configuration
+  ansible.builtin.debug:
+    var: proxmox_emergency_restore_final_config.stdout_lines
+  when: not ansible_check_mode

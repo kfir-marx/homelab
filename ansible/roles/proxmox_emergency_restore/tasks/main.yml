@@ -1,0 +1,126 @@
+---
+- name: Require the emergency recovery to run only on smallgpu
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'smallgpu'
+      - ansible_facts.hostname == 'smallgpu'
+      - proxmox_emergency_restore_vm_ids | length > 0
+      - proxmox_emergency_restore_vm_ids | difference([201, 403]) | length == 0
+    fail_msg: This one-time recovery role may target only smallgpu and VMs 201/403.
+
+- name: Require VM 201 to be restored in a separate earlier run
+  ansible.builtin.assert:
+    that:
+      - proxmox_emergency_restore_vm_ids == [201]
+        or proxmox_emergency_restore_vm_ids == [403]
+    fail_msg: >-
+      Restore one VM per run. Run the default VM 201 recovery first, verify
+      Talos/etcd/Kubernetes, then run with proxmox_emergency_restore_vm_ids=[403].
+
+- name: Create the read-only emergency NFS mount point
+  ansible.builtin.file:
+    path: "{{ proxmox_emergency_restore_mount_point }}"
+    state: directory
+
+- name: Read the emergency NFS mount state
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --raw
+      - --mountpoint
+      - "{{ proxmox_emergency_restore_mount_point }}"
+      - --output
+      - SOURCE,TARGET,FSTYPE,OPTIONS
+  register: proxmox_emergency_restore_mount_state
+  changed_when: false
+  failed_when: proxmox_emergency_restore_mount_state.rc not in [0, 1]
+  check_mode: false
+
+- name: Validate an existing emergency NFS mount
+  ansible.builtin.assert:
+    that:
+      - proxmox_emergency_restore_source in proxmox_emergency_restore_mount_state.stdout
+      - proxmox_emergency_restore_mount_point in proxmox_emergency_restore_mount_state.stdout
+      - proxmox_emergency_restore_mount_state.stdout is search('(^| )nfs4?( |$)')
+      - proxmox_emergency_restore_mount_state.stdout is search('(^|[, ])ro([, ]|$)')
+    fail_msg: >-
+      {{ proxmox_emergency_restore_mount_point }} is mounted from an unexpected
+      source or is not read-only NFS. Refusing to replace it.
+  when: proxmox_emergency_restore_mount_state.rc == 0
+
+- name: Mount the emergency NFS export read-only
+  ansible.builtin.command:
+    argv:
+      - mount
+      - --types
+      - nfs4
+      - --options
+      - ro,vers=4.2,hard
+      - "{{ proxmox_emergency_restore_source }}"
+      - "{{ proxmox_emergency_restore_mount_point }}"
+  when:
+    - proxmox_emergency_restore_mount_state.rc == 1
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Confirm the recovery directory is backed by the expected NFS export
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --raw
+      - --target
+      - "{{ proxmox_emergency_restore_mount_point }}/{{ proxmox_emergency_restore_directory }}"
+      - --output
+      - SOURCE,TARGET,FSTYPE,OPTIONS
+  register: proxmox_emergency_restore_directory_mount
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Require the exact read-only NFS backing for the recovery directory
+  ansible.builtin.assert:
+    that:
+      - proxmox_emergency_restore_source in proxmox_emergency_restore_directory_mount.stdout
+      - proxmox_emergency_restore_mount_point in proxmox_emergency_restore_directory_mount.stdout
+      - proxmox_emergency_restore_directory_mount.stdout is search('(^| )nfs4?( |$)')
+      - proxmox_emergency_restore_directory_mount.stdout is search('(^|[, ])ro([, ]|$)')
+    fail_msg: The recovery directory is not backed by the expected read-only NFS mount.
+  when: not ansible_check_mode
+
+- name: Inspect required emergency recovery images
+  ansible.builtin.stat:
+    path: >-
+      {{ proxmox_emergency_restore_mount_point }}/{{ proxmox_emergency_restore_directory }}/{{ item }}
+    follow: false
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  loop:
+    - vm-201-disk-0.qcow2
+    - vm-403-disk-1.qcow2
+    - vm-403-disk-2.qcow2
+  register: proxmox_emergency_restore_image_stats
+  when: not ansible_check_mode
+
+- name: Require every recovery image to be a regular non-empty file
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - item.stat.size | int > 0
+    fail_msg: "Required recovery image {{ item.item }} is absent, non-regular, or empty."
+  loop: "{{ proxmox_emergency_restore_image_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not ansible_check_mode
+
+- name: Restore each explicitly selected VM
+  ansible.builtin.include_tasks: restore_vm.yml
+  vars:
+    proxmox_emergency_restore_vm: "{{ proxmox_emergency_restore_vms[proxmox_emergency_restore_vmid] }}"
+  loop: "{{ proxmox_emergency_restore_vm_ids }}"
+  loop_control:
+    loop_var: proxmox_emergency_restore_vmid
+    label: "{{ proxmox_emergency_restore_vmid }}"

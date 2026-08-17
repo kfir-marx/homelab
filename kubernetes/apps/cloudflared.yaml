@@ -25,8 +25,8 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-    # The tunnel-credentials Secret is created out-of-band (see runbook);
-    # don't let ArgoCD prune it.
+    # The tunnel-credentials Secret is restored out-of-band from the SOPS
+    # recovery bundle (see the secrets runbook); don't let ArgoCD prune it.
   ignoreDifferences:
     - group: ""
       kind: Secret

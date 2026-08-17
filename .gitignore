@@ -24,6 +24,19 @@ talosconfig.yaml
 kubeconfig
 kubeconfig.yaml
 
+# SOPS working files. The encrypted age identity (*.age), SOPS dotenv, and
+# *.sops.json Kubernetes snapshots under secrets/ are intentionally tracked.
+secrets/**/*.dec
+secrets/**/*.decrypted
+secrets/age/*
+!secrets/age/.gitkeep
+!secrets/age/*.agekey.age
+secrets/kubernetes/*
+!secrets/kubernetes/.gitkeep
+!secrets/kubernetes/*.sops.json
+secrets/*.env
+!secrets/*.sops.env
+
 # OS
 .DS_Store
 Thumbs.db

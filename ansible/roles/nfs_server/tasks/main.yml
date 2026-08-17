@@ -15,7 +15,13 @@
 - name: Validate NFS export declarations
   ansible.builtin.assert:
     that:
-      - item.path in (nfs_server_mounts | map(attribute='mount_point') | list)
+      - >-
+        (item.mount_point | default(item.path)) in
+        ((nfs_server_mounts | map(attribute='mount_point') | list)
+         + nfs_server_adopted_mount_points)
+      - >-
+        item.path == (item.mount_point | default(item.path))
+        or item.path.startswith((item.mount_point | default(item.path)) + '/')
       - item.client is match('^[0-9./]+$')
       - "'rw' in item.options.split(',')"
       - "'no_root_squash' in item.options.split(',')"
@@ -30,7 +36,10 @@
     that:
       - item.path is match('^/mnt/.+')
       - item.path != item.mount_point
-      - (nfs_server_mounts | selectattr('mount_point', 'equalto', item.mount_point) | list | length) == 1
+      - >-
+        item.mount_point in
+        ((nfs_server_mounts | map(attribute='mount_point') | list)
+         + nfs_server_adopted_mount_points)
       - item.path.startswith(item.mount_point + '/')
     fail_msg: "Invalid or unsafe NFS data directory declaration: {{ item }}"
   loop: "{{ nfs_server_directories }}"
@@ -97,6 +106,34 @@
   loop_control:
     label: "{{ item.item.mount_point }}"
   when: not ansible_check_mode
+
+- name: Read adopted NFS backing mount state
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --raw
+      - --mountpoint
+      - "{{ item }}"
+      - --output
+      - TARGET,OPTIONS
+  loop: "{{ nfs_server_adopted_mount_points }}"
+  register: nfs_server_adopted_mount_states
+  changed_when: false
+  check_mode: false
+
+- name: Require adopted NFS backing mounts to be active and read/write
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.item in item.stdout
+      - item.stdout is search('(^|[, ])rw([, ]|$)')
+    fail_msg: >-
+      Adopted backing mount {{ item.item }} is absent or not read/write; refusing
+      to create directories or exports on the host filesystem beneath it.
+  loop: "{{ nfs_server_adopted_mount_states.results }}"
+  loop_control:
+    label: "{{ item.item }}"
 
 - name: Create declared directories on mounted NFS filesystems
   ansible.builtin.file:

@@ -43,10 +43,38 @@ nfs_server_directories:
   - path: /mnt/data10tb/media/torrents/incomplete
     mount_point: /mnt/data10tb
     mode: "0777"
+  - path: /mnt/data10tb/proxmox-backups/from-largegpu
+    mount_point: /mnt/data10tb
+    owner: root
+    group: root
+    mode: "0700"
 nfs_server_exports:
   - path: /mnt/data10tb
     client: 192.168.1.0/24
     options: rw,sync,no_subtree_check,no_root_squash,fsid=1
+  # Kubernetes mounts each PV path directly. Keep those paths as explicit
+  # exports because the NTFS-backed parent export cannot service subdirectory
+  # mount requests reliably after an NFS server restart.
+  - path: /mnt/data10tb/media
+    mount_point: /mnt/data10tb
+    client: 192.168.1.0/24
+    options: rw,sync,no_subtree_check,no_root_squash,fsid=11
+  - path: /mnt/data10tb/monitoring/alertmanager
+    mount_point: /mnt/data10tb
+    client: 192.168.1.0/24
+    options: rw,sync,no_subtree_check,no_root_squash,fsid=12
+  - path: /mnt/data10tb/monitoring/grafana
+    mount_point: /mnt/data10tb
+    client: 192.168.1.0/24
+    options: rw,sync,no_subtree_check,no_root_squash,fsid=13
+  - path: /mnt/data10tb/monitoring/prometheus
+    mount_point: /mnt/data10tb
+    client: 192.168.1.0/24
+    options: rw,sync,no_subtree_check,no_root_squash,fsid=14
+  - path: /mnt/data10tb/proxmox-backups/from-largegpu
+    mount_point: /mnt/data10tb
+    client: 192.168.1.107
+    options: rw,sync,no_subtree_check,no_root_squash,fsid=21
 
 vfio_passthrough_bootloader: grub
 vfio_passthrough_iommu_parameters:

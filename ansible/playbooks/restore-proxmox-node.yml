@@ -1,0 +1,13 @@
+---
+- name: Restore one replaced Proxmox node from opposite-node vzdump backups
+  hosts: proxmox_hosts
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - role: proxmox_preflight
+      vars:
+        # Restoration does not reconcile VFIO. A currently running GPU VM is
+        # expected when this playbook is inspected in check mode.
+        vfio_passthrough_devices: []
+    - role: proxmox_native_restore

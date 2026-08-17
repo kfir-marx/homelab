@@ -1,0 +1,47 @@
+---
+proxmox_emergency_restore_source: 192.168.1.105:/mnt/storage2-bulk
+proxmox_emergency_restore_mount_point: /mnt/proxmox-recovery-smallgpu
+# Preserve the live emergency directory spelling. The source export contains
+# the accepted recovery images under "recovary"; do not rename or move them.
+proxmox_emergency_restore_directory: proxmox-recovary-smallgpu
+proxmox_emergency_restore_storage: local-lvm
+
+# Restore the control plane by default. Restore 403 only after 201, Talos,
+# etcd, and the Kubernetes API have been verified independently.
+proxmox_emergency_restore_vm_ids:
+  - 201
+
+proxmox_emergency_restore_vms:
+  201:
+    name: cp-1
+    machine: q35
+    bios: seabios
+    cores: 2
+    memory_mb: 4096
+    ip_address: 192.168.1.211/24
+    gateway: 192.168.1.1
+    bridge: vmbr0
+    cloud_init: true
+    disks:
+      - interface: scsi0
+        image: vm-201-disk-0.qcow2
+        options: aio=io_uring,backup=1,cache=none,discard=on,iothread=0,replicate=1,ssd=1
+  403:
+    name: gpu-3
+    machine: q35
+    bios: ovmf
+    cores: 10
+    memory_mb: 8192
+    ip_address: 192.168.1.233/24
+    gateway: 192.168.1.1
+    bridge: vmbr0
+    cloud_init: true
+    fresh_efi: true
+    hostpci0: host=09:00,pcie=1,rombar=1,x-vga=0
+    disks:
+      - interface: scsi0
+        image: vm-403-disk-1.qcow2
+        options: aio=io_uring,backup=1,cache=none,discard=on,iothread=0,replicate=1,ssd=1
+      - interface: scsi1
+        image: vm-403-disk-2.qcow2
+        options: aio=io_uring,backup=1,cache=none,discard=on,iothread=1,replicate=0,serial=media-state,ssd=1

@@ -1,6 +1,7 @@
 # Daily encrypted application-state backup. SQLite databases are copied with
 # SQLite's online backup command; live WAL/SHM files are never archived.
-# Provision the password Secret out-of-band as documented in the media runbook.
+# Provision the password Secret out-of-band and capture it into the SOPS
+# recovery bundle as documented in the media and secrets runbooks.
 apiVersion: batch/v1
 kind: CronJob
 metadata:

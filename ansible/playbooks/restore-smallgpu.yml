@@ -1,0 +1,10 @@
+---
+- name: Restore smallgpu Talos VMs from emergency qcow2 images
+  hosts: smallgpu
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - role: proxmox_preflight
+    - role: proxmox_emergency_restore
+

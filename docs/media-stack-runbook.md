@@ -140,8 +140,12 @@ kubectl --kubeconfig kubeconfig.yaml -n media create secret generic \
 ```
 
 Do not recreate this Secret unless existing encrypted backups can be discarded.
-Back up the password in a password manager; losing it makes every archive
-unrecoverable.
+Capture it into SOPS and keep the optional password-manager copy; losing both
+makes every archive unrecoverable:
+
+```bash
+scripts/secrets.sh capture-k8s media/media-backup-credentials
+```
 
 Trigger and verify a backup:
 

@@ -105,8 +105,9 @@ application traffic remains WireGuard encrypted between peers.
   is allowed to forward only its declared `192.168.1.0/24` route, while
   Tailscale grants remain the primary per-client policy boundary for traffic
   entering through it. See [Kubernetes network policies](network-policies.md).
-- Auth keys and Cloudflare credentials are created out-of-band and never
-  committed to Git.
+- Auth keys and Cloudflare credentials are created out-of-band. Plaintext is
+  never committed; SOPS-encrypted recovery copies are tracked as described in
+  [the secrets runbook](secrets-disaster-recovery.md).
 
 ## Private DNS and ad blocking
 

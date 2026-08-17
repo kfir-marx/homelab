@@ -248,7 +248,7 @@ re-verified after the fresh OS is configured.
 | `media-state-pv` | `local-media-state` | `gpu-3:/var/mnt/media-state` | 45 Gi | **Local state** — SQLite/config; encrypted backups required |
 | `media-backups-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/media/backups` | 20 Gi | **Critical** — encrypted media-stack state archives |
 
-Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests.
+Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests. On the NTFS-backed bulk tier, Ansible also exports each PV child path explicitly with its own stable `fsid`; Talos mounts those child paths directly, and the parent NTFS export alone does not reliably serve a fresh child-path mount after an NFS restart.
 
 Applications that need hard binding and independent retention declare smaller
 static PVs beneath the same export. Bitwarden uses separate retained paths for
@@ -269,20 +269,21 @@ The separate `gpu2-scratch-pv` is node-local rather than NFS. It is a static
 only to `gpu-2`, with `WaitForFirstConsumer` binding and node affinity. It is
 appropriate only for replaceable caches and temporary work. It is unavailable
 while Windows owns `largegpu`, and loss or return of that borrowed host destroys
-the data. Talos VM `402` is not backed up because Terraform and Talos can
-recreate it; its scratch disk is disposable as well.
+the data. Talos VM `402` is backed up at the VM level for fast node recovery,
+while its separately attached scratch disk remains excluded and disposable.
 
 `largegpu-hdd` stores the monthly Proxmox backup of durable Windows template VM
 `101`, with one retained copy. The old VM `100` backup job was removed with its
-retired Proxmox node. Linked Windows VM `502` and all Talos VMs are
-recreated from their retained template or Terraform rather than backed up.
-Ansible also corrects the Proxmox `storage1-bulk` registration to the live
-`/mnt/data10tb` export; the former `/mnt/storage1-bulk` path could remain
-temporarily usable through a stale NFS client mount but failed on fresh mounts.
-These backups help with VM mistakes and rollback but are not disaster recovery
-because both backup destinations are borrowed hosts. Windows and VirtIO
-installation ISOs live on `largegpu-hdd` as low-priority, replaceable assets;
-Terraform-managed per-node Talos images remain on each node's `local` storage.
+retired Proxmox node. In addition, every current guest is protected by staggered
+daily cross-node `vzdump` jobs: `smallgpu` writes to a dedicated directory on
+`largegpu-hdd` at 02:15, while `largegpu` writes to a dedicated directory on
+`smallgpu`'s NTFS bulk disk at 04:15. Both retain three recent and two weekly
+Zstandard archives. Proxmox registrations restrict each backup storage to its
+source node, and the server exports only the dedicated destination to the
+opposite host. Ansible also corrects `storage1-bulk` to the live
+`/mnt/data10tb` export. Windows and VirtIO installation ISOs remain
+low-priority, replaceable assets; Terraform-managed per-node Talos images remain
+on each node's `local` storage.
 
 Prometheus, Alertmanager, and Grafana use smaller static PVs carved from the
 `nfs-storage1` export under `/mnt/data10tb/monitoring`. Metrics are explicitly

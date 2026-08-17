@@ -71,7 +71,15 @@ kubectl -n monitoring create secret generic monitoring-grafana-admin \
 unset GRAFANA_ADMIN_PASSWORD
 ```
 
-The Secret is deliberately not stored in this public repository.
+Capture it immediately into the encrypted recovery bundle:
+
+```bash
+scripts/secrets.sh capture-k8s monitoring/monitoring-grafana-admin
+```
+
+The plaintext Secret is deliberately not stored in this public repository;
+only its SOPS ciphertext is committed. See
+[SOPS + age recovery](secrets-disaster-recovery.md).
 
 Commit and push the manifests. The root ArgoCD Application should discover
 `kubernetes/apps/monitoring.yaml`. If it does not, apply the child Application:

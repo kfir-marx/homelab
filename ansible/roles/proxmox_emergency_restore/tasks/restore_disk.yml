@@ -1,0 +1,126 @@
+---
+- name: Read VM {{ proxmox_emergency_restore_vmid }} configuration before {{ proxmox_emergency_restore_disk.interface }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - config
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+  register: proxmox_emergency_restore_disk_config
+  changed_when: false
+  check_mode: false
+
+- name: Read allocated VM {{ proxmox_emergency_restore_vmid }} volumes before {{ proxmox_emergency_restore_disk.interface }}
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ inventory_hostname }}/storage/{{ proxmox_emergency_restore_storage }}/content"
+      - --content
+      - images
+      - --vmid
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --output-format
+      - json
+  register: proxmox_emergency_restore_disk_content
+  changed_when: false
+  check_mode: false
+
+- name: Derive exact volume state for {{ proxmox_emergency_restore_disk.interface }}
+  ansible.builtin.set_fact:
+    proxmox_emergency_restore_disk_current_volid: >-
+      {{ (proxmox_emergency_restore_disk_config.stdout
+          | regex_findall('(?m)^' ~ (proxmox_emergency_restore_disk.interface | regex_escape) ~ ':\s*([^,\s]+)')
+          | first) | default('') }}
+    proxmox_emergency_restore_disk_existing_volids: >-
+      {{ proxmox_emergency_restore_disk_content.stdout
+         | from_json | map(attribute='volid') | list }}
+    proxmox_emergency_restore_disk_configured_volids: >-
+      {{ proxmox_emergency_restore_disk_config.stdout
+         | regex_findall('(?m)^(?:ide[0-9]+|sata[0-9]+|scsi[0-9]+|virtio[0-9]+|efidisk0|tpmstate0):\s*([^,\s]+)') }}
+
+- name: Refuse unattached or unexpected allocated volumes for VM {{ proxmox_emergency_restore_vmid }}
+  ansible.builtin.assert:
+    that:
+      - proxmox_emergency_restore_disk_existing_volids | difference(proxmox_emergency_restore_disk_configured_volids) | length == 0
+    fail_msg: >-
+      VM {{ proxmox_emergency_restore_vmid }} has allocated volumes that are not
+      attached in its configuration. Refusing to guess, overwrite, free, or delete them.
+
+- name: Remove only the proven-missing {{ proxmox_emergency_restore_disk.interface }} reference
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - --delete
+      - "{{ proxmox_emergency_restore_disk.interface }}"
+  when:
+    - not ansible_check_mode
+    - proxmox_emergency_restore_disk_current_volid | length > 0
+    - proxmox_emergency_restore_disk_current_volid not in proxmox_emergency_restore_disk_existing_volids
+  changed_when: true
+
+- name: Import {{ proxmox_emergency_restore_disk.image }} to {{ proxmox_emergency_restore_disk.interface }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - importdisk
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - >-
+        {{ proxmox_emergency_restore_mount_point }}/{{ proxmox_emergency_restore_directory }}/{{ proxmox_emergency_restore_disk.image }}
+      - "{{ proxmox_emergency_restore_storage }}"
+      - --format
+      - raw
+      - --target-disk
+      - "{{ proxmox_emergency_restore_disk.interface }}"
+  register: proxmox_emergency_restore_disk_import
+  when:
+    - not ansible_check_mode
+    - proxmox_emergency_restore_disk_current_volid | length == 0
+      or proxmox_emergency_restore_disk_current_volid not in proxmox_emergency_restore_disk_existing_volids
+  changed_when: true
+
+- name: Read exact imported volume ID for {{ proxmox_emergency_restore_disk.interface }}
+  ansible.builtin.command:
+    argv:
+      - qm
+      - config
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+  register: proxmox_emergency_restore_disk_imported_config
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Derive exact imported volume ID for {{ proxmox_emergency_restore_disk.interface }}
+  ansible.builtin.set_fact:
+    proxmox_emergency_restore_disk_imported_volid: >-
+      {{ (proxmox_emergency_restore_disk_imported_config.stdout
+          | regex_findall('(?m)^' ~ (proxmox_emergency_restore_disk.interface | regex_escape) ~ ':\s*([^,\s]+)')
+          | first) | default('') }}
+  when: not ansible_check_mode
+
+- name: Require an exact imported Proxmox volume ID for {{ proxmox_emergency_restore_disk.interface }}
+  ansible.builtin.assert:
+    that:
+      - proxmox_emergency_restore_disk_imported_volid is match('^[a-zA-Z][a-zA-Z0-9_-]*:[^,\s]+$')
+    fail_msg: Proxmox did not attach an exact volume ID after import; stopping safely.
+  when: not ansible_check_mode
+
+- name: Attach the exact imported volume ID with declared options
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ proxmox_emergency_restore_vmid | string }}"
+      - "--{{ proxmox_emergency_restore_disk.interface }}"
+      - "{{ proxmox_emergency_restore_disk_imported_volid }},{{ proxmox_emergency_restore_disk.options }}"
+  when: not ansible_check_mode
+  changed_when: false
+
+- name: Report exact restored volume ID
+  ansible.builtin.debug:
+    msg: >-
+      VM {{ proxmox_emergency_restore_vmid }} {{ proxmox_emergency_restore_disk.interface }}
+      uses {{ proxmox_emergency_restore_disk_imported_volid }}
+  when: not ansible_check_mode
+

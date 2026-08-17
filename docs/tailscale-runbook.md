@@ -46,7 +46,7 @@ Create a key with these properties:
 - pre-approved: enabled if device approval is enabled
 - ephemeral: disabled
 
-Store it out-of-band; never commit the key:
+Create it out-of-band; never commit the plaintext key:
 
 ```bash
 kubectl create namespace tailscale-router --dry-run=client -o yaml \
@@ -61,6 +61,19 @@ ArgoCD ignores the Secret's data. The router stores its long-lived node identity
 in the separate `tailscale-router-state-official` Secret, so the auth key is
 normally used only for initial enrollment. The distinct name deliberately
 prevents reuse of state created against the previous control plane.
+
+After the router has enrolled and created its state Secret, capture both into
+the encrypted recovery bundle:
+
+```bash
+scripts/secrets.sh capture-k8s \
+  tailscale-router/tailscale-auth \
+  tailscale-router/tailscale-router-state-official
+scripts/secrets.sh check
+```
+
+Commit only the resulting `*.sops.json` ciphertext. Repeat the capture after a
+router identity change. See [SOPS + age recovery](secrets-disaster-recovery.md).
 
 After the Application syncs:
 

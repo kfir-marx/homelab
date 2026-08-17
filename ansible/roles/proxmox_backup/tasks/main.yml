@@ -3,12 +3,20 @@
   ansible.builtin.assert:
     that:
       - item.id is match('^[a-zA-Z0-9_-]+$')
-      - item.vmid | string is match('^[1-9][0-9]*$')
+      - >-
+        (item.all | default(false) | bool)
+        or (item.vmid | default('') | string is match('^[1-9][0-9]*(,[1-9][0-9]*)*$'))
+      - not (item.all | default(false) | bool) or item.vmid is not defined
+      - >-
+        item.exclude | default([]) | map('string')
+        | reject('match', '^[1-9][0-9]*$') | list | length == 0
+      - item.exclude | default([]) | length == 0 or item.all | default(false) | bool
       - item.storage is match('^[a-zA-Z][a-zA-Z0-9_-]+$')
       - item.node is match('^[a-zA-Z][a-zA-Z0-9_-]+$')
       - item.mode in ['snapshot', 'stop', 'suspend']
       - item.compress in ['zstd', 'gzip', 'lzo', '0']
       - item.keep_last | int > 0
+      - item.keep_weekly | default(0) | int >= 0
     fail_msg: "Invalid Proxmox backup job declaration: {{ item }}"
   loop: "{{ proxmox_backup_jobs }}"
   loop_control:
@@ -56,7 +64,43 @@
   check_mode: false
   loop: "{{ proxmox_backup_jobs }}"
   loop_control:
-    label: "{{ item.node }}/{{ item.vmid }}"
+    label: "{{ item.node }}/{{ item.vmid | default('all') }}"
+  when: not (item.all | default(false) | bool)
+
+- name: Validate retired backup job identifiers
+  ansible.builtin.assert:
+    that:
+      - item is match('^[a-zA-Z0-9_-]+$')
+    fail_msg: "Invalid retired Proxmox backup job ID: {{ item }}"
+  loop: "{{ proxmox_backup_retired_job_ids }}"
+
+- name: Read retired Proxmox backup jobs
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/cluster/backup/{{ item }}"
+      - --output-format
+      - json
+  register: proxmox_backup_retired_job_reads
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  loop: "{{ proxmox_backup_retired_job_ids }}"
+
+- name: Remove only explicitly retired Proxmox backup jobs
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - delete
+      - "/cluster/backup/{{ item.item }}"
+  when:
+    - item.rc == 0
+    - not ansible_check_mode
+  changed_when: true
+  loop: "{{ proxmox_backup_retired_job_reads.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
 
 - name: Manage each Proxmox backup job
   ansible.builtin.include_tasks: manage_job.yml

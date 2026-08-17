@@ -1,0 +1,25 @@
+---
+proxmox_restore_confirm: false
+proxmox_native_restore_start: false
+proxmox_native_restore_target_storage: local-lvm
+
+proxmox_native_restore_backup_storage_by_node:
+  smallgpu: backup-on-largegpu
+  largegpu: backup-on-smallgpu
+
+proxmox_native_restore_vm_ids_by_node:
+  smallgpu:
+    - 201
+    - 403
+  largegpu:
+    - 101
+    - 402
+
+proxmox_native_restore_expected_ips:
+  201: 192.168.1.211
+  402: 192.168.1.232
+  403: 192.168.1.233
+
+proxmox_native_restore_expected_hostpci:
+  403: "09:00"
+

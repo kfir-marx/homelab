@@ -24,9 +24,9 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-  # The auth-key Secret is created out-of-band from an official Tailscale
-  # auth key — don't let ArgoCD prune it. tailscaled also writes node state
-  # into a self-managed Secret.
+  # The auth-key Secret is created out-of-band from an official Tailscale auth
+  # key and backed up with SOPS — don't let ArgoCD prune it. tailscaled also
+  # writes node state into a self-managed Secret that is included in recovery.
   ignoreDifferences:
     - group: ""
       kind: Secret

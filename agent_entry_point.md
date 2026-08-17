@@ -47,6 +47,7 @@ Do not silently edit code to match prose. Establish which side is stale first.
 | Kubernetes network policy | `docs/network-policies.md` | matching workload manifests and Cilium bootstrap configuration |
 | Storage placement or PV changes | storage section in `docs/architecture.md` | `kubernetes/system/storage/`, app storage manifest, NFS host vars |
 | Remote access or DNS | `docs/remote-access.md` | Tailscale/AdGuard runbook and matching manifests |
+| Secrets or bare-metal credential recovery | `docs/secrets-disaster-recovery.md` | `scripts/secrets.sh`, `secrets/inventory.tsv`, then the consuming layer |
 | Monitoring or GPUs | matching runbook | Argo CD application and system manifests |
 | CI or delivery | `.github/workflows/terraform-plan.yml`, `atlantis.yaml` | `terraform/run-terragrunt.sh` |
 | Broad architecture change | relevant config and manifests first | only the affected sections of `docs/architecture.md` |
