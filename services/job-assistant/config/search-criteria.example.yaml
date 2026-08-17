@@ -1,0 +1,35 @@
+desired_titles:
+  - DevOps Engineer
+  - Platform Engineer
+  - Site Reliability Engineer
+excluded_titles:
+  - Intern
+  - Sales
+seniority:
+  - mid
+  - senior
+israel_locations:
+  - Israel
+  - Tel Aviv
+  - Haifa
+  - Jerusalem
+fully_remote: true
+acceptable_timezone_difference_hours: 4
+required_technologies:
+  - Kubernetes
+  - Terraform
+  - Linux
+preferred_technologies:
+  - Ansible
+  - Argo CD
+  - AWS
+  - Python
+excluded_companies: []
+preferred_companies: []
+minimum_match_threshold: 0.65
+maximum_job_age_days: 30
+language_preferences:
+  - English
+  - Hebrew
+minimum_salary: null
+salary_currency: null

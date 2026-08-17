@@ -1,0 +1,16 @@
+# Slugs are intentionally non-working placeholders. Verify each company's
+# official public ATS board and its terms before setting enabled: true.
+companies:
+  - company: Israeli technology company example
+    ats: greenhouse
+    slug: REPLACE_WITH_VERIFIED_GREENHOUSE_BOARD
+    enabled: false
+  - company: Remote-friendly company example
+    ats: lever
+    slug: REPLACE_WITH_VERIFIED_LEVER_SITE
+    enabled: false
+  - company: Additional remote company example
+    ats: ashby
+    slug: REPLACE_WITH_VERIFIED_ASHBY_BOARD
+    enabled: false
+

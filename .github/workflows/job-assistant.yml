@@ -1,0 +1,87 @@
+name: "Job Assistant"
+
+on:
+  pull_request:
+    paths:
+      - "services/job-assistant/**"
+      - "kubernetes/apps/job-assistant.yaml"
+      - "kubernetes/system/job-assistant/**"
+      - "docs/job-assistant-*.md"
+      - ".github/workflows/job-assistant.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/job-assistant/**"
+      - "kubernetes/apps/job-assistant.yaml"
+      - "kubernetes/system/job-assistant/**"
+      - "docs/job-assistant-*.md"
+      - ".github/workflows/job-assistant.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: "Lint, type, test, migrate"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_USER: job_assistant_test
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: job_assistant_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U job_assistant_test -d job_assistant_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/job-assistant/pyproject.toml
+      - name: Install
+        run: pip install -e 'services/job-assistant[dev]'
+      - name: Ruff format
+        run: ruff format --check services/job-assistant
+      - name: Ruff lint
+        run: ruff check services/job-assistant
+      - name: Mypy
+        run: mypy services/job-assistant/src
+      - name: Tests
+        env:
+          TEST_POSTGRES_URL: postgresql+psycopg://job_assistant_test:test-only-password@localhost:5432/job_assistant_test
+        run: pytest --cov=job_assistant --cov-report=term-missing services/job-assistant
+
+  manifests:
+    name: "Render manifests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.33.0
+      - name: Render application resources
+        run: kubectl kustomize kubernetes/system/job-assistant >/tmp/job-assistant.yaml
+      - name: Client-side schema parse
+        run: kubectl apply --dry-run=client --validate=false -f /tmp/job-assistant.yaml
+      - name: Parse Argo CD Application
+        run: kubectl apply --dry-run=client --validate=false -f kubernetes/apps/job-assistant.yaml
+
+  container:
+    name: "Build container"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/job-assistant
+          push: false
+          tags: homelab-job-assistant:test
+

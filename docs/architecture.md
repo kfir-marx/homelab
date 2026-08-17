@@ -247,6 +247,7 @@ re-verified after the fresh OS is configured.
 | `media-data-pv` | `nfs-storage1` | `smallgpu:/mnt/data10tb/media` | 7 Ti | **Bulk** — Jellyfin library, torrents, and shared hardlink tree |
 | `media-state-pv` | `local-media-state` | `gpu-3:/var/mnt/media-state` | 45 Gi | **Local state** — SQLite/config; encrypted backups required |
 | `media-backups-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/media/backups` | 20 Gi | **Critical** — encrypted media-stack state archives |
+| `job-assistant-*-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/job-assistant/*` | 1–20 Gi each | **Critical** — personal job history, PostgreSQL, CV artifacts, backups, and encrypted Codex credential state |
 
 Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests. On the NTFS-backed bulk tier, Ansible also exports each PV child path explicitly with its own stable `fsid`; Talos mounts those child paths directly, and the parent NTFS export alone does not reliably serve a fresh child-path mount after an NFS restart.
 

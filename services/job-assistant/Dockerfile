@@ -1,0 +1,31 @@
+FROM python:3.12.10-slim-bookworm AS builder
+WORKDIR /build
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN python -m pip install --no-cache-dir --prefix=/install .
+
+FROM python:3.12.10-slim-bookworm
+ARG CODEX_CLI_VERSION=0.143.0
+ARG CODEX_CLI_SHA256=d9dc731dc66e227b175b13c071be9ea126cc7672fcac8a87823da50b0d2b2ffe
+RUN apt-get update \
+ && apt-get install --no-install-recommends -y ca-certificates curl tini \
+ && curl -fsSL -o /tmp/codex.tar.gz \
+    "https://github.com/openai/codex/releases/download/rust-v${CODEX_CLI_VERSION}/codex-x86_64-unknown-linux-musl.tar.gz" \
+ && echo "${CODEX_CLI_SHA256}  /tmp/codex.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/codex.tar.gz -C /usr/local/bin \
+ && mv /usr/local/bin/codex-x86_64-unknown-linux-musl /usr/local/bin/codex \
+ && chmod 0755 /usr/local/bin/codex \
+ && rm /tmp/codex.tar.gz \
+ && apt-get purge -y curl \
+ && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --gid 10001 jobassistant \
+ && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /app jobassistant
+COPY --from=builder /install /usr/local
+WORKDIR /app
+RUN mkdir -p /data/artifacts /data/private /var/lib/codex /tmp/job-assistant \
+ && chown -R 10001:10001 /data /var/lib/codex /tmp/job-assistant /app
+USER 10001:10001
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ENTRYPOINT ["/usr/bin/tini", "--", "job-assistant"]
+CMD ["api"]

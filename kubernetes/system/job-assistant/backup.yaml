@@ -1,0 +1,78 @@
+# Logical database backups share the critical host with the source and protect
+# against accidental data changes, not host loss. Copy encrypted archives
+# off-host according to the runbook.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: job-assistant-backup
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  schedule: "43 2 * * *"
+  timeZone: Asia/Jerusalem
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: job-assistant
+            component: backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: docker.io/library/postgres:17.6-bookworm
+              command:
+                - sh
+                - -ec
+                - |
+                  umask 077
+                  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                  pg_dump --format=custom --host=job-assistant-postgres \
+                    --username=job_assistant --dbname=job_assistant \
+                    > "/backup/job-assistant-${stamp}.dump"
+                  find /backup -type f -name 'job-assistant-*.dump' -mtime +30 -print
+                  if [ "${RETENTION_DELETE:-false}" = true ]; then
+                    find /backup -type f -name 'job-assistant-*.dump' -mtime +30 -delete
+                  fi
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: job-assistant-secrets
+                      key: POSTGRES_PASSWORD
+                # Safe default: report retention candidates without deletion.
+                - name: RETENTION_DELETE
+                  value: "false"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              volumeMounts:
+                - name: backups
+                  mountPath: /backup
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: job-assistant-backups

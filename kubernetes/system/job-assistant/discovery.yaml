@@ -1,0 +1,91 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: job-assistant-discovery
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  schedule: "17 7 * * *"
+  timeZone: Asia/Jerusalem
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: job-assistant
+            component: discovery
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: discover
+              image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+              args: [discover]
+              env:
+                - name: JOB_ASSISTANT_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: job-assistant-secrets
+                      key: DATABASE_URL
+                - name: JOB_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS
+                  valueFrom:
+                    secretKeyRef:
+                      name: job-assistant-secrets
+                      key: TELEGRAM_ALLOWED_USER_IDS
+                - name: JOB_ASSISTANT_IMAP_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: job-assistant-secrets
+                      key: IMAP_HOST
+                - name: JOB_ASSISTANT_IMAP_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: job-assistant-secrets
+                      key: IMAP_USERNAME
+                - name: JOB_ASSISTANT_IMAP_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: job-assistant-secrets
+                      key: IMAP_PASSWORD
+                - name: JOB_ASSISTANT_SEARCH_CRITERIA_PATH
+                  value: /app/config/search-criteria.yaml
+                - name: JOB_ASSISTANT_COMPANY_REGISTRY_PATH
+                  value: /app/config/company-registry.yaml
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+              volumeMounts:
+                - name: artifacts
+                  mountPath: /data
+                - name: config
+                  mountPath: /app/config
+                  readOnly: true
+          volumes:
+            - name: artifacts
+              persistentVolumeClaim:
+                claimName: job-assistant-artifacts
+            - name: config
+              configMap:
+                name: job-assistant-config

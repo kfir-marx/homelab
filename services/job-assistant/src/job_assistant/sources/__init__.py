@@ -1,0 +1,1 @@
+"""Replaceable job-source adapters."""

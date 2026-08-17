@@ -1,0 +1,28 @@
+# Personal job-discovery and human-approved application assistance. PostgreSQL,
+# retained critical-NFS state, security isolation, and monitoring are defined in
+# the repository-owned manifests below; no public ingress is created.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: job-assistant
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/job-assistant
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: job-assistant
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+

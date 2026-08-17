@@ -1,0 +1,343 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: job-assistant-api
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    app: job-assistant
+    component: api
+spec:
+  selector:
+    app: job-assistant
+    component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: job-assistant-api
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: job-assistant
+      component: api
+  template:
+    metadata:
+      labels:
+        app: job-assistant
+        component: api
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          args: [api]
+          env:
+            - name: JOB_ASSISTANT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: DATABASE_URL
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: job-assistant-telegram
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: job-assistant
+      component: telegram
+  template:
+    metadata:
+      labels:
+        app: job-assistant
+        component: telegram
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: telegram
+          image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          args: [telegram]
+          env:
+            - name: JOB_ASSISTANT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: DATABASE_URL
+            - name: JOB_ASSISTANT_TELEGRAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: TELEGRAM_TOKEN
+            - name: JOB_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: TELEGRAM_ALLOWED_USER_IDS
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          volumeMounts:
+            - name: artifacts
+              mountPath: /data
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: job-assistant-artifacts
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: job-assistant-worker
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: job-assistant
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: job-assistant
+        component: worker
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          args: [worker]
+          env:
+            - name: JOB_ASSISTANT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: DATABASE_URL
+            - name: JOB_ASSISTANT_TELEGRAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: TELEGRAM_TOKEN
+            - name: JOB_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: TELEGRAM_ALLOWED_USER_IDS
+            - name: JOB_ASSISTANT_SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: SMTP_HOST
+            - name: JOB_ASSISTANT_SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: SMTP_USERNAME
+            - name: JOB_ASSISTANT_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: SMTP_PASSWORD
+            - name: JOB_ASSISTANT_SMTP_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: SMTP_FROM
+            - name: JOB_ASSISTANT_REVIEW_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: REVIEW_EMAIL
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: artifacts
+              mountPath: /data
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: job-assistant-artifacts
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: job-assistant-generation
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: job-assistant
+      component: generation
+  template:
+    metadata:
+      labels:
+        app: job-assistant
+        component: generation
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: seed-codex-auth
+          image: docker.io/library/busybox:1.37.0
+          command:
+            - sh
+            - -ec
+            - |
+              umask 077
+              if [ ! -s /codex-home/auth.json ]; then
+                cp /bootstrap/auth.json /codex-home/auth.json
+              fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: codex-home
+              mountPath: /codex-home
+            - name: auth-bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+      containers:
+        - name: generation
+          image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          args: [generation-worker]
+          env:
+            - name: JOB_ASSISTANT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-codex-db
+                  key: DATABASE_URL
+            - name: JOB_ASSISTANT_CODEX_HOME
+              value: /var/lib/codex
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: codex-home
+              mountPath: /var/lib/codex
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: codex-home
+          persistentVolumeClaim:
+            claimName: job-assistant-codex-home
+        - name: auth-bootstrap
+          secret:
+            secretName: job-assistant-codex-auth-bootstrap
+            optional: true
+            defaultMode: 0400
+        - name: temporary
+          emptyDir:
+            sizeLimit: 1Gi

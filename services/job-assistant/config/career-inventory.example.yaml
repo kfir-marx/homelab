@@ -1,0 +1,51 @@
+schema_version: 1
+person:
+  name: Example Candidate
+  email: candidate@example.invalid
+  location: Israel
+experiences:
+  - id: exp-example
+    employer: Example Systems Ltd.
+    start_date: 2022-01-01
+    end_date: 2024-01-31
+    official_title: Systems Engineer
+    allowed_display_titles: []
+    responsibilities:
+      - id: fact-linux-ops
+        text: Maintained Linux services according to documented operating procedures.
+        metrics: []
+        technologies: [Linux]
+        tags: [operations]
+        evidence: documented
+        allowed_variations:
+          - Operated Linux services using documented procedures.
+    achievements:
+      - id: fact-automation
+        text: Automated a repeatable configuration check with Python.
+        metrics: []
+        technologies: [Python]
+        tags: [automation]
+        evidence: verified
+        allowed_variations: []
+projects:
+  - id: project-homelab
+    name: Example homelab
+    description: Personal learning environment; not production employment.
+    facts:
+      - id: fact-homelab-k8s
+        text: Deployed Kubernetes and Argo CD in a personal homelab.
+        metrics: []
+        technologies: [Kubernetes, Argo CD]
+        tags: [homelab]
+        evidence: homelab
+        allowed_variations: []
+education: []
+certifications: []
+languages:
+  - id: language-english
+    text: Professional working proficiency in English.
+    metrics: []
+    technologies: []
+    tags: [language]
+    evidence: self_reported
+    allowed_variations: []

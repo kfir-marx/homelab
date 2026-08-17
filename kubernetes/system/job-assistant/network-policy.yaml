@@ -1,0 +1,200 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: application-to-postgres
+  namespace: job-assistant
+spec:
+  podSelector:
+    matchExpressions:
+      - key: component
+        operator: In
+        values: [api, telegram, worker, generation, discovery, migrate, backup]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: job-assistant
+              component: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: job-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: job-assistant
+      component: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: component
+                operator: In
+                values: [api, telegram, worker, generation, discovery, migrate, backup]
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prometheus-to-api
+  namespace: job-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: job-assistant
+      component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: dns-egress
+  namespace: job-assistant
+spec:
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+# Telegram handles both Bot API traffic and allowlisted manual public URLs.
+# Public-only CIDRs and application-level DNS/IP validation prevent LAN access.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: telegram-public-egress
+  namespace: job-assistant
+spec:
+  endpointSelector:
+    matchLabels:
+      component: telegram
+  egress:
+    - toFQDNs:
+        - matchName: api.telegram.org
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toCIDRSet: &publicCidrs
+        - cidr: 0.0.0.0/0
+          except:
+            - 0.0.0.0/8
+            - 10.0.0.0/8
+            - 100.64.0.0/10
+            - 127.0.0.0/8
+            - 169.254.0.0/16
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: worker-delivery-egress
+  namespace: job-assistant
+spec:
+  endpointSelector:
+    matchLabels:
+      component: worker
+  egress:
+    - toFQDNs:
+        - matchName: api.telegram.org
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: smtp.gmail.com
+      toPorts:
+        - ports:
+            - port: "587"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: discovery-external-egress
+  namespace: job-assistant
+spec:
+  endpointSelector:
+    matchLabels:
+      component: discovery
+  egress:
+    - toFQDNs:
+        - matchName: imap.gmail.com
+      toPorts:
+        - ports:
+            - port: "993"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: boards-api.greenhouse.io
+        - matchName: api.lever.co
+        - matchName: api.ashbyhq.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# The generation workload has no Telegram, SMTP, or Kubernetes credentials.
+# Web search is disabled in Codex and only Codex service domains are reachable.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: generation-codex-egress
+  namespace: job-assistant
+spec:
+  endpointSelector:
+    matchLabels:
+      component: generation
+  egress:
+    - toFQDNs:
+        - matchName: chatgpt.com
+        - matchPattern: "*.chatgpt.com"
+        - matchName: openai.com
+        - matchPattern: "*.openai.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+

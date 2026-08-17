@@ -1,0 +1,143 @@
+# Job-search history, contacts, CV artifacts, and Codex auth are personal and
+# irreplaceable. They remain on the permanent critical NFS host. Every PV is
+# hard-bound and Retained; Argo deletion cannot delete the backing directories.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: job-assistant-postgres-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions: [nfsvers=4.2, hard]
+  claimRef:
+    namespace: job-assistant
+    name: job-assistant-postgres
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/job-assistant/postgres
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: job-assistant-postgres
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 10Gi
+  volumeName: job-assistant-postgres-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: job-assistant-artifacts-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions: [nfsvers=4.2, hard]
+  claimRef:
+    namespace: job-assistant
+    name: job-assistant-artifacts
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/job-assistant/artifacts
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: job-assistant-artifacts
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: job-assistant-artifacts-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: job-assistant-codex-home-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions: [nfsvers=4.2, hard]
+  claimRef:
+    namespace: job-assistant
+    name: job-assistant-codex-home
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/job-assistant/codex-home
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: job-assistant-codex-home
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: job-assistant-codex-home-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: job-assistant-backups-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions: [nfsvers=4.2, hard]
+  claimRef:
+    namespace: job-assistant
+    name: job-assistant-backups
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/job-assistant/backups
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: job-assistant-backups
+  namespace: job-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nfs-storage2
+  resources:
+    requests:
+      storage: 10Gi
+  volumeName: job-assistant-backups-pv
+

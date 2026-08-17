@@ -1,0 +1,60 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: job-assistant
+  namespace: job-assistant
+  labels:
+    app: job-assistant
+spec:
+  selector:
+    matchLabels:
+      app: job-assistant
+      component: api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: job-assistant
+  namespace: job-assistant
+  labels:
+    app: job-assistant
+spec:
+  groups:
+    - name: job-assistant.rules
+      rules:
+        - alert: JobAssistantUnavailable
+          expr: up{namespace="job-assistant",service="job-assistant-api"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Job assistant metrics endpoint is unavailable
+            description: The private API has been unreachable for ten minutes.
+        - alert: JobAssistantQueueStalled
+          expr: job_assistant_queue_oldest_age_seconds > 3600
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Job assistant queue has stalled
+            description: A pending work item is more than one hour old.
+        - alert: JobAssistantCodexAuthenticationFailed
+          expr: job_assistant_generation_runs{status="failed",error_code="authentication"} > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: Codex authentication requires attention
+            description: Reseed the private persistent CODEX_HOME using the documented runbook.
+        - alert: JobAssistantRepeatedDeliveryFailures
+          expr: sum(job_assistant_outbox_events{status=~"retry|dead",channel=~"email|telegram"}) >= 3
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Job assistant notification delivery is repeatedly failing
+            description: Check Telegram/SMTP connectivity and credentials; no automatic outreach retries past the bounded limit.
