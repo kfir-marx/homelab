@@ -68,7 +68,7 @@ back to Tailscale's managed DERP relays when direct connectivity is unavailable.
 | Bitwarden | `https://bitwarden.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | Immich | `https://immich.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | Jellyfin | `https://jellyfin.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
-| Media administration | `https://{seerr,sonarr,radarr,prowlarr,qbittorrent,maintainerr}.home.547600.xyz` | Cilium Gateway API with cert-manager TLS |
+| Media administration | `https://{seerr,sonarr,radarr,prowlarr,bazarr,qbittorrent,maintainerr}.home.547600.xyz` | Cilium Gateway API with cert-manager TLS |
 | AdGuard Home DNS | `192.168.1.221:53` TCP/UDP | Cilium LoadBalancer |
 | qBittorrent peers | `192.168.1.222:6881` TCP/UDP | Cilium LoadBalancer; optional router port-forward |
 | Kubernetes API | `192.168.1.210:6443` | API VIP |

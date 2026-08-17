@@ -258,11 +258,12 @@ to a borrowed-host or scratch tier. The backup path shares the source failure
 domain and must also be copied to an encrypted off-host destination.
 
 The media stack follows a three-part variant of this model. Replaceable media
-and torrents share one `media-data-pv` mount so Servarr imports can hardlink.
-Live SQLite databases use a retained local disk on `gpu-3`, because Servarr
-does not support application databases on NFS. A daily job performs consistent
-SQLite backups, encrypts the complete state archive, and stores it on
-`media-backups-pv` on the permanent workstation.
+and torrents share one `media-data-pv` mount so Servarr imports can hardlink
+and Bazarr can write subtitle files beside the media. Live SQLite databases
+use a retained local disk on `gpu-3`, because Servarr and Bazarr do not support
+application databases on NFS. A daily job performs consistent SQLite backups,
+encrypts the complete state archive, and stores it on `media-backups-pv` on the
+permanent workstation.
 
 The separate `gpu2-scratch-pv` is node-local rather than NFS. It is a static
 `390 GiB`, `ReadWriteOnce` PV backed by the capped 400 GiB virtual HDD attached

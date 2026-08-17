@@ -1,6 +1,6 @@
-# Jellyfin and its request/download/maintenance stack. Application state is
-# local to gpu-3 and backed up to the permanent critical NFS tier; replaceable
-# media lives on the bulk NFS tier.
+# Jellyfin and its request/download/subtitle/maintenance stack. Application
+# state is local to gpu-3 and backed up to the permanent critical NFS tier;
+# replaceable media lives on the bulk NFS tier.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

@@ -27,7 +27,7 @@ apply step is required.
 | `immich/machine-learning` | Server to TCP/3003 | Cluster DNS and public-only HTTPS for model downloads |
 | `immich/postgres` | Server to TCP/5432 | None |
 | `immich/redis` | Server to TCP/6379 | None |
-| `media` | Same-namespace application traffic; Gateway to each web UI; Cloudflared to Jellyfin TCP/8096; LAN/world peers to qBittorrent TCP/UDP 6881 | Cluster DNS; public-only TCP 80/443 for metadata, indexers, and trackers; qBittorrent additionally reaches public TCP/UDP peers |
+| `media` | Same-namespace application traffic; Gateway to each web UI; Cloudflared to Jellyfin TCP/8096; LAN/world peers to qBittorrent TCP/UDP 6881 | Cluster DNS; public-only TCP 80/443 for metadata, indexers, subtitle providers, and trackers; qBittorrent additionally reaches public TCP/UDP peers |
 | `tailscale-router` | Public/LAN UDP 41641 (pinned in the Deployment) | Not isolated; see the Cilium Gateway hairpin exception below |
 | `monitoring` | Same-namespace traffic, Gateway to Grafana, and API-server webhook traffic | Not isolated: Prometheus must discover and scrape changing cluster targets |
 

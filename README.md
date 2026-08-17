@@ -95,7 +95,7 @@ makes failures easier to reason about.
 | Capability | Implementation | Why it is here |
 |---|---|---|
 | Private photo platform | Immich with PostgreSQL and Redis | A real stateful workload whose irreplaceable data must stay on permanent hardware |
-| Home streaming | Jellyfin, Seerr, Servarr, qBittorrent, and Maintainerr | GPU-accelerated streaming with recoverable bulk media and policy-driven retention |
+| Home streaming | Jellyfin, Seerr, Servarr, Bazarr, qBittorrent, and Maintainerr | GPU-accelerated streaming with automated subtitles, recoverable bulk media, and policy-driven retention |
 | Observability | kube-prometheus-stack, Grafana, Alertmanager, and NVIDIA DCGM metrics | Cluster, workload, and GPU visibility with explicit retention limits |
 | Private DNS | AdGuard Home | Split DNS for private services and optional network-wide filtering |
 | Private remote access | Official Tailscale subnet router | Administrative access without exposing management interfaces publicly |

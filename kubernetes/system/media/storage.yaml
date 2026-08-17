@@ -1,6 +1,7 @@
 # Live application databases stay on a dedicated Talos user volume on gpu-3.
-# Servarr's SQLite databases must not live on NFS. This PV deliberately pins
-# every stateful media pod to gpu-3; encrypted backups go to the critical tier.
+# Servarr and Bazarr SQLite databases must not live on NFS. This PV deliberately
+# pins every stateful media pod to gpu-3; encrypted backups go to the critical
+# tier.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -59,7 +60,8 @@ spec:
   volumeName: media-state-pv
 ---
 # A single filesystem and a single /data mount preserve hardlinks and atomic
-# imports between qBittorrent, Sonarr, and Radarr.
+# imports between qBittorrent, Sonarr, and Radarr, while allowing Bazarr to
+# store subtitle files beside the media.
 apiVersion: v1
 kind: PersistentVolume
 metadata:

@@ -12,7 +12,8 @@ spec:
     - Egress
 ---
 # The stack is one trust boundary: Prowlarr pushes indexers to the Arr apps,
-# Seerr and Maintainerr call several internal APIs, and the Arr apps call qBit.
+# Seerr, Bazarr, and Maintainerr call several internal APIs, and the Arr apps
+# call qBit.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -46,6 +47,7 @@ spec:
           - sonarr
           - radarr
           - prowlarr
+          - bazarr
           - qbittorrent
           - maintainerr
   ingress:
@@ -58,6 +60,7 @@ spec:
             - {port: "8989", protocol: TCP}
             - {port: "7878", protocol: TCP}
             - {port: "9696", protocol: TCP}
+            - {port: "6767", protocol: TCP}
             - {port: "8080", protocol: TCP}
             - {port: "6246", protocol: TCP}
     - fromEndpoints:

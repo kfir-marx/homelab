@@ -2,7 +2,7 @@
 
 ## Scope and ownership
 
-Argo CD owns Jellyfin, Seerr, Sonarr, Radarr, Prowlarr, qBittorrent,
+Argo CD owns Jellyfin, Seerr, Sonarr, Radarr, Prowlarr, Bazarr, qBittorrent,
 FlareSolverr, Maintainerr, their routes, policies, and static PV/PVC objects
 under `kubernetes/system/media/`. Terraform owns the `gpu-3` VM data disk and
 Talos `media-state` user volume. Ansible owns the physical NFS mount/export on
@@ -28,9 +28,12 @@ The shared container layout is deliberately stable:
     └── incomplete/
 ```
 
-Sonarr, Radarr, and qBittorrent must all receive the single `/data` mount.
-Splitting downloads and media into different mounts prevents hardlinks and
-atomic imports even when both mounts ultimately refer to the same disk.
+Sonarr, Radarr, Bazarr, and qBittorrent must all receive the single `/data`
+mount. Splitting downloads and media into different mounts prevents hardlinks
+and atomic imports even when both mounts ultimately refer to the same disk.
+Bazarr needs this mount writable so downloaded subtitles can be stored beside
+the movie or episode. Do not configure Bazarr path mappings while these paths
+remain identical in all three applications.
 
 The backing NTFS filesystem exposes fixed `root:root` ownership. Ansible keeps
 the declared media directories at mode `0777` so the UID-mapped media pods can
@@ -48,6 +51,7 @@ Administrative and request interfaces use the private Gateway:
 | Sonarr | `https://sonarr.home.547600.xyz` |
 | Radarr | `https://radarr.home.547600.xyz` |
 | Prowlarr | `https://prowlarr.home.547600.xyz` |
+| Bazarr | `https://bazarr.home.547600.xyz` |
 | qBittorrent | `https://qbittorrent.home.547600.xyz` |
 | Maintainerr | `https://maintainerr.home.547600.xyz` |
 
@@ -82,16 +86,18 @@ out of Git and require an operator:
 3. Complete the credential rotations in the order below. The restored
    application state came from a repository that contained secret-bearing
    databases.
-4. Configure Maintainerr and leave deletion actions disabled for at least one
+4. Configure Bazarr's Sonarr, Radarr, Jellyfin, subtitle-provider, and language
+   integrations as described below. Provider credentials remain out of Git.
+5. Configure Maintainerr and leave deletion actions disabled for at least one
    complete candidate cycle. Apply the pin and cleanup policy below only after
    reviewing its proposed collection.
-5. In Jellyfin, enable NVIDIA NVENC and run one real lower-bitrate transcode.
+6. In Jellyfin, enable NVIDIA NVENC and run one real lower-bitrate transcode.
    GPU discovery is already verified, but only playback exercises the complete
    FFmpeg path.
-6. Optionally forward TCP and UDP `6881` on the home router to
+7. Optionally forward TCP and UDP `6881` on the home router to
    `192.168.1.222` for better inbound peer connectivity. Do not expose port
    `8080`.
-7. On the Ubuntu workstation, run the following once with the local sudo
+8. On the Ubuntu workstation, run the following once with the local sudo
    password so Ansible confirms the already-created critical backup directory:
 
    ```bash
@@ -126,8 +132,9 @@ Restore these directories while every media Deployment has zero replicas:
 | `configs/jellyseerr` | `seerr` | Seerr performs the Jellyseerr schema migration on startup |
 
 Do not restore the old Maintainerr directory. That database had no configured
-rules and predates current Jellyfin-aware cleanup support. Start Maintainerr
-fresh. Logs, PID files, Sentry caches, and stale lockfiles are not required.
+rules and predates current Jellyfin-aware cleanup support. Bazarr was not in
+the original archive. Start both applications fresh. Logs, PID files, Sentry
+caches, and stale lockfiles are not required.
 
 ## Backup credential and verification
 
@@ -172,13 +179,48 @@ the archive and application databases. Rotate in this order so integrations do
 not silently break:
 
 1. Change the qBittorrent WebUI password, then update Sonarr and Radarr.
-2. Rotate Sonarr and Radarr API keys, then update Prowlarr, Seerr, and
+2. Rotate Sonarr and Radarr API keys, then update Prowlarr, Seerr, Bazarr, and
    Maintainerr.
 3. Rotate the Prowlarr API key after its applications have re-synced.
-4. Re-authenticate Seerr to Jellyfin and update its Arr connections.
+4. Re-authenticate Seerr to Jellyfin and update its Arr connections. Generate
+   a separate Jellyfin API key for Bazarr and update its Jellyfin integration.
 5. Reset Jellyfin user passwords and revoke obsolete devices/sessions.
 6. Re-enter or rotate external tracker credentials, cookies, and passkeys in
    Prowlarr where the provider supports rotation.
+
+## Bazarr subtitle automation
+
+Open `https://bazarr.home.547600.xyz` and complete the setup in this order:
+
+1. Enable Bazarr authentication before storing API keys or provider
+   credentials. The route is private, but every trusted LAN or tailnet client
+   can otherwise open the UI.
+2. Under **Settings > Sonarr**, enable Sonarr with address `sonarr`, port
+   `8989`, no SSL or URL base, and the current Sonarr API key.
+3. Under **Settings > Radarr**, enable Radarr with address `radarr`, port
+   `7878`, no SSL or URL base, and the current Radarr API key.
+4. Do not add path mappings. Sonarr, Radarr, and Bazarr all see movie and show
+   paths under the same `/data/media/...` hierarchy.
+5. In Jellyfin, create a dedicated Bazarr API key under **Dashboard > API
+   Keys**. Configure Bazarr's Jellyfin integration with server URL
+   `http://jellyfin:8096`, that key, and the applicable movie and TV libraries.
+   This lets Bazarr refresh Jellyfin after subtitle changes.
+6. Add only the subtitle providers you intend to use. Keep provider usernames,
+   passwords, tokens, and cookies in Bazarr's local configuration, never in
+   Git. Start with one or two providers to avoid unnecessary bans or rate
+   limits, then test each provider from Bazarr.
+7. Create the required language profile or profiles, enable automatic subtitle
+   downloading, and assign a default profile to new movies and shows. For
+   existing library entries, use Bazarr's mass editor to apply the profile;
+   setting a default does not retroactively assign it.
+8. Run a manual search on one movie and one episode. Confirm the `.srt` files
+   appear beside the video under `/data/media`, then refresh and play both in
+   Jellyfin before enabling broad automatic searches.
+
+For a bilingual library, a practical starting profile is the preferred
+language plus English as a fallback. Choose whether forced and
+hearing-impaired variants are wanted explicitly; treating them as ordinary
+subtitles tends to produce confusing duplicate tracks.
 
 ## Maintainerr cleanup policy
 
@@ -233,5 +275,5 @@ verify an encrypted backup. To roll back:
 3. Move the current state aside rather than deleting it.
 4. Restore the archive into the matching state subdirectories.
 5. Pin the exact application versions that created that archive.
-6. Start qBittorrent, Sonarr/Radarr, Prowlarr, Jellyfin, Seerr, then
+6. Start qBittorrent, Sonarr/Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, then
    Maintainerr, verifying each dependency before continuing.
