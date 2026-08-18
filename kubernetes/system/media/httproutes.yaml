@@ -116,6 +116,29 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
+  name: whisparr
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private
+      namespace: argocd
+      sectionName: private-https
+  hostnames: [whisparr.home.547600.xyz]
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: whisparr
+          port: 6969
+          weight: 1
+      matches:
+        - path: {type: PathPrefix, value: /}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
   name: bazarr
   namespace: media
 spec:
@@ -200,6 +223,7 @@ spec:
     - sonarr.home.547600.xyz
     - radarr.home.547600.xyz
     - prowlarr.home.547600.xyz
+    - whisparr.home.547600.xyz
     - bazarr.home.547600.xyz
     - qbittorrent.home.547600.xyz
     - maintainerr.home.547600.xyz

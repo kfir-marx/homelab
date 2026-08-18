@@ -2,11 +2,12 @@
 
 ## Scope and ownership
 
-Argo CD owns Jellyfin, Seerr, Sonarr, Radarr, Prowlarr, Bazarr, qBittorrent,
-FlareSolverr, Maintainerr, their routes, policies, and static PV/PVC objects
-under `kubernetes/system/media/`. Terraform owns the `gpu-3` VM data disk and
-Talos `media-state` user volume. Ansible owns the physical NFS mount/export on
-`smallgpu`; it must never format or repair the existing NTFS filesystem.
+Argo CD owns Jellyfin, Seerr, Sonarr, Radarr, Whisparr, Prowlarr, Bazarr,
+qBittorrent, FlareSolverr, Maintainerr, their routes, policies, and static
+PV/PVC objects under `kubernetes/system/media/`. Terraform owns the `gpu-3` VM
+data disk and Talos `media-state` user volume. Ansible owns the physical NFS
+mount/export on `smallgpu`; it must never format or repair the existing NTFS
+filesystem.
 
 ## Data placement
 
@@ -24,17 +25,19 @@ The shared container layout is deliberately stable:
 ├── jellybridge/
 ├── media/
 │   ├── movies/
-│   └── tv/
+│   ├── tv/
+│   └── whisparr/
 └── torrents/
-    └── incomplete/
+    ├── incomplete/
+    └── whisparr/
 ```
 
-Sonarr, Radarr, Bazarr, and qBittorrent must all receive the single `/data`
-mount. Splitting downloads and media into different mounts prevents hardlinks
-and atomic imports even when both mounts ultimately refer to the same disk.
-Bazarr needs this mount writable so downloaded subtitles can be stored beside
-the movie or episode. Do not configure Bazarr path mappings while these paths
-remain identical in all three applications.
+Sonarr, Radarr, Whisparr, Bazarr, and qBittorrent must all receive the single
+`/data` mount. Splitting downloads and media into different mounts prevents
+hardlinks and atomic imports even when both mounts ultimately refer to the same
+disk. Bazarr needs this mount writable so downloaded subtitles can be stored
+beside the movie or episode. Do not configure path mappings while these paths
+remain identical in all applications.
 
 Jellyfin receives the real media tree at `/data/media` read-only. Its
 JellyBridge plugin receives only `/data/jellybridge` as a separate writable
@@ -57,6 +60,7 @@ Administrative and request interfaces use the private Gateway:
 | Sonarr | `https://sonarr.home.547600.xyz` |
 | Radarr | `https://radarr.home.547600.xyz` |
 | Prowlarr | `https://prowlarr.home.547600.xyz` |
+| Whisparr | `https://whisparr.home.547600.xyz` |
 | Bazarr | `https://bazarr.home.547600.xyz` |
 | qBittorrent | `https://qbittorrent.home.547600.xyz` |
 | Maintainerr | `https://maintainerr.home.547600.xyz` |
@@ -92,18 +96,20 @@ out of Git and require an operator:
 3. Complete the credential rotations in the order below. The restored
    application state came from a repository that contained secret-bearing
    databases.
-4. Configure Bazarr's Sonarr, Radarr, Jellyfin, subtitle-provider, and language
+4. Configure Whisparr, qBittorrent, and its Prowlarr application/indexer sync as
+   described below. API keys and tracker credentials remain out of Git.
+5. Configure Bazarr's Sonarr, Radarr, Jellyfin, subtitle-provider, and language
    integrations as described below. Provider credentials remain out of Git.
-5. Configure Maintainerr and leave deletion actions disabled for at least one
+6. Configure Maintainerr and leave deletion actions disabled for at least one
    complete candidate cycle. Apply the pin and cleanup policy below only after
    reviewing its proposed collection.
-6. In Jellyfin, enable NVIDIA NVENC and run one real lower-bitrate transcode.
+7. In Jellyfin, enable NVIDIA NVENC and run one real lower-bitrate transcode.
    GPU discovery is already verified, but only playback exercises the complete
    FFmpeg path.
-7. Optionally forward TCP and UDP `6881` on the home router to
+8. Optionally forward TCP and UDP `6881` on the home router to
    `192.168.1.222` for better inbound peer connectivity. Do not expose port
    `8080`.
-8. On the Ubuntu workstation, run the following once with the local sudo
+9. On the Ubuntu workstation, run the following once with the local sudo
    password so Ansible confirms the already-created critical backup directory:
 
    ```bash
@@ -138,9 +144,9 @@ Restore these directories while every media Deployment has zero replicas:
 | `configs/jellyseerr` | `seerr` | Seerr performs the Jellyseerr schema migration on startup |
 
 Do not restore the old Maintainerr directory. That database had no configured
-rules and predates current Jellyfin-aware cleanup support. Bazarr was not in
-the original archive. Start both applications fresh. Logs, PID files, Sentry
-caches, and stale lockfiles are not required.
+rules and predates current Jellyfin-aware cleanup support. Bazarr and Whisparr
+were not in the original archive. Start all three applications fresh. Logs,
+PID files, Sentry caches, and stale lockfiles are not required.
 
 ## Backup credential and verification
 
@@ -184,15 +190,44 @@ Treat every restored secret as compromised because the old repository tracks
 the archive and application databases. Rotate in this order so integrations do
 not silently break:
 
-1. Change the qBittorrent WebUI password, then update Sonarr and Radarr.
+1. Change the qBittorrent WebUI password, then update Sonarr, Radarr, and
+   Whisparr.
 2. Rotate Sonarr and Radarr API keys, then update Prowlarr, Seerr, Bazarr, and
    Maintainerr.
-3. Rotate the Prowlarr API key after its applications have re-synced.
-4. Re-authenticate Seerr to Jellyfin and update its Arr connections. Generate
+3. Rotate the Whisparr API key, update its Prowlarr application, and force an
+   application sync.
+4. Rotate the Prowlarr API key after its applications have re-synced.
+5. Re-authenticate Seerr to Jellyfin and update its Arr connections. Generate
    a separate Jellyfin API key for Bazarr and update its Jellyfin integration.
-5. Reset Jellyfin user passwords and revoke obsolete devices/sessions.
-6. Re-enter or rotate external tracker credentials, cookies, and passkeys in
+6. Reset Jellyfin user passwords and revoke obsolete devices/sessions.
+7. Re-enter or rotate external tracker credentials, cookies, and passkeys in
    Prowlarr where the provider supports rotation.
+
+## Whisparr and Prowlarr indexer sync
+
+Open `https://whisparr.home.547600.xyz` and complete the setup in this order:
+
+1. Enable Whisparr authentication before adding API keys or download-client
+   credentials. Set its root folder to `/data/media/whisparr`.
+2. Under **Settings > Download Clients**, add qBittorrent at
+   `http://qbittorrent:8080` with category `whisparr`. In qBittorrent, make the
+   matching category save to `/data/torrents/whisparr`. No remote path mapping
+   is needed because both applications use the same `/data` mount.
+3. Copy the Whisparr API key from **Settings > General**. In Prowlarr, open
+   **Settings > Apps**, add a Whisparr application, and use Prowlarr server URL
+   `http://prowlarr:9696`, application server URL `http://whisparr:6969`, and
+   that API key. Use **Full Sync** so Prowlarr remains the owner of the synced
+   indexer definitions.
+4. Create a Prowlarr tag such as `whisparr`, apply it to the Whisparr app and
+   only to indexers intended for it, and select the applicable adult/XXX sync
+   categories in the app's advanced settings. An indexer is synced only when
+   its advertised categories overlap the application's sync categories.
+5. Test each selected indexer in Prowlarr, test and save the Whisparr app, then
+   run **Sync App Indexers**. Confirm the resulting `(Prowlarr)` entries appear
+   and pass tests under Whisparr's **Settings > Indexers**.
+6. Run an interactive search in Whisparr before enabling RSS or automatic
+   searches. Keep indexer credentials, cookies, passkeys, and both application
+   API keys in their retained state databases, never in manifests.
 
 ## Bazarr subtitle automation
 
@@ -295,5 +330,5 @@ verify an encrypted backup. To roll back:
 3. Move the current state aside rather than deleting it.
 4. Restore the archive into the matching state subdirectories.
 5. Pin the exact application versions that created that archive.
-6. Start qBittorrent, Sonarr/Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, then
-   Maintainerr, verifying each dependency before continuing.
+6. Start qBittorrent, Sonarr/Radarr/Whisparr, Prowlarr, Bazarr, Jellyfin,
+   Seerr, then Maintainerr, verifying each dependency before continuing.

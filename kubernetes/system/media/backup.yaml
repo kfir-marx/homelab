@@ -73,6 +73,7 @@ spec:
                   backup_db /state/sonarr/sonarr.db sonarr/sonarr.db
                   backup_db /state/radarr/radarr.db radarr/radarr.db
                   backup_db /state/prowlarr/prowlarr.db prowlarr/prowlarr.db
+                  backup_db /state/whisparr/whisparr.db whisparr/whisparr.db
                   backup_db /state/bazarr/db/bazarr.db bazarr/db/bazarr.db
                   backup_db /state/seerr/db/db.sqlite3 seerr/db/db.sqlite3
                   backup_db /state/maintainerr/maintainerr.db maintainerr/maintainerr.db

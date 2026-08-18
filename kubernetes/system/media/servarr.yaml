@@ -175,6 +175,93 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: whisparr
+  namespace: media
+  labels:
+    app: whisparr
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: whisparr
+  template:
+    metadata:
+      labels:
+        app: whisparr
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-state
+          image: busybox:1.37.0
+          command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/whisparr"]
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, FOWNER]
+          volumeMounts:
+            - name: state
+              mountPath: /state
+      containers:
+        - name: whisparr
+          image: ghcr.io/thespad/whisparr:v3.3.8-release.1097-spad46
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: media-config
+          ports:
+            - name: http
+              containerPort: 6969
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: state
+              mountPath: /config
+              subPath: whisparr
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: media-state
+        - name: data
+          persistentVolumeClaim:
+            claimName: media-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whisparr
+  namespace: media
+spec:
+  selector:
+    app: whisparr
+  ports:
+    - name: http
+      port: 6969
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: prowlarr
   namespace: media
   labels:

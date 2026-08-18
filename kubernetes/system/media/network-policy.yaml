@@ -47,6 +47,7 @@ spec:
           - sonarr
           - radarr
           - prowlarr
+          - whisparr
           - bazarr
           - qbittorrent
           - maintainerr
@@ -60,6 +61,7 @@ spec:
             - {port: "8989", protocol: TCP}
             - {port: "7878", protocol: TCP}
             - {port: "9696", protocol: TCP}
+            - {port: "6969", protocol: TCP}
             - {port: "6767", protocol: TCP}
             - {port: "8080", protocol: TCP}
             - {port: "6246", protocol: TCP}

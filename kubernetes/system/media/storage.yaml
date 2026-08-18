@@ -60,8 +60,8 @@ spec:
   volumeName: media-state-pv
 ---
 # A single filesystem and a single /data mount preserve hardlinks and atomic
-# imports between qBittorrent, Sonarr, and Radarr, while allowing Bazarr to
-# store subtitle files beside the media.
+# imports between qBittorrent and the Arr applications, while allowing Bazarr
+# to store subtitle files beside the media.
 apiVersion: v1
 kind: PersistentVolume
 metadata:
