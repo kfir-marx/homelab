@@ -46,7 +46,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api
-          image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          image: ghcr.io/kfir-marx/homelab-job-assistant:sha-b068345a612f26cbf8f99a10ae78d085c1801c56
           imagePullPolicy: IfNotPresent
           args: [api]
           env:
@@ -118,7 +118,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: telegram
-          image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          image: ghcr.io/kfir-marx/homelab-job-assistant:sha-b068345a612f26cbf8f99a10ae78d085c1801c56
           imagePullPolicy: IfNotPresent
           args: [telegram]
           env:
@@ -188,7 +188,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: worker
-          image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          image: ghcr.io/kfir-marx/homelab-job-assistant:sha-b068345a612f26cbf8f99a10ae78d085c1801c56
           imagePullPolicy: IfNotPresent
           args: [worker]
           env:
@@ -305,7 +305,7 @@ spec:
               readOnly: true
       containers:
         - name: generation
-          image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          image: ghcr.io/kfir-marx/homelab-job-assistant:sha-b068345a612f26cbf8f99a10ae78d085c1801c56
           imagePullPolicy: IfNotPresent
           args: [generation-worker]
           env:
