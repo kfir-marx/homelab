@@ -123,6 +123,11 @@ The controller uses the `immediate` update strategy. With a one-runner maximum,
 this avoids an `eventual` rollout waiting indefinitely for a broken Pending
 runner to finish.
 
+Keep `runnerMaxConcurrentReconciles` at `1` while this deployment has a single
+runner scale set. A higher value allowed overlapping reconciliations to create
+two `EphemeralRunnerSet` resources for the same generation; ARC then marked the
+newly registered runner `Outdated` and deleted it before it could claim a job.
+
 ## Rotation and upgrades
 
 Rotate the fine-grained token before it expires: create a replacement in

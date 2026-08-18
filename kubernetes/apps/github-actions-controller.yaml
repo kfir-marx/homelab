@@ -20,6 +20,11 @@ spec:
       valuesObject:
         flags:
           logLevel: info
+          # A single scale set must be reconciled serially. With the chart's
+          # default of two, duplicate EphemeralRunnerSets were created in the
+          # same reconciliation window and ARC immediately retired the runner
+          # it had just registered as Outdated.
+          runnerMaxConcurrentReconciles: 1
           # This pool is capped at one runner. Apply template fixes immediately
           # so a broken Pending runner cannot block an eventual rollout.
           updateStrategy: immediate
