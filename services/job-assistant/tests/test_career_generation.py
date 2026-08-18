@@ -1,5 +1,5 @@
-import json
 import os
+import shlex
 from pathlib import Path
 
 import pytest
@@ -82,12 +82,29 @@ def test_codex_provider_uses_ephemeral_read_only_schema_mode(tmp_path: Path) -> 
     executable = tmp_path / "fake-codex"
     output = result(["fact-1"]).model_dump_json()
     executable.write_text(
-        "#!/usr/bin/env python3\n"
-        "import pathlib,sys\n"
-        "args=sys.argv\n"
-        "assert '--ephemeral' in args and 'read-only' in args and '--output-schema' in args\n"
-        "assert 'web_search=\"disabled\"' in args\n"
-        f"pathlib.Path(args[args.index('--output-last-message')+1]).write_text({json.dumps(output)})\n",
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "saw_ephemeral=false\n"
+        "saw_read_only=false\n"
+        "saw_schema=false\n"
+        "saw_web_search=false\n"
+        "output_path=\n"
+        'while [ "$#" -gt 0 ]; do\n'
+        '  case "$1" in\n'
+        "    --ephemeral) saw_ephemeral=true ;;\n"
+        "    read-only) saw_read_only=true ;;\n"
+        '    --output-schema) shift; test -f "$1"; saw_schema=true ;;\n'
+        '    --output-last-message) shift; output_path="$1" ;;\n'
+        '    --config) shift; test "$1" = \'web_search="disabled"\'; saw_web_search=true ;;\n'
+        "  esac\n"
+        "  shift\n"
+        "done\n"
+        'test "$saw_ephemeral" = true\n'
+        'test "$saw_read_only" = true\n'
+        'test "$saw_schema" = true\n'
+        'test "$saw_web_search" = true\n'
+        'test -n "$output_path"\n'
+        f"printf '%s' {shlex.quote(output)} > \"$output_path\"\n",
         encoding="utf-8",
     )
     os.chmod(executable, 0o700)
