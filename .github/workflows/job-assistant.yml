@@ -34,7 +34,7 @@ jobs:
     outputs:
       release: ${{ steps.release.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Detect service or release-workflow changes
@@ -45,15 +45,20 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           release=false
+          changed_file="${RUNNER_TEMP}/job-assistant-release-files.txt"
           if [[ "${EVENT_NAME}" == "push" ]]; then
             if [[ "${BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
               release=true
-            elif git diff --name-only "${BEFORE_SHA}" "${CURRENT_SHA}" -- \
+            else
+              git diff --name-only "${BEFORE_SHA}" "${CURRENT_SHA}" -- \
               services/job-assistant \
-              .github/workflows/job-assistant.yml | rg --quiet '.'; then
-              release=true
+              .github/workflows/job-assistant.yml >"${changed_file}"
+              if [[ -s "${changed_file}" ]]; then
+                release=true
+              fi
             fi
           fi
+          echo "release decision: ${release}"
           echo "release=${release}" >>"${GITHUB_OUTPUT}"
 
   python:
@@ -74,8 +79,8 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -97,8 +102,8 @@ jobs:
     name: "Render manifests"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-kubectl@v4
+      - uses: actions/checkout@v6
+      - uses: azure/setup-kubectl@v5
         with:
           version: v1.33.0
       - name: Render application resources
@@ -137,16 +142,16 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: services/job-assistant
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -167,7 +172,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: main
       - name: Pin the published image tag
@@ -179,13 +184,13 @@ jobs:
             kubernetes/system/job-assistant/migrate.yaml
             kubernetes/system/job-assistant/workloads.yaml
           )
-          before_count="$(rg --only-matching \
+          before_count="$(grep --extended-regexp --only-matching --no-filename \
             "image: ${IMAGE_NAME}:[^[:space:]]+" "${manifests[@]}" | wc --lines)"
           test "${before_count}" -eq 6
           sed --in-place --regexp-extended \
             "s|(image: ${IMAGE_NAME}:)[^[:space:]]+|\\1${IMAGE_TAG}|" \
             "${manifests[@]}"
-          after_count="$(rg --only-matching \
+          after_count="$(grep --fixed-strings --only-matching --no-filename \
             "image: ${IMAGE_NAME}:${IMAGE_TAG}" "${manifests[@]}" | wc --lines)"
           test "${after_count}" -eq 6
       - name: Create or update the release PR
