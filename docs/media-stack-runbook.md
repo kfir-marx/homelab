@@ -21,6 +21,7 @@ The shared container layout is deliberately stable:
 
 ```text
 /data/
+├── jellybridge/
 ├── media/
 │   ├── movies/
 │   └── tv/
@@ -34,6 +35,11 @@ and atomic imports even when both mounts ultimately refer to the same disk.
 Bazarr needs this mount writable so downloaded subtitles can be stored beside
 the movie or episode. Do not configure Bazarr path mappings while these paths
 remain identical in all three applications.
+
+Jellyfin receives the real media tree at `/data/media` read-only. Its
+JellyBridge plugin receives only `/data/jellybridge` as a separate writable
+mount for generated discovery-library content; Seerr does not need this
+filesystem mount because JellyBridge reaches it over the internal HTTP API.
 
 The backing NTFS filesystem exposes fixed `root:root` ownership. Ansible keeps
 the declared media directories at mode `0777` so the UID-mapped media pods can
@@ -221,6 +227,20 @@ For a bilingual library, a practical starting profile is the preferred
 language plus English as a fallback. Choose whether forced and
 hearing-impaired variants are wanted explicitly; treating them as ordinary
 subtitles tends to produce confusing duplicate tracks.
+
+## JellyBridge discovery and requests
+
+Configure JellyBridge with Seerr URL `http://seerr:5055`, a Seerr API key, and
+library directory `/data/jellybridge`. The directory is persistent but
+replaceable bulk data and is deliberately isolated from the read-only movie and
+TV mount.
+
+Use JellyBridge's library setup action or create the Jellyfin discovery library
+against `/data/jellybridge`. In Seerr, exclude or disable that discovery library
+from availability scans so generated placeholders are not treated as already
+downloaded media. Test the Seerr connection, run one manual discovery sync, and
+confirm the generated entries appear in Jellyfin before enabling scheduled
+syncs.
 
 ## Maintainerr cleanup policy
 

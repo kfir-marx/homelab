@@ -114,6 +114,15 @@ and no-privilege-escalation settings. The controller must also exclude
 Argo CD adopts and prunes ARC's dynamically generated listener and runner
 resources, causing a delete/recreate loop.
 
+The runner container also sets numeric UID `1001`, matching the `runner` user
+in GitHub's official image. Retain that value while using the upstream image:
+with only `runAsNonRoot: true`, kubelet cannot verify a named image user and
+leaves the pod in `CreateContainerConfigError`.
+
+The controller uses the `immediate` update strategy. With a one-runner maximum,
+this avoids an `eventual` rollout waiting indefinitely for a broken Pending
+runner to finish.
+
 ## Rotation and upgrades
 
 Rotate the fine-grained token before it expires: create a replacement in

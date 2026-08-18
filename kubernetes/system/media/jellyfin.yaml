@@ -30,7 +30,9 @@ spec:
           command:
             - sh
             - -ec
-            - install -d -o 1000 -g 1000 -m 0770 /state/jellyfin
+            - |
+              install -d -o 1000 -g 1000 -m 0770 /state/jellyfin
+              chmod 0777 /jellybridge
           securityContext:
             runAsUser: 0
             allowPrivilegeEscalation: false
@@ -43,6 +45,9 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /state
+            - name: data
+              mountPath: /jellybridge
+              subPath: jellybridge
       containers:
         - name: jellyfin
           image: jellyfin/jellyfin:10.11.11
@@ -104,6 +109,9 @@ spec:
               mountPath: /data/media
               subPath: media
               readOnly: true
+            - name: data
+              mountPath: /data/jellybridge
+              subPath: jellybridge
             - name: cache
               mountPath: /cache
       volumes:

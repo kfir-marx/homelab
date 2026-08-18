@@ -20,7 +20,9 @@ spec:
       valuesObject:
         flags:
           logLevel: info
-          updateStrategy: eventual
+          # This pool is capped at one runner. Apply template fixes immediately
+          # so a broken Pending runner cannot block an eventual rollout.
+          updateStrategy: immediate
           # ARC-generated listener and runner resources must not inherit Argo
           # CD's tracking label or Argo will treat them as chart resources and
           # continuously prune them.
