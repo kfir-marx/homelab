@@ -21,6 +21,11 @@ spec:
         flags:
           logLevel: info
           updateStrategy: eventual
+          # ARC-generated listener and runner resources must not inherit Argo
+          # CD's tracking label or Argo will treat them as chart resources and
+          # continuously prune them.
+          excludeLabelPropagationPrefixes:
+            - argocd.argoproj.io/instance
         resources:
           requests:
             cpu: 50m

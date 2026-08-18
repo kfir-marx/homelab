@@ -96,6 +96,24 @@ Remove the variable to fall back to GitHub-hosted capacity during a cluster
 outage. Setting both `minRunners` and `maxRunners` to zero drains the scale set
 without changing workflow routing; jobs remain queued until capacity returns.
 
+## Queued jobs with no runner pod
+
+If GitHub shows jobs queued for `homelab` but no runner pod appears, verify the
+listener before investigating runner scheduling:
+
+```bash
+kubectl --kubeconfig kubeconfig.yaml -n arc-systems get pods
+kubectl --kubeconfig kubeconfig.yaml -n arc-systems \
+  logs deployment/arc-gha-rs-controller --since=10m
+```
+
+The `arc-systems` namespace enforces the restricted Pod Security profile, so
+the listener template must retain its non-root, seccomp, dropped-capabilities,
+and no-privilege-escalation settings. The controller must also exclude
+`argocd.argoproj.io/instance` from label propagation. Without that exclusion,
+Argo CD adopts and prunes ARC's dynamically generated listener and runner
+resources, causing a delete/recreate loop.
+
 ## Rotation and upgrades
 
 Rotate the fine-grained token before it expires: create a replacement in

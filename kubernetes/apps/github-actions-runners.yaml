@@ -45,6 +45,10 @@ spec:
 
           listenerTemplate:
             spec:
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
               tolerations:
                 - key: nvidia.com/gpu
                   operator: Equal
@@ -52,6 +56,11 @@ spec:
                   effect: NoSchedule
               containers:
                 - name: listener
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    capabilities:
+                      drop:
+                        - ALL
                   resources:
                     requests:
                       cpu: 25m
