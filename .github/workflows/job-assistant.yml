@@ -1,6 +1,7 @@
 name: "Job Assistant"
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "services/job-assistant/**"
