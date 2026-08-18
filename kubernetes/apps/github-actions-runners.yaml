@@ -1,0 +1,108 @@
+# One repository-scoped, scale-to-zero runner set for this repository. The
+# installation/release name "homelab" is also the workflow `runs-on` label.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: github-actions-runners
+  namespace: argocd
+  annotations:
+    # Install the controller and its CRDs before rendering the scale set.
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/kfir-marx/homelab.git
+      targetRevision: main
+      path: kubernetes/system/github-actions-runners
+    - repoURL: ghcr.io/actions/actions-runner-controller-charts
+      chart: gha-runner-scale-set
+      targetRevision: 0.14.2
+      helm:
+        releaseName: homelab
+        valuesObject:
+          githubConfigUrl: https://github.com/kfir-marx/homelab
+          githubConfigSecret: github-actions-runner-auth
+          runnerScaleSetName: homelab
+
+          # Avoid idle compute and prevent CI from exhausting the 8 GiB mixed
+          # worker when the larger GPU worker is unavailable.
+          minRunners: 0
+          maxRunners: 1
+
+          # Existing workflows use service containers and Buildx, which require
+          # Docker-in-Docker. This makes the dind sidecar privileged; the runner
+          # namespace is therefore a deliberate privileged trust boundary.
+          containerMode:
+            type: dind
+
+          # Argo CD renders Helm without live-cluster lookup, so identify the
+          # controller service account explicitly.
+          controllerServiceAccount:
+            namespace: arc-systems
+            name: arc-gha-rs-controller
+
+          listenerTemplate:
+            spec:
+              tolerations:
+                - key: nvidia.com/gpu
+                  operator: Equal
+                  value: "true"
+                  effect: NoSchedule
+              containers:
+                - name: listener
+                  resources:
+                    requests:
+                      cpu: 25m
+                      memory: 64Mi
+                    limits:
+                      cpu: 250m
+                      memory: 256Mi
+
+          template:
+            spec:
+              tolerations:
+                - key: nvidia.com/gpu
+                  operator: Equal
+                  value: "true"
+                  effect: NoSchedule
+              containers:
+                - name: runner
+                  image: ghcr.io/actions/actions-runner:2.334.0
+                  command:
+                    - /home/runner/run.sh
+                  resources:
+                    requests:
+                      cpu: 500m
+                      memory: 512Mi
+                      ephemeral-storage: 1Gi
+                    limits:
+                      cpu: "2"
+                      memory: 2Gi
+                      ephemeral-storage: 5Gi
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    capabilities:
+                      drop:
+                        - ALL
+                    runAsNonRoot: true
+                    seccompProfile:
+                      type: RuntimeDefault
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: github-actions-runners
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    managedNamespaceMetadata:
+      labels:
+        # Required only for the chart-generated privileged dind sidecar.
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: restricted
+        pod-security.kubernetes.io/warn: restricted
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true

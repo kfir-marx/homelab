@@ -30,7 +30,7 @@ env:
 jobs:
   changes:
     name: "Detect releasable changes"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     outputs:
       release: ${{ steps.release.outputs.release }}
     steps:
@@ -63,7 +63,7 @@ jobs:
 
   python:
     name: "Lint, type, test, migrate"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     services:
       postgres:
         image: postgres:17.6-bookworm
@@ -100,7 +100,7 @@ jobs:
 
   manifests:
     name: "Render manifests"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
       - uses: azure/setup-kubectl@v5
@@ -137,7 +137,7 @@ jobs:
       needs.manifests.result == 'success' &&
       (github.event_name == 'pull_request' || needs.changes.outputs.release == 'true')
     needs: [changes, python, manifests]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -167,7 +167,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       needs.changes.outputs.release == 'true'
     needs: [changes, container]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     permissions:
       contents: write
       pull-requests: write

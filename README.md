@@ -31,7 +31,7 @@ explicit recovery procedures, and documented trade-offs.
 | **Accelerators** | NVIDIA RTX 3080 and RTX 2060 passed through to Talos VMs |
 | **Storage** | 10 TB bulk tier, 800 GB critical-data tier, and disposable local GPU scratch |
 | **Networking** | Cilium CNI, Gateway API, LAN load-balancer IPs, Tailscale, and Cloudflare Tunnel |
-| **Delivery** | Terraform/Terragrunt for infrastructure and Argo CD for continuous reconciliation |
+| **Delivery** | Self-hosted GitHub Actions runners, Terraform/Terragrunt, and Argo CD reconciliation |
 | **Operations** | Ansible-managed hosts, Prometheus, Alertmanager, Grafana, runbooks, and PR plans |
 
 ## Architecture
@@ -119,8 +119,8 @@ makes failures easier to reason about.
   do not format disks, serialize changes, and keep reboots explicit. Static
   Kubernetes volumes use the `Retain` policy.
 - **Pull requests show infrastructure impact.** CI checks formatting, runs a
-  security scan, and posts Terragrunt plans; Atlantis requires an approved,
-  mergeable PR before apply.
+  security scan, and posts Terragrunt plans on ephemeral in-cluster runners;
+  Atlantis requires an approved, mergeable PR before apply.
 - **Recovery knowledge lives beside the code.** Operational runbooks document
   enrollment, verification, failure modes, and recovery rather than relying on
   memory.

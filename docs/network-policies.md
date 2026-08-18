@@ -73,6 +73,10 @@ these policies do not change the critical/bulk storage paths.
 - `argocd`, `cert-manager`, `gpu-operator`, and `kube-system` are bootstrap or
   platform namespaces. Their chart-generated API, webhook, node, and registry
   flows must be observed and staged separately before default-deny is safe.
+- `arc-systems` and `github-actions-runners` are platform exceptions. ARC needs
+  the Kubernetes API and GitHub endpoints, while runner jobs may fetch actions,
+  packages, tools, and workflow-selected registries. The privileged runner
+  namespace is repository-scoped and documented in the runner runbook.
 - Public CIDR rules are IPv4-only because this cluster is currently IPv4-only.
   Add equivalent IPv6 policy before enabling IPv6 pod or service networking.
 

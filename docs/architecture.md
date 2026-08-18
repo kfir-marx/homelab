@@ -636,6 +636,19 @@ checks and plans both Proxmox-backed Terraform stacks.
 
 The plan job depends on lint + security passing first.
 
+All workflows select `${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}`. During
+bootstrap or a cluster outage, an absent `RUNNER_LABEL` uses GitHub-hosted
+capacity. In normal operation the repository variable is `homelab`, which
+routes jobs to the Argo-managed Actions Runner Controller scale set.
+
+ARC `0.14.2` runs in `arc-systems`; ephemeral job pods run separately in
+`github-actions-runners`. The scale set has zero idle runners and a concurrency
+cap of one to protect the smaller mixed worker. Docker-in-Docker is enabled
+because current workflows require service containers and Buildx, making this a
+deliberate privileged workload boundary. Authentication, rollout, rotation,
+and the trust restrictions are in
+[`github-actions-runners-runbook.md`](github-actions-runners-runbook.md).
+
 ### Atlantis (`atlantis.yaml`)
 
 Atlantis provides the PR-driven plan/apply workflow:

@@ -1,0 +1,62 @@
+# GitHub's Actions Runner Controller. The controller is kept separate from the
+# untrusted, ephemeral runner pods as recommended by GitHub.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: github-actions-controller
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ghcr.io/actions/actions-runner-controller-charts
+    chart: gha-runner-scale-set-controller
+    targetRevision: 0.14.2
+    helm:
+      releaseName: arc
+      valuesObject:
+        flags:
+          logLevel: info
+          updateStrategy: eventual
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        # Terraform currently leaves both GPU workers untainted. Keep this
+        # toleration so ARC remains schedulable if gpu-2's documented dedicated
+        # taint is re-enabled; no ARC pod requests a GPU resource.
+        tolerations:
+          - key: nvidia.com/gpu
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-systems
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    managedNamespaceMetadata:
+      labels:
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/audit: restricted
+        pod-security.kubernetes.io/warn: restricted
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true

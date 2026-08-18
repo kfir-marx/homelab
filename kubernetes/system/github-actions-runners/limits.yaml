@@ -1,0 +1,21 @@
+# The ARC chart does not assign resources to its injected Docker-in-Docker
+# sidecar. Admission defaults keep that privileged container bounded without
+# copying and owning the chart's generated Pod template.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: github-actions-container-defaults
+  namespace: github-actions-runners
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 256Mi
+        ephemeral-storage: 1Gi
+      default:
+        cpu: "4"
+        memory: 4Gi
+        ephemeral-storage: 30Gi
