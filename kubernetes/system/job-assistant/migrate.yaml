@@ -27,6 +27,7 @@ spec:
       containers:
         - name: migrate
           image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          imagePullPolicy: IfNotPresent
           args: [migrate]
           env:
             - name: JOB_ASSISTANT_DATABASE_URL

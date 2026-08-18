@@ -8,13 +8,16 @@ Telegram uses long polling and the API is a private ClusterIP.
 ## 1. Build and publish the image
 
 CI verifies Python 3.12 linting, typing, tests, a disposable PostgreSQL
-migration/queue integration test, and the container build. Publish version
-`0.1.0` to `ghcr.io/kfir-marx/homelab-job-assistant`, then preferably replace
-the tag in every manifest with the registry's immutable digest before syncing.
+migration/queue integration test, and the container build. Pull requests build
+without publishing. When service or release-workflow changes land on `main`, a
+successful run publishes the immutable `sha-<git-sha>` tag to
+`ghcr.io/kfir-marx/homelab-job-assistant` and opens a release PR that pins all
+six workload references to that tag.
 
 ```bash
-docker build -t ghcr.io/kfir-marx/homelab-job-assistant:0.1.0 services/job-assistant
-docker push ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+release_sha="$(git rev-parse HEAD)"
+docker build -t "ghcr.io/kfir-marx/homelab-job-assistant:sha-${release_sha}" services/job-assistant
+docker push "ghcr.io/kfir-marx/homelab-job-assistant:sha-${release_sha}"
 ```
 
 The Dockerfile pins its Codex CLI version. Before an upgrade, read the current
@@ -163,13 +166,30 @@ metrics and Telegram; they never retry indefinitely.
 
 ## 6. Verify and deploy through GitOps
 
-Static validation does not contact the cluster:
+Static validation does not contact the cluster. `kubectl apply --dry-run=client`
+still performs API discovery, so CI uses kubeconform for offline OpenAPI schema
+validation and ignores only schemas for CRDs that are not bundled with the
+Kubernetes schema set:
 
 ```bash
 kubectl kustomize kubernetes/system/job-assistant >/tmp/job-assistant.yaml
-kubectl apply --dry-run=client --validate=false -f /tmp/job-assistant.yaml
-kubectl apply --dry-run=client --validate=false -f kubernetes/apps/job-assistant.yaml
+kubeconform -ignore-missing-schemas -kubernetes-version 1.33.0 -strict -summary \
+  /tmp/job-assistant.yaml kubernetes/apps/job-assistant.yaml
 ```
+
+In repository **Settings → Actions → General → Workflow permissions**, enable
+**Allow GitHub Actions to create and approve pull requests**. The release job
+uses only the scoped `GITHUB_TOKEN` with `contents: write` and
+`pull-requests: write`; it needs no cluster, Tailscale, or Argo CD credential.
+GitHub may require a maintainer to approve the generated PR's workflow run.
+
+The fixed `automation/job-assistant-image` branch means a newer successful
+release updates the existing open release PR instead of creating a queue of
+stale PRs. Merging the reviewed PR changes the Deployment pod templates and
+lets automated Argo CD reconciliation run the migration hook and perform the
+rollout. A manifest-only release-PR merge does not publish another image, so
+the flow cannot recursively create release PRs. Main-branch workflow
+concurrency also prevents releases from being published out of order.
 
 After reviewing, commit and push normally. The root Argo CD app discovers
 `kubernetes/apps/job-assistant.yaml`. Watch, but do not manually mutate, the

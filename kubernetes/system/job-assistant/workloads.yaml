@@ -47,6 +47,7 @@ spec:
       containers:
         - name: api
           image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          imagePullPolicy: IfNotPresent
           args: [api]
           env:
             - name: JOB_ASSISTANT_DATABASE_URL
@@ -118,6 +119,7 @@ spec:
       containers:
         - name: telegram
           image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          imagePullPolicy: IfNotPresent
           args: [telegram]
           env:
             - name: JOB_ASSISTANT_DATABASE_URL
@@ -187,6 +189,7 @@ spec:
       containers:
         - name: worker
           image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          imagePullPolicy: IfNotPresent
           args: [worker]
           env:
             - name: JOB_ASSISTANT_DATABASE_URL
@@ -303,6 +306,7 @@ spec:
       containers:
         - name: generation
           image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+          imagePullPolicy: IfNotPresent
           args: [generation-worker]
           env:
             - name: JOB_ASSISTANT_DATABASE_URL

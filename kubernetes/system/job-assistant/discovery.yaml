@@ -33,6 +33,7 @@ spec:
           containers:
             - name: discover
               image: ghcr.io/kfir-marx/homelab-job-assistant:0.1.0
+              imagePullPolicy: IfNotPresent
               args: [discover]
               env:
                 - name: JOB_ASSISTANT_DATABASE_URL
