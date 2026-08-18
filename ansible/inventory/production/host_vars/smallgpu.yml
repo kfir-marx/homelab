@@ -37,6 +37,9 @@ nfs_server_directories:
   - path: /mnt/data10tb/media/media/tv
     mount_point: /mnt/data10tb
     mode: "0777"
+  - path: /mnt/data10tb/media/media/whisparr
+    mount_point: /mnt/data10tb
+    mode: "0777"
   - path: /mnt/data10tb/media/jellybridge
     mount_point: /mnt/data10tb
     mode: "0777"
@@ -44,6 +47,9 @@ nfs_server_directories:
     mount_point: /mnt/data10tb
     mode: "0777"
   - path: /mnt/data10tb/media/torrents/incomplete
+    mount_point: /mnt/data10tb
+    mode: "0777"
+  - path: /mnt/data10tb/media/torrents/whisparr
     mount_point: /mnt/data10tb
     mode: "0777"
   - path: /mnt/data10tb/proxmox-backups/from-largegpu
