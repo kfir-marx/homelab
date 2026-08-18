@@ -119,6 +119,12 @@ in GitHub's official image. Retain that value while using the upstream image:
 with only `runAsNonRoot: true`, kubelet cannot verify a named image user and
 leaves the pod in `CreateContainerConfigError`.
 
+ARC disables in-place runner updates for ephemeral runners. If the runner
+container exits with code `7` and the controller marks it `Outdated`, update
+the pinned `actions-runner` image to GitHub's current runner release. An
+outdated runner can become Ready briefly before GitHub rejects it, after which
+ARC deletes the runner, listener, and scale set while queued jobs remain.
+
 The controller uses the `immediate` update strategy. With a one-runner maximum,
 this avoids an `eventual` rollout waiting indefinitely for a broken Pending
 runner to finish.
