@@ -33,6 +33,22 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /state
+        - name: configure-qbittorrent
+          image: busybox:1.37.0
+          command: [sh, /settings/reconcile.sh]
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, FOWNER]
+          volumeMounts:
+            - name: state
+              mountPath: /config
+              subPath: qbittorrent
+            - name: qbittorrent-settings
+              mountPath: /settings
+              readOnly: true
       containers:
         - name: qbittorrent
           image: lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.13-ls469
@@ -44,16 +60,16 @@ spec:
             - name: WEBUI_PORT
               value: "8080"
             - name: TORRENTING_PORT
-              value: "6881"
+              value: "51413"
           ports:
             - name: web
               containerPort: 8080
               protocol: TCP
             - name: bittorrent-tcp
-              containerPort: 6881
+              containerPort: 51413
               protocol: TCP
             - name: bittorrent-udp
-              containerPort: 6881
+              containerPort: 51413
               protocol: UDP
           readinessProbe:
             tcpSocket:
@@ -82,6 +98,10 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: media-data
+        - name: qbittorrent-settings
+          configMap:
+            name: qbittorrent-settings
+            defaultMode: 0755
 ---
 apiVersion: v1
 kind: Service
@@ -98,7 +118,7 @@ spec:
       targetPort: web
 ---
 # A stable LAN address for peer traffic. Internet reachability additionally
-# requires a router port-forward to 192.168.1.222:6881 TCP+UDP.
+# requires a router port-forward to 192.168.1.222:51413 TCP+UDP.
 apiVersion: v1
 kind: Service
 metadata:
@@ -113,10 +133,10 @@ spec:
     app: qbittorrent
   ports:
     - name: bittorrent-tcp
-      port: 6881
+      port: 51413
       targetPort: bittorrent-tcp
       protocol: TCP
     - name: bittorrent-udp
-      port: 6881
+      port: 51413
       targetPort: bittorrent-udp
       protocol: UDP

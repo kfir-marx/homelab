@@ -65,7 +65,7 @@ Administrative and request interfaces use the private Gateway:
 | qBittorrent | `https://qbittorrent.home.547600.xyz` |
 | Maintainerr | `https://maintainerr.home.547600.xyz` |
 
-qBittorrent peer traffic uses `192.168.1.222:6881` TCP and UDP. Forward that
+qBittorrent peer traffic uses `192.168.1.222:51413` TCP and UDP. Forward that
 port on the home router only if inbound peer reachability is desired. Never
 forward the WebUI port.
 
@@ -106,8 +106,8 @@ out of Git and require an operator:
 7. In Jellyfin, enable NVIDIA NVENC and run one real lower-bitrate transcode.
    GPU discovery is already verified, but only playback exercises the complete
    FFmpeg path.
-8. Optionally forward TCP and UDP `6881` on the home router to
-   `192.168.1.222` for better inbound peer connectivity. Do not expose port
+8. Forward WAN TCP and UDP `51413` on the home router to
+   `192.168.1.222:51413` for inbound peer connectivity. Do not expose port
    `8080`.
 9. On the Ubuntu workstation, run the following once with the local sudo
    password so Ansible confirms the already-created critical backup directory:
@@ -219,7 +219,7 @@ Open `https://whisparr.home.547600.xyz` and complete the setup in this order:
    that API key. Use **Full Sync** so Prowlarr remains the owner of the synced
    indexer definitions.
 4. Create a Prowlarr tag such as `whisparr`, apply it to the Whisparr app and
-   only to indexers intended for it, and select the applicable adult/XXX sync
+   only to indexers intended for it, and select the applicable private sync
    categories in the app's advanced settings. An indexer is synced only when
    its advertised categories overlap the application's sync categories.
 5. Test each selected indexer in Prowlarr, test and save the Whisparr app, then
