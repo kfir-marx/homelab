@@ -19,3 +19,5 @@ configMapGenerator:
   - name: qbittorrent-settings
     files:
       - reconcile.sh=qbittorrent-settings.sh
+    options:
+      disableNameSuffixHash: true
