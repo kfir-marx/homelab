@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+from typing import Annotated
+
 from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -10,7 +13,9 @@ class Settings(BaseSettings):
     )
 
     telegram_token: SecretStr
-    telegram_allowed_user_ids: frozenset[int] = Field(default_factory=frozenset)
+    telegram_allowed_user_ids: Annotated[frozenset[int], NoDecode] = Field(
+        default_factory=frozenset
+    )
     llm_base_url: str = "http://llm:8000/v1"
     llm_api_key: SecretStr
     llm_model: str = "homelab-assistant"
@@ -29,5 +34,10 @@ class Settings(BaseSettings):
     @classmethod
     def parse_user_ids(cls, value: object) -> object:
         if isinstance(value, str):
+            value = value.strip()
+            if value.startswith("["):
+                return json.loads(value)
             return frozenset(int(item.strip()) for item in value.split(",") if item.strip())
+        if isinstance(value, int):
+            return frozenset({value})
         return value
