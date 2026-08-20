@@ -29,7 +29,7 @@ spec:
         - name: gateway
           # The first service commit builds a content-addressed image and opens
           # an automated PR that replaces this bootstrap tag before rollout.
-          image: ghcr.io/kfir-marx/homelab-assistant:sha-bootstrap
+          image: ghcr.io/kfir-marx/homelab-assistant:sha-f4af5e5c66b74255755944986dd6f2f063e2ebba
           imagePullPolicy: IfNotPresent
           env:
             - name: HOMELAB_ASSISTANT_TELEGRAM_TOKEN
