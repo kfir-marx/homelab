@@ -1,0 +1,178 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-ai
+  namespace: external-ai
+  labels:
+    app: external-ai
+    component: api
+spec:
+  type: ClusterIP
+  selector:
+    app: external-ai
+    component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-ai-api
+  namespace: external-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: external-ai
+      component: api
+  template:
+    metadata:
+      labels:
+        app: external-ai
+        component: api
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/kfir-marx/homelab-external-ai:sha-bootstrap
+          args: [api]
+          env:
+            - name: EXTERNAL_AI_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: external-ai-secrets
+                  key: DATABASE_URL
+            - name: EXTERNAL_AI_HOMELAB_ASSISTANT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: external-ai-secrets
+                  key: HOMELAB_ASSISTANT_TOKEN
+            - name: EXTERNAL_AI_JOB_ASSISTANT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: external-ai-secrets
+                  key: JOB_ASSISTANT_TOKEN
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-ai-worker
+  namespace: external-ai
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: external-ai
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: external-ai
+        component: worker
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: seed-codex-auth
+          image: docker.io/library/busybox:1.37.0
+          command:
+            - sh
+            - -ec
+            - |
+              umask 077
+              if [ ! -s /codex-home/auth.json ]; then
+                cp /bootstrap/auth.json /codex-home/auth.json
+              fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: codex-home
+              mountPath: /codex-home
+            - name: auth-bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+      containers:
+        - name: worker
+          image: ghcr.io/kfir-marx/homelab-external-ai:sha-bootstrap
+          args: [worker]
+          env:
+            - name: EXTERNAL_AI_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: external-ai-secrets
+                  key: DATABASE_URL
+            - name: EXTERNAL_AI_CODEX_HOME
+              value: /var/lib/codex
+            - name: EXTERNAL_AI_WORK_ROOT
+              value: /work
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: codex-home
+              mountPath: /var/lib/codex
+            - name: work
+              mountPath: /work
+      volumes:
+        - name: codex-home
+          persistentVolumeClaim:
+            claimName: external-ai-codex-home
+        - name: auth-bootstrap
+          secret:
+            secretName: external-ai-codex-auth-bootstrap
+            optional: true
+            defaultMode: 0400
+        - name: work
+          emptyDir:
+            sizeLimit: 1Gi

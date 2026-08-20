@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - storage.yaml
+  - postgres.yaml
   - inference.yaml
   - telegram.yaml
   - network-policy.yaml

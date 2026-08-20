@@ -1,0 +1,83 @@
+name: external-ai
+
+on:
+  pull_request:
+    paths:
+      - services/external-ai/**
+      - kubernetes/apps/external-ai.yaml
+      - kubernetes/system/external-ai/**
+      - .github/workflows/external-ai.yml
+  push:
+    branches: [main]
+    paths:
+      - services/external-ai/**
+      - kubernetes/apps/external-ai.yaml
+      - kubernetes/system/external-ai/**
+      - .github/workflows/external-ai.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-ai-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/kfir-marx/homelab-external-ai
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/external-ai/pyproject.toml
+      - run: pip install -e 'services/external-ai[dev]'
+      - run: ruff format --check services/external-ai
+      - run: ruff check services/external-ai
+      - run: mypy services/external-ai/src services/external-ai/tests
+      - run: pytest services/external-ai
+      - uses: azure/setup-kubectl@v4
+      - run: kubectl kustomize kubernetes/system/external-ai >/tmp/external-ai.yaml
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/external-ai
+          push: false
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/external-ai
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+      - name: Pin immutable image
+        run: >-
+          sed -i
+          's|ghcr.io/kfir-marx/homelab-external-ai:sha-[a-f0-9]*\|ghcr.io/kfir-marx/homelab-external-ai:sha-${{ github.sha }}\|g;
+          s|ghcr.io/kfir-marx/homelab-external-ai:sha-bootstrap\|ghcr.io/kfir-marx/homelab-external-ai:sha-${{ github.sha }}\|g'
+          kubernetes/system/external-ai/workloads.yaml
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/external-ai-image
+          delete-branch: true
+          commit-message: "deploy(external-ai): pin image sha-${{ github.sha }}"
+          title: "deploy(external-ai): release sha-${{ github.sha }}"
+          body: Automated immutable image release.

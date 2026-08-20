@@ -1,0 +1,71 @@
+# Codex authentication and durable queue state are irreplaceable and remain on
+# the permanent critical NFS host. Static PVs are hard-bound and Retained.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: external-ai-postgres-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions: [nfsvers=4.2, hard]
+  claimRef:
+    namespace: external-ai
+    name: external-ai-postgres
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/external-ai/postgres
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: external-ai-postgres
+  namespace: external-ai
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nfs-storage2
+  volumeName: external-ai-postgres-pv
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: external-ai-codex-home-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions: [nfsvers=4.2, hard]
+  claimRef:
+    namespace: external-ai
+    name: external-ai-codex-home
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/external-ai/codex-home
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: external-ai-codex-home
+  namespace: external-ai
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nfs-storage2
+  volumeName: external-ai-codex-home-pv
+  resources:
+    requests:
+      storage: 1Gi

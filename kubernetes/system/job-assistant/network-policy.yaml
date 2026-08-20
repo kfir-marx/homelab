@@ -3,8 +3,6 @@ kind: NetworkPolicy
 metadata:
   name: default-deny
   namespace: job-assistant
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
@@ -19,7 +17,7 @@ spec:
     matchExpressions:
       - key: component
         operator: In
-        values: [api, telegram, worker, generation, discovery, migrate, backup]
+        values: [api, worker, generation-broker, discovery, migrate, backup]
   policyTypes: [Egress]
   egress:
     - to:
@@ -29,7 +27,6 @@ spec:
               component: postgres
       ports:
         - port: 5432
-          protocol: TCP
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -48,15 +45,14 @@ spec:
             matchExpressions:
               - key: component
                 operator: In
-                values: [api, telegram, worker, generation, discovery, migrate, backup]
+                values: [api, worker, generation-broker, discovery, migrate, backup]
       ports:
         - port: 5432
-          protocol: TCP
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: prometheus-to-api
+  name: api-ingress
   namespace: job-assistant
 spec:
   podSelector:
@@ -68,10 +64,37 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: homelab-assistant
+          podSelector:
+            matchLabels:
+              component: telegram
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: monitoring
       ports:
         - port: 8080
-          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: generation-broker-to-external-ai
+  namespace: job-assistant
+spec:
+  podSelector:
+    matchLabels:
+      component: generation-broker
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: external-ai
+          podSelector:
+            matchLabels:
+              app: external-ai
+              component: api
+      ports:
+        - port: 8080
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -93,25 +116,18 @@ spec:
             dns:
               - matchPattern: "*"
 ---
-# Telegram handles both Bot API traffic and allowlisted manual public URLs.
-# Public-only CIDRs and application-level DNS/IP validation prevent LAN access.
+# The API fetches manual public job URLs after application-level DNS/IP SSRF checks.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: telegram-public-egress
+  name: api-public-job-egress
   namespace: job-assistant
 spec:
   endpointSelector:
     matchLabels:
-      component: telegram
+      component: api
   egress:
-    - toFQDNs:
-        - matchName: api.telegram.org
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
-    - toCIDRSet: &publicCidrs
+    - toCIDRSet:
         - cidr: 0.0.0.0/0
           except:
             - 0.0.0.0/8
@@ -131,19 +147,13 @@ spec:
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: worker-delivery-egress
+  name: worker-smtp-egress
   namespace: job-assistant
 spec:
   endpointSelector:
     matchLabels:
       component: worker
   egress:
-    - toFQDNs:
-        - matchName: api.telegram.org
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
     - toFQDNs:
         - matchName: smtp.gmail.com
       toPorts:
@@ -175,26 +185,3 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
----
-# The generation workload has no Telegram, SMTP, or Kubernetes credentials.
-# Web search is disabled in Codex and only Codex service domains are reachable.
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: generation-codex-egress
-  namespace: job-assistant
-spec:
-  endpointSelector:
-    matchLabels:
-      component: generation
-  egress:
-    - toFQDNs:
-        - matchName: chatgpt.com
-        - matchPattern: "*.chatgpt.com"
-        - matchName: openai.com
-        - matchPattern: "*.openai.com"
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
-

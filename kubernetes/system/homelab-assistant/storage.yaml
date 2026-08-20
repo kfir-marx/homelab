@@ -16,4 +16,40 @@ spec:
   resources:
     requests:
       storage: 390Gi
-
+---
+# Session transcripts are personal and irreplaceable. This static volume is
+# hard-bound to the critical nfs-storage2 tier and explicitly Retained.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: homelab-assistant-postgres-pv
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage2
+  mountOptions: [nfsvers=4.2, hard]
+  claimRef:
+    namespace: homelab-assistant
+    name: homelab-assistant-postgres
+  nfs:
+    server: 192.168.1.105
+    path: /mnt/storage2-bulk/homelab-assistant/postgres
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: homelab-assistant-postgres
+  namespace: homelab-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nfs-storage2
+  volumeName: homelab-assistant-postgres-pv
+  resources:
+    requests:
+      storage: 5Gi

@@ -43,13 +43,13 @@ spec:
           annotations:
             summary: Job assistant queue has stalled
             description: A pending work item is more than one hour old.
-        - alert: JobAssistantCodexAuthenticationFailed
+        - alert: JobAssistantExternalAiAuthenticationFailed
           expr: job_assistant_generation_runs{status="failed",error_code="authentication"} > 0
           labels:
             severity: warning
           annotations:
-            summary: Codex authentication requires attention
-            description: Reseed the private persistent CODEX_HOME using the documented runbook.
+            summary: external-ai authentication requires attention
+            description: Follow the external-ai authentication recovery runbook.
         - alert: JobAssistantRepeatedDeliveryFailures
           expr: sum(job_assistant_outbox_events{status=~"retry|dead",channel=~"email|telegram"}) >= 3
           for: 15m
@@ -57,4 +57,4 @@ spec:
             severity: warning
           annotations:
             summary: Job assistant notification delivery is repeatedly failing
-            description: Check Telegram/SMTP connectivity and credentials; no automatic outreach retries past the bounded limit.
+            description: Check gateway notification leases and SMTP connectivity; no automatic outreach retries past the bounded limit.

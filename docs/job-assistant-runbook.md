@@ -1,280 +1,97 @@
 # Job assistant deployment and operations
 
-This runbook prepares the declarative Argo CD deployment at
-`kubernetes/system/job-assistant`. Do not run the live steps until the image,
-private files, storage paths, and Secrets are ready. No public route is needed;
-Telegram uses long polling and the API is a private ClusterIP.
+## Current runtime boundary
 
-## 1. Build and publish the image
+Job-assistant owns job discovery, truthful prompt construction, career fact
+validation, workflow state, artifacts, delivery approval, SMTP delivery, and
+audit events. It does not poll Telegram, call Telegram, install Codex, mount
+`auth.json`, or authenticate to ChatGPT.
 
-CI verifies Python 3.12 linting, typing, tests, a disposable PostgreSQL
-migration/queue integration test, and the container build. Pull requests build
-without publishing. When service or release-workflow changes land on `main`, a
-successful run publishes the immutable `sha-<git-sha>` tag to
-`ghcr.io/kfir-marx/homelab-job-assistant` and opens a release PR that pins all
-six workload references to that tag.
+The shared homelab-assistant gateway calls the authenticated internal API. Its
+typed replies contain text and unprefixed callback actions; the gateway adds
+the `job:` namespace. Async Telegram replies remain in the database outbox
+until the gateway leases, sends, and acknowledges them.
 
-```bash
-release_sha="$(git rev-parse HEAD)"
-docker build -t "ghcr.io/kfir-marx/homelab-job-assistant:sha-${release_sha}" services/job-assistant
-docker push "ghcr.io/kfir-marx/homelab-job-assistant:sha-${release_sha}"
-```
+The worker submits generation with a requester-scoped idempotency key to
+external-ai, records `external_job_id`, waits for the durable result, validates
+the JSON Schema, and rejects unknown career-inventory IDs. Retries and crashes
+reuse the same broker job.
 
-The Dockerfile pins its Codex CLI version. Before an upgrade, read the current
-[Codex authentication](https://learn.chatgpt.com/docs/auth),
-[non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode),
-and [managed account-auth automation](https://learn.chatgpt.com/docs/auth/ci-cd-auth)
-documentation, update the pin, and rerun the fake-executable provider test.
+## Storage and private inputs
 
-## 2. Prepare retained storage and private inputs
+All job history, PostgreSQL data, CV artifacts, private career inventory, and
+backups stay on retained `nfs-storage2` volumes. Create the existing runbook
+directories on the NFS host with their documented UID/GID ownership; never
+format, force-mount, or repurpose an existing filesystem.
 
-On `ubuntu-workstation`, create the exact critical-NFS paths with restrictive
-ownership. This creates directories only; it does not format or repartition any
-disk.
+The legacy `/mnt/storage2-bulk/job-assistant/codex-home` PV/PVC and
+`job-assistant-codex-auth-bootstrap` encrypted recovery snapshot are
+intentionally retained but have no runtime consumer. Remove them only after a
+verified external-ai cutover and an explicit operator decision.
 
-```bash
-sudo install -d -o 999 -g 999 -m 0700 /mnt/storage2-bulk/job-assistant/postgres
-sudo install -d -o 10001 -g 10001 -m 0700 /mnt/storage2-bulk/job-assistant/artifacts
-sudo install -d -o 10001 -g 10001 -m 0700 /mnt/storage2-bulk/job-assistant/artifacts/artifacts
-sudo install -d -o 10001 -g 10001 -m 0700 /mnt/storage2-bulk/job-assistant/artifacts/private
-sudo install -d -o 10001 -g 10001 -m 0700 /mnt/storage2-bulk/job-assistant/codex-home
-sudo install -d -o 10001 -g 10001 -m 0700 /mnt/storage2-bulk/job-assistant/backups
-```
-
-Place the real career inventory at:
-
-```text
-/mnt/storage2-bulk/job-assistant/artifacts/private/career-inventory.yaml
-```
-
-Optionally place the existing ATS-friendly DOCX template beside it as
-`cv-template.docx`. Neither file belongs in Git. Validate the inventory locally
-before deployment:
-
-```bash
-cd services/job-assistant
-python3 -c 'from pathlib import Path; from job_assistant.career import load_inventory; print(len(load_inventory(Path("/path/to/career-inventory.yaml")).fact_ids()))'
-```
-
-## 3. Configure database identities
-
-Use a URL-safe, high-entropy database password. The main Secret contains the
-database-owner URL because the migration hook owns schema changes. The Codex
-worker gets a separate restricted role and Secret.
-
-Provide a second URL whose username is exactly `job_assistant_generation` and
-whose password is independently generated. During every migration sync, the
-owner-backed migration job creates or rotates that role and reapplies only
-these grants:
-
-```sql
-GRANT CONNECT ON DATABASE job_assistant TO job_assistant_generation;
-GRANT USAGE ON SCHEMA public TO job_assistant_generation;
-GRANT SELECT ON applications TO job_assistant_generation;
-GRANT UPDATE (status, updated_at) ON applications TO job_assistant_generation;
-GRANT SELECT, INSERT, UPDATE ON generation_runs,
-  outbox_events, work_items, worker_heartbeats TO job_assistant_generation;
-GRANT SELECT, INSERT ON application_events TO job_assistant_generation;
-```
-
-Do not grant access to companies, jobs, artifacts, contacts, or delivery
-attempts. The generation worker's input is already sanitized by the application,
-and the database role further limits blast radius. Do not create the role by
-hand; the GitOps migration job establishes it after the schema exists, so first
-deployment does not require a partial sync or an owner credential in the
-runtime worker.
-
-## 4. Create and capture Secrets
-
-Create namespace and the two application Secrets from a protected temporary
-environment file. Never put values in Git or paste them into this runbook.
+## Secrets
 
 Required `job-assistant-secrets` keys:
 
-- `POSTGRES_PASSWORD`, `DATABASE_URL`
-- `TELEGRAM_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`
-- `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `REVIEW_EMAIL`
-- `IMAP_HOST`, `IMAP_USERNAME`, `IMAP_PASSWORD`
+- `DATABASE_URL`;
+- `GATEWAY_API_TOKEN`, matching the gateway's update/file client token;
+- `GATEWAY_NOTIFICATION_TOKEN`, independently matching the notification
+  lease/ack client;
+- `EXTERNAL_AI_TOKEN`, unique to the job-assistant requester;
+- `TELEGRAM_ALLOWED_USER_IDS` only as notification recipients and defense in
+  depth; there is no `TELEGRAM_TOKEN`;
+- SMTP, review-email, and IMAP keys listed in `secrets/inventory.tsv`.
 
-Required `job-assistant-codex-db` key: `DATABASE_URL` for the restricted role.
+`job-assistant-codex-db/DATABASE_URL` remains the restricted generation role.
+The isolated `job-assistant-generation-broker` uses only this connection and
+the job-assistant requester token for external-ai. The delivery worker uses the
+normal connection and receives neither restricted database nor external-ai
+credentials. Provisioning remains fail-closed through the database migration
+command.
 
-```bash
-kubectl create namespace job-assistant --dry-run=client -o yaml | kubectl apply -f -
-umask 077
-secret_env="$(mktemp)"
-generation_env="$(mktemp)"
-# Edit both temporary files with the exact KEY=value entries listed above.
-${EDITOR:-vi} "$secret_env"
-${EDITOR:-vi} "$generation_env"
-kubectl -n job-assistant create secret generic job-assistant-secrets \
-  --from-env-file="$secret_env"
-kubectl -n job-assistant create secret generic job-assistant-codex-db \
-  --from-env-file="$generation_env"
-shred -u "$secret_env" "$generation_env"
-```
+Capture changed Secrets with `scripts/secrets.sh capture-k8s`. Do not fabricate
+SOPS snapshots or copy secrets between namespaces by hand.
 
-Add these non-secret inventory rows to `secrets/inventory.tsv` only in the same
-change that captures their encrypted snapshots:
-
-```text
-job-assistant/job-assistant-secrets	POSTGRES_PASSWORD|DATABASE_URL|TELEGRAM_TOKEN|TELEGRAM_ALLOWED_USER_IDS|SMTP_HOST|SMTP_USERNAME|SMTP_PASSWORD|SMTP_FROM|REVIEW_EMAIL|IMAP_HOST|IMAP_USERNAME|IMAP_PASSWORD	Job assistant database, bot, review mail, and discovery identities
-job-assistant/job-assistant-codex-db	DATABASE_URL	Restricted generation-worker database identity
-job-assistant/job-assistant-codex-auth-bootstrap	auth.json	Initial ChatGPT-managed Codex authentication seed
-```
-
-Then run `scripts/secrets.sh capture-k8s` for each target. Commit only the SOPS
-ciphertext. The implementation did not fabricate these snapshots because real
-credentials are required.
-
-## 5. Bootstrap ChatGPT-managed Codex authentication
-
-Official Codex documentation states that `codex exec` reuses saved CLI auth,
-file-backed credentials live at `$CODEX_HOME/auth.json`, and Codex refreshes a
-managed session in place. Treat that file as a password and serialize every
-consumer. This deployment uses one generation replica, a PostgreSQL queue, a
-process file lock, and a retained writable `CODEX_HOME`.
-
-On a trusted machine with a browser:
+## Build and static verification
 
 ```bash
-codex login
-codex login status
-auth_file="${CODEX_HOME:-$HOME/.codex}/auth.json"
-test -s "$auth_file"
-kubectl -n job-assistant create secret generic job-assistant-codex-auth-bootstrap \
-  --from-file=auth.json="$auth_file"
-scripts/secrets.sh capture-k8s job-assistant/job-assistant-codex-auth-bootstrap
-```
-
-The init container copies the bootstrap only when persistent `auth.json` is
-missing, so it never overwrites refreshed credentials. After the first healthy
-generation run, deleting the bootstrap Secret from the live namespace is safe;
-keep only its SOPS-encrypted recovery copy. Never print, inspect, or log the
-file's tokens.
-
-If authentication fails repeatedly:
-
-1. scale the generation Deployment to zero;
-2. run `codex login` again on the trusted machine;
-3. replace the bootstrap Secret and the persistent `auth.json` while no worker
-   is running;
-4. recapture the SOPS snapshot;
-5. restore one replica and run a fake/manual generation job.
-
-Usage-limit and authentication failures are bounded/retryable and surfaced in
-metrics and Telegram; they never retry indefinitely.
-
-## 6. Verify and deploy through GitOps
-
-Static validation does not contact the cluster. `kubectl apply --dry-run=client`
-still performs API discovery, so CI uses kubeconform for offline OpenAPI schema
-validation and ignores only schemas for CRDs that are not bundled with the
-Kubernetes schema set:
-
-```bash
+ruff format --check services/job-assistant
+ruff check services/job-assistant
+mypy services/job-assistant/src
+pytest services/job-assistant
 kubectl kustomize kubernetes/system/job-assistant >/tmp/job-assistant.yaml
-kubeconform -ignore-missing-schemas -kubernetes-version 1.33.0 -strict -summary \
-  /tmp/job-assistant.yaml kubernetes/apps/job-assistant.yaml
+scripts/secrets.sh check
 ```
 
-In repository **Settings → Actions → General → Workflow permissions**, enable
-**Allow GitHub Actions to create and approve pull requests**. The release job
-uses only the scoped `GITHUB_TOKEN` with `contents: write` and
-`pull-requests: write`; it needs no cluster, Tailscale, or Argo CD credential.
-GitHub may require a maintainer to approve the generated PR's workflow run.
+The workflow `.github/workflows/job-assistant.yml` builds and pins the same
+image for API, delivery worker, generation broker, migration, discovery, and
+backup roles. The runtime image must not contain a `codex` binary.
 
-The fixed `automation/job-assistant-image` branch means a newer successful
-release updates the existing open release PR instead of creating a queue of
-stale PRs. Merging the reviewed PR changes the Deployment pod templates and
-lets automated Argo CD reconciliation run the migration hook and perform the
-rollout. A manifest-only release-PR merge does not publish another image, so
-the flow cannot recursively create release PRs. Main-branch workflow
-concurrency also prevents releases from being published out of order.
+## Staged cutover
 
-After reviewing, commit and push normally. The root Argo CD app discovers
-`kubernetes/apps/job-assistant.yaml`. Watch, but do not manually mutate, the
-declarative resources:
-
-```bash
-kubectl -n argocd get application job-assistant -w
-kubectl -n job-assistant get pods,jobs,cronjobs,pvc
-kubectl get pv | grep job-assistant
-kubectl -n job-assistant logs job/job-assistant-migrate
-```
-
-Only if the root app is not discovering child Applications, and with explicit
-live-action approval, bootstrap the child with:
-
-```bash
-kubectl apply -f kubernetes/apps/job-assistant.yaml
-```
-
-## 7. Functional verification
-
-1. Send `/add <public URL>` from the allowlisted Telegram account.
-2. If parsing fails, supply `Company | Title | Location | Description`.
-3. Press `Apply`; confirm one application and one generation work item.
-4. Confirm the review email has DOCX, PDF, preview, gaps, and source URL.
-5. Run `/final CODE`, upload PDF/DOCX, then paste the final message.
-6. Run `/contact CODE` and explicitly verify the named company-domain contact.
-7. Run `/approve CODE`, review the recipient, then press `Confirm Send`.
-8. For LinkedIn-only or unverified contacts, use `/manual CODE`; no automatic
-   message is sent.
-9. After completing the official application separately, run `/submitted CODE`.
-
-To test discovery without changing the schedule, create a one-off Job only with
-explicit live-action approval:
-
-```bash
-kubectl -n job-assistant create job --from=cronjob/job-assistant-discovery \
-  job-assistant-discovery-manual
-```
-
-## Backup, restore, retention, and deletion
-
-Back up:
-
-- PostgreSQL logical dumps from the backups PVC;
-- the complete artifacts PVC, including the private inventory/template;
-- the SOPS-encrypted Secret snapshots;
-- `CODEX_HOME` only in a separately encrypted credential backup.
-
-Do not place plaintext `auth.json`, Telegram/SMTP secrets, CVs, or contacts in
-ordinary backup archives. The daily dump retention action defaults to dry-run.
-
-Restore order:
-
-1. restore/recreate retained NFS directories;
-2. restore PostgreSQL dump with `pg_restore --clean --if-exists` into an empty
-   maintenance database, then verify counts and constraints;
-3. restore artifact files and verify recorded SHA-256 checksums;
-4. restore SOPS Secrets with `scripts/secrets.sh restore-k8s`;
-5. restore or reseed persistent Codex auth;
-6. let Argo CD reconcile and verify queue leases/outbox state before enabling
-   workers.
-
-After a database point-in-time restore, inspect any `sending` delivery attempt
-and reconcile it manually. Never reset it to pending without proving SMTP did
-not accept the original message.
-
-Personal-data deletion is intentionally manual and reviewable. First export the
-audit record, stop relevant workers, identify exact application/job/artifact
-rows and storage keys, take an encrypted backup, then delete only the confirmed
-records and files. Do not add a destructive retention CronJob.
+1. Deploy and authenticate external-ai without changing job-assistant.
+2. Add job-assistant's external-ai token and run database migration `0002`.
+3. Release the broker-backed job-assistant image and verify an idempotent test
+   generation through the internal workflow.
+4. Add gateway routing and verify `/job_help`, callbacks, pending conversations,
+   documents, and async notification acknowledgment.
+5. Stop and prune the job-assistant Telegram and Codex-generation Deployments.
+6. Verify no job-assistant pod has `TELEGRAM_TOKEN`, `CODEX_HOME`, `auth.json`,
+   Codex/OpenAI egress, or direct Telegram egress.
+7. Revoke the old separate bot token after confirming the shared bot receives
+   all intended commands.
+8. Retain old Codex recovery material until the new authentication has survived
+   refresh, restart, and one operator-approved recovery exercise.
 
 ## Troubleshooting
 
-- **Migration waits:** verify PostgreSQL readiness and the owner `DATABASE_URL`.
-- **PVC pending:** verify static `volumeName`, claimRef, NFS export paths, and
-  `nfs-storage2`; never remove `Retain` to force binding.
-- **No recommendations:** disabled placeholder ATS slugs are expected; verify
-  IMAP folder, criteria threshold, maximum age, and career inventory.
-- **Codex auth/limit:** inspect only redacted exit classifications and metrics;
-  never log `auth.json`. Follow the reseed procedure above.
-- **Generation schema failure:** retain the run metadata, not CV/prompt content,
-  and fix the provider prompt/schema. The worker fails closed.
-- **Outbox dead:** fix the provider, then selectively requeue review
-  notifications. Never blindly requeue recruiter outreach.
-- **SMTP says sent but no delivery:** Gmail SMTP acceptance is not downstream
-  delivery. Check the mailbox/bounce channel manually; bounce ingestion is an
-  extension point.
+- `broker_unavailable`: verify service DNS, requester token, and NetworkPolicy;
+  retries remain idempotent.
+- `authentication`: recover external-ai authentication using its runbook; do
+  not add auth material back to job-assistant.
+- `usage_limit` or `timeout`: external-ai classifies and bounds retries; inspect
+  sanitized job metadata and queue metrics, never prompt/result logs.
+- missing Telegram notification: inspect the durable outbox lease and gateway
+  health. Do not deliver directly from a worker.
+- invalid claims/output: treat as terminal generation failure and repair the
+  prompt/schema/inventory; never weaken fail-closed validation.

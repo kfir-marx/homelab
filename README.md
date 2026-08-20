@@ -95,7 +95,7 @@ makes failures easier to reason about.
 | Capability | Implementation | Why it is here |
 |---|---|---|
 | Private photo platform | Immich with PostgreSQL and Redis | A real stateful workload whose irreplaceable data must stay on permanent hardware |
-| Personal job assistance | Python, PostgreSQL, Telegram, Codex CLI | Human-approved discovery and truthful CV/outreach preparation without bulk applications |
+| Private AI assistants | Shared Telegram gateway, local vLLM, persistent sessions, job-assistant, and external-ai | Keeps ordinary chat local, routes job workflows safely, and centralizes confirmed Codex execution |
 | Home streaming | Jellyfin, Seerr, Servarr, Bazarr, qBittorrent, and Maintainerr | GPU-accelerated streaming with automated subtitles, recoverable bulk media, and policy-driven retention |
 | Observability | kube-prometheus-stack, Grafana, Alertmanager, and NVIDIA DCGM metrics | Cluster, workload, and GPU visibility with explicit retention limits |
 | Private DNS | AdGuard Home | Split DNS for private services and optional network-wide filtering |
@@ -206,8 +206,9 @@ export are unavailable even though the API on `largegpu` remains up.
 | [AdGuard Home runbook](docs/adguard-home-runbook.md) | Private split DNS, tailnet filtering, setup, and recovery |
 | [Monitoring runbook](docs/monitoring-runbook.md) | Prometheus/Grafana deployment, storage, access, and verification |
 | [Job assistant architecture](docs/job-assistant-architecture.md) | Trust boundaries, queues, state machines, deduplication, and delivery safety |
-| [Job assistant runbook](docs/job-assistant-runbook.md) | Private inputs, Codex auth, secrets, deployment, restore, and troubleshooting |
+| [Job assistant runbook](docs/job-assistant-runbook.md) | Private inputs, broker migration, secrets, deployment, restore, and troubleshooting |
 | [Homelab assistant runbook](docs/homelab-assistant-runbook.md) | GPU LLM, Telegram security boundary, secrets, rollout, and incident response |
+| [External AI runbook](docs/external-ai-runbook.md) | Durable broker, requester scopes, Codex authentication, rollout, and recovery |
 | [GPU Operator runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, rollout, CUDA validation, and metrics |
 | [Jellyfin media stack runbook](docs/media-stack-runbook.md) | Backup restoration, storage, GPU transcoding, credential rotation, and cleanup policy |
 | [Ubuntu workstation runbook](docs/ubuntu-workstation-runbook.md) | Critical NFS service and local NVIDIA/HDMI recovery |

@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-ai-postgres
+  namespace: external-ai
+spec:
+  selector:
+    app: external-ai
+    component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: external-ai-postgres
+  namespace: external-ai
+spec:
+  serviceName: external-ai-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: external-ai
+      component: postgres
+  template:
+    metadata:
+      labels:
+        app: external-ai
+        component: postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:17.4-bookworm
+          env:
+            - name: POSTGRES_DB
+              value: external_ai
+            - name: POSTGRES_USER
+              value: external_ai
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: external-ai-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, external_ai, -d, external_ai]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: external-ai-postgres

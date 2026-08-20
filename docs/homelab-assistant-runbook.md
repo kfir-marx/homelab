@@ -1,151 +1,94 @@
-# Private homelab LLM and Telegram gateway
+# Private homelab LLM and shared Telegram gateway
 
-## Architecture and security boundary
+## Architecture and ownership
 
-The `homelab-assistant` Argo CD Application contains two independent roles:
+`homelab-assistant` is the sole long-poll consumer and sole holder of the
+shared Telegram bot token. The gateway authenticates private-chat updates
+against its owner allowlist before routing them:
 
-```text
-Owner's Telegram app
-        |
-        | Telegram cloud (TLS)
-        v
-allowlisted gateway pod -- bearer key --> ClusterIP-only vLLM
-                                              |
-                                              v
-                               Qwen3-8B-AWQ on gpu-2 / RTX 3080
-```
+- general commands and ordinary text use persistent local sessions and vLLM;
+- `/handover` creates a confirmed request for `external-ai`;
+- `/job_*`, `job:*` callbacks, and pending job conversations use the
+  authenticated job-assistant internal API.
 
-vLLM is pinned to `gpu-2`, requests the whole GPU, and caches the pinned model
-snapshot on the existing disposable `gpu2-scratch-pv`. The model API has no
-Gateway, Ingress, LoadBalancer, NodePort, Cloudflare route, or Tailscale-facing
-route. Network policy admits API traffic only from the Telegram gateway and
-node-originated health probes. A bearer key is an additional control, not a
-substitute for that isolation.
+The gateway downloads Telegram documents with a 10 MB bound and forwards the
+bytes to job-assistant. Job-assistant performs MIME, signature, size, and domain
+validation and stores accepted artifacts. Async job notifications remain in a
+durable job-assistant outbox until the gateway sends and acknowledges them.
 
-The container root remains read-only. An ephemeral writable cache holds vLLM,
-FlashInfer, and Triton compilation artifacts, while the nested Hugging Face
-cache mount retains only the replaceable model snapshot across pod restarts.
+No model has Kubernetes credentials or execution authority. Neither local nor
+external model output is executed automatically.
 
-The gateway accepts only direct chats where the Telegram sender ID, chat ID,
-and configured allowlist agree. It has no service-account token, shell, host
-mount, persistent conversation store, or model-controlled tools. `/new` clears
-the bounded in-memory history and a pod restart clears all history.
+## Persistent sessions
 
-Telegram itself cannot be restricted to Tailscale: the phone connects to
-Telegram, while the pod long-polls `api.telegram.org`. The cluster never sees
-the phone's source IP, and Telegram requires the bot to reach its public API.
-The actual controls on this path are the secret bot token, exact user-ID
-allowlist, private-chat requirement, Telegram account security, default-deny
-network policy, and absence of execution privileges. Keep Telegram two-step
-verification enabled and protect the enrolled phone. If tailnet-only transport
-is a hard requirement, use a private web client over the existing Tailscale
-Gateway instead of Telegram.
+The gateway stores session state in its dedicated single-replica PostgreSQL
+StatefulSet. PostgreSQL uses the hard-bound `homelab-assistant-postgres-pv` on
+`nfs-storage2` with `Retain`; model weights remain on disposable
+`local-gpu-scratch`. The gateway does not mount the database volume directly.
 
-This first release is deliberately an LLM chat interface, not an autonomous
-operator. Add future homelab actions as separately implemented, typed commands
-with least-privilege credentials, confirmation for mutations, and an audit log.
-Never execute model-generated shell or `kubectl` text.
+Session IDs are six-character Crockford Base32 strings, case-insensitive and
+owner-scoped. Messages are append-only and retain provider, model, reasoning,
+job, and token provenance. `/continue` changes the active session persistently.
+Deletion is confirmed and tombstones the session; it does not destroy the
+immutable transcript.
 
-The job-assistant bot remains separate. It is coupled to that application's
-PostgreSQL workflow, and Telegram permits only one reliable long-poll consumer
-for a bot token. Create a new BotFather bot/token for this service.
+The effective prompt budget is `8192 - 1024 - 512 = 6656` tokens. vLLM's
+reported prompt usage is authoritative after each response; conservative UTF-8
+preflight estimates protect the next call. The gateway warns once at 80%,
+rejects ordinary turns at 90%, and only trims complete user/assistant turns from
+the active model context. The full transcript remains stored.
 
-## Model sizing and availability
+Compaction first generates and stores a preview. Accept creates a child,
+persists the structured handover, links `parent_session_id`, marks the parent
+compacted, and only then leaves the child active. Retry and Cancel do not change
+the source.
 
-[`Qwen/Qwen3-8B-AWQ`](https://huggingface.co/Qwen/Qwen3-8B-AWQ) is a 4-bit 8B
-model whose published snapshot is about 6.1 GB. The deployment limits context
-to 8,192 tokens and two concurrent
-sequences so weights and KV cache fit the RTX 3080's 10 GiB VRAM. If startup
-reports CUDA out-of-memory, reduce `--max-model-len` before lowering model
-quality. The model and vLLM versions are intentionally pinned.
+## Secrets
 
-`gpu-2` is mutually exclusive with Windows VM `502`. Draining/stopping VM `402`
-makes inference unavailable; the Telegram gateway stays up and reports a
-temporary failure. The cache persists on gpu-2's scratch disk, but is
-replaceable and may be downloaded again. Do not move this PVC to critical NFS.
-Download egress includes the exact Hugging Face/Xet hosts used by the pinned
-snapshot, including the regional `us.aws.cdn.hf.co` large-file redirect.
+Required `homelab-assistant-secrets` keys:
 
-## First image release
+- `TELEGRAM_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS`;
+- `LLM_API_KEY` for the in-namespace vLLM endpoint;
+- `POSTGRES_PASSWORD` and a matching `SESSION_DATABASE_URL` for the dedicated
+  session database;
+- `EXTERNAL_AI_TOKEN`, matching only external-ai's homelab requester scope;
+- `JOB_ASSISTANT_API_TOKEN`, matching job-assistant's update/file scope;
+- `JOB_ASSISTANT_NOTIFICATION_TOKEN`, matching only the durable notification
+  lease/ack scope.
 
-The workflow `.github/workflows/homelab-assistant.yml` lints, types, tests, and
-builds `ghcr.io/kfir-marx/homelab-assistant:sha-<commit>`. A successful push to
-`main` opens `automation/homelab-assistant-image`, replacing the bootstrap tag
-in the Deployment with the tested content-addressed tag. Merge that release PR
-before expecting the gateway pod to start.
+Generate the two internal tokens independently with a cryptographically secure
+password generator. Do not reuse the Telegram token, database passwords, or one
+client's external-ai token for another interface. Capture the completed Secret
+with `scripts/secrets.sh capture-k8s`; never place plaintext values in Git.
 
-## Create and capture the Secret
-
-Create a new Telegram bot with BotFather and obtain your numeric Telegram user
-ID out of band. The bot token must not be shared with the job assistant. On a
-trusted controller, write values into protected temporary files so secrets do
-not appear in shell history or process arguments:
+## Static verification
 
 ```bash
-umask 077
-assistant_secret_dir="$(mktemp -d)"
-read -rsp 'New Telegram bot token: ' telegram_token
-printf '%s' "${telegram_token}" >"${assistant_secret_dir}/TELEGRAM_TOKEN"
-unset telegram_token
-printf '\n'
-read -rp 'Allowed numeric Telegram user IDs (comma-separated): ' telegram_ids
-printf '%s' "${telegram_ids}" >"${assistant_secret_dir}/TELEGRAM_ALLOWED_USER_IDS"
-unset telegram_ids
-openssl rand -base64 48 | tr -d '\n' >"${assistant_secret_dir}/LLM_API_KEY"
-
-kubectl create namespace homelab-assistant --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n homelab-assistant create secret generic homelab-assistant-secrets \
-  --from-file="${assistant_secret_dir}"
-scripts/secrets.sh capture-k8s homelab-assistant/homelab-assistant-secrets
-
-# Securely dispose of the temporary files using the controller's approved method.
+ruff format --check services/homelab-assistant
+ruff check services/homelab-assistant
+mypy services/homelab-assistant/src services/homelab-assistant/tests
+pytest services/homelab-assistant
+kubectl kustomize kubernetes/system/homelab-assistant >/tmp/homelab-assistant.yaml
+scripts/secrets.sh check
 ```
 
-Commit only the resulting SOPS ciphertext. Run `scripts/secrets.sh check`
-afterward. Never add the plaintext token, allowlist, or LLM key to a manifest.
+The workflow `.github/workflows/homelab-assistant.yml` builds
+`ghcr.io/kfir-marx/homelab-assistant:sha-<commit>` and opens the immutable image
+pin PR.
 
-## Rollout and verification
+## Rollout and recovery
 
-After the service release PR, Secret ciphertext, and manifests are merged, let
-Argo CD reconcile normally. No live apply is required:
+Create `/mnt/storage2-bulk/homelab-assistant/postgres` for UID/GID `999` before
+Argo synchronization. During the staged cutover, scale down the old
+job-assistant Telegram poller before starting this gateway with the shared bot
+token; two long pollers must never overlap.
 
-```bash
-kubectl -n argocd get application homelab-assistant -w
-kubectl -n homelab-assistant get pods,pvc -o wide
-kubectl -n homelab-assistant rollout status deployment/llm --timeout=30m
-kubectl -n homelab-assistant rollout status deployment/telegram-gateway
-kubectl -n homelab-assistant logs deployment/llm
-kubectl -n homelab-assistant logs deployment/telegram-gateway
-```
+After rollout, verify one gateway replica, no public route, model readiness,
+session persistence across a gateway restart, `/job_help`, a pending job
+conversation, callback namespacing, bounded document forwarding, and a
+cancelled `/handover`. Do not submit an external handover during a dry run.
 
-The first model download is several gigabytes. Test `/status`, `/new`, and a
-short prompt from the allowlisted private chat. Also test from a non-allowlisted
-Telegram account; it must receive no reply. Confirm there is no externally
-addressable service:
-
-```bash
-kubectl -n homelab-assistant get service llm
-kubectl -n homelab-assistant get httproute,ingress
-kubectl -n homelab-assistant get networkpolicy,ciliumnetworkpolicy
-```
-
-Use DCGM metrics from the GPU Operator to observe VRAM, utilization,
-temperature, and power. When switching `gpu-2` to Windows, follow the drain and
-VM wait sequence in the GPU Operator runbook; no LLM-specific shutdown step is
-needed.
-
-## Rotation and incident response
-
-- Rotate the internal LLM key by updating the single Secret; both pods consume
-  the same key and restart through normal GitOps/operator procedure.
-- If the Telegram token or account is suspected compromised, revoke the token
-  immediately with BotFather, replace it in the Secret, capture the new SOPS
-  ciphertext, and review Telegram active sessions.
-- If an unapproved sender receives any response, scale the gateway down, revoke
-  the bot token, and inspect the deployed allowlist before restoring service.
-- Do not log request bodies, authorization headers, bot tokens, or model
-  conversations. Current code logs only generic request failures.
-
-The model endpoint follows [vLLM's security guidance](https://docs.vllm.ai/en/stable/usage/security/):
-the bearer key protects compatible API paths, while network policy remains the
-primary boundary because not every vLLM endpoint is authenticated.
+If Telegram reports update conflicts, stop both consumers and identify every
+workload using the token before restarting only `telegram-gateway`. If the
+session database is unavailable, fix the retained NFS mount; do not clear the
+claim, force-mount, or replace it with scratch storage.

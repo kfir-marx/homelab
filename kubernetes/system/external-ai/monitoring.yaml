@@ -1,0 +1,38 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: external-ai
+  namespace: external-ai
+spec:
+  selector:
+    matchLabels:
+      app: external-ai
+      component: api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: external-ai
+  namespace: external-ai
+spec:
+  groups:
+    - name: external-ai.rules
+      rules:
+        - alert: ExternalAiApiDown
+          expr: up{namespace="external-ai",service="external-ai"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: external-ai API is unavailable
+        - alert: ExternalAiQueueBacklog
+          expr: sum(external_ai_queue_depth{status="queued"}) > 5
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: external-ai queue remains backlogged

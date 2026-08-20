@@ -22,7 +22,17 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 180.0
     max_input_chars: int = 6000
     max_output_tokens: int = 1024
-    max_history_messages: int = 12
+    model_context_tokens: int = 8192
+    fixed_prompt_overhead_tokens: int = 512
+    session_database_url: SecretStr = SecretStr(
+        "postgresql+psycopg://homelab_assistant@homelab-assistant-postgres:5432/homelab_assistant"
+    )
+    external_ai_base_url: str = "http://external-ai.external-ai.svc.cluster.local:8080"
+    external_ai_token: SecretStr = SecretStr("")
+    job_assistant_base_url: str = "http://job-assistant-api.job-assistant.svc.cluster.local:8080"
+    job_assistant_token: SecretStr = SecretStr("")
+    job_assistant_notification_token: SecretStr = SecretStr("")
+    max_job_upload_bytes: int = 10_000_000
     system_prompt: str = (
         "You are the owner's private homelab assistant. Be concise and explicit about "
         "uncertainty. You have no tools and cannot inspect or change the homelab. Never claim "

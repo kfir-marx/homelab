@@ -1,0 +1,118 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: external-ai
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-clients
+  namespace: external-ai
+spec:
+  podSelector:
+    matchLabels:
+      app: external-ai
+      component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: homelab-assistant
+          podSelector:
+            matchLabels:
+              component: telegram
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: job-assistant
+          podSelector:
+            matchLabels:
+              component: generation-broker
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  namespace: external-ai
+spec:
+  podSelector:
+    matchLabels:
+      app: external-ai
+      component: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: external-ai
+      ports:
+        - port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-egress
+  namespace: external-ai
+spec:
+  podSelector:
+    matchLabels:
+      app: external-ai
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: external-ai
+              component: postgres
+      ports:
+        - port: 5432
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: dns-egress
+  namespace: external-ai
+spec:
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: codex-openai-egress
+  namespace: external-ai
+spec:
+  endpointSelector:
+    matchLabels:
+      app: external-ai
+      component: worker
+  egress:
+    - toFQDNs:
+        - matchName: api.openai.com
+        - matchName: auth.openai.com
+        - matchName: chatgpt.com
+        - matchPattern: "*.chatgpt.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

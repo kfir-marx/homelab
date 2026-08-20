@@ -131,4 +131,73 @@ spec:
         - ports:
             - port: "8000"
               protocol: TCP
-
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-internal-services-egress
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: homelab-assistant
+      component: telegram
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: external-ai
+          podSelector:
+            matchLabels:
+              app: external-ai
+              component: api
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: job-assistant
+          podSelector:
+            matchLabels:
+              app: job-assistant
+              component: api
+      ports:
+        - port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-to-postgres
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: homelab-assistant
+      component: telegram
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: homelab-assistant
+              component: postgres
+      ports:
+        - port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: homelab-assistant
+      component: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: homelab-assistant
+              component: telegram
+      ports:
+        - port: 5432

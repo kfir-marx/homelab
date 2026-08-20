@@ -26,14 +26,17 @@ apply step is required.
 | `immich/server` | Gateway and Cloudflared to TCP/2283 | PostgreSQL 5432, Valkey 6379, ML 3003, cluster DNS, and public-only HTTPS |
 | `immich/machine-learning` | Server to TCP/3003 | Cluster DNS and public-only HTTPS for model downloads |
 | `immich/postgres` | Server to TCP/5432 | None |
-| `job-assistant/api` | Prometheus to TCP/8080 | PostgreSQL and cluster DNS |
-| `job-assistant/telegram` | None | PostgreSQL, cluster DNS, Telegram API, and SSRF-filtered public HTTP(S) job pages |
-| `job-assistant/worker` | None | PostgreSQL, cluster DNS, Telegram API, and Gmail SMTP |
-| `job-assistant/generation` | None | Restricted PostgreSQL, cluster DNS, and Codex service HTTPS only |
+| `job-assistant/api` | Homelab Telegram gateway and Prometheus to TCP/8080 | PostgreSQL, cluster DNS, and SSRF-filtered public HTTP(S) job pages |
+| `job-assistant/worker` | None | PostgreSQL, cluster DNS, and Gmail SMTP; no Telegram, external-ai, or Codex egress |
+| `job-assistant/generation-broker` | None | Restricted PostgreSQL role, cluster DNS, and external-ai TCP/8080 only |
 | `job-assistant/discovery` | None | PostgreSQL, cluster DNS, Gmail IMAP, and configured public ATS APIs |
 | `job-assistant/postgres` | Application roles and backup to TCP/5432 | None |
-| `homelab-assistant/telegram` | None | Cluster DNS, Telegram API HTTPS, and the authenticated in-namespace LLM API on TCP/8000 |
+| `homelab-assistant/telegram` | None | Cluster DNS, Telegram API HTTPS, local LLM TCP/8000, job API TCP/8080, external-ai TCP/8080, and PostgreSQL TCP/5432 |
 | `homelab-assistant/inference` | Telegram gateway and node health probes to TCP/8000 | Cluster DNS and pinned-model download hosts on HTTPS |
+| `homelab-assistant/postgres` | Telegram gateway to TCP/5432 | Cluster DNS only |
+| `external-ai/api` | Homelab gateway, job generation broker, and Prometheus to TCP/8080 | PostgreSQL and cluster DNS only |
+| `external-ai/worker` | None | PostgreSQL, cluster DNS, and allowlisted OpenAI/ChatGPT HTTPS only |
+| `external-ai/postgres` | external-ai API and worker to TCP/5432 | None |
 | `immich/redis` | Server to TCP/6379 | None |
 | `media` | Same-namespace application traffic; Gateway to each web UI; Cloudflared to Jellyfin TCP/8096 and Seerr TCP/5055; LAN/world peers to qBittorrent TCP/UDP 51413 | Cluster DNS; public-only TCP 80/443 for metadata, indexers, subtitle providers, and trackers; qBittorrent additionally reaches public TCP/UDP peers |
 | `tailscale-router` | Public/LAN UDP 41641 (pinned in the Deployment) | Not isolated; see the Cilium Gateway hairpin exception below |

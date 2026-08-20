@@ -273,6 +273,7 @@ class GenerationRun(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("applications.id"), nullable=False)
     provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    external_job_id: Mapped[str | None] = mapped_column(String(40), index=True)
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False)
     output_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)

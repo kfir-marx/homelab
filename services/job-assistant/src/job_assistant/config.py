@@ -17,8 +17,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"  # noqa: S104 - container listener
     api_port: int = 8080
-    telegram_token: SecretStr | None = None
+    gateway_api_token: SecretStr = SecretStr("")
+    gateway_notification_token: SecretStr = SecretStr("")
     telegram_allowed_user_ids: frozenset[int] = Field(default_factory=frozenset)
+    external_ai_base_url: str = "http://external-ai.external-ai.svc.cluster.local:8080"
+    external_ai_token: SecretStr = SecretStr("")
+    external_ai_model: str = "sol"
+    external_ai_reasoning: str = "high"
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_username: str | None = None
@@ -35,9 +40,7 @@ class Settings(BaseSettings):
     cv_template_path: Path | None = Path("/data/private/cv-template.docx")
     search_criteria_path: Path = Path("/app/config/search-criteria.yaml")
     company_registry_path: Path = Path("/app/config/company-registry.yaml")
-    codex_executable: str = "codex"
-    codex_home: Path = Path("/var/lib/codex")
-    codex_timeout_seconds: int = 600
+    generation_timeout_seconds: int = 600
     http_timeout_seconds: float = 15.0
     max_download_bytes: int = 2_000_000
     max_upload_bytes: int = 10_000_000

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import os
 import random
 import socket
@@ -17,13 +16,14 @@ from .config import Settings
 from .contact_policy import ContactPolicyInput, automatic_email_allowed
 from .domain import transition_application, transition_outreach
 from .email_delivery import SmtpDeliveryProvider
-from .generation import (
-    CodexCliGenerationProvider,
-    GenerationError,
-    validate_claims,
-)
+from .generation import ExternalAiGenerationProvider, GenerationError, validate_claims
 from .interfaces import Delivery, GenerationResult
-from .metrics import CODEX_FAILURES, DELIVERY_FAILURES, GENERATION_DURATION, GENERATION_FAILURES
+from .metrics import (
+    DELIVERY_FAILURES,
+    EXTERNAL_AI_FAILURES,
+    GENERATION_DURATION,
+    GENERATION_FAILURES,
+)
 from .models import (
     Application,
     Artifact,
@@ -37,7 +37,6 @@ from .models import (
 )
 from .queue import claim_work, complete_work, fail_work, put_outbox, recover_stale_outbox
 from .states import ApplicationStatus, OutreachStatus
-from .telegram import TelegramHttpProvider, TelegramReply
 
 
 def _worker_id(role: str) -> str:
@@ -54,11 +53,13 @@ def _heartbeat(session: Session, worker_id: str, role: str) -> None:
 
 def run_generation_worker(factory: sessionmaker[Session], settings: Settings) -> None:
     worker_id = _worker_id("generation")
-    provider = CodexCliGenerationProvider(
-        settings.codex_executable, settings.codex_home, settings.codex_timeout_seconds
+    provider = ExternalAiGenerationProvider(
+        settings.external_ai_base_url,
+        settings.external_ai_token.get_secret_value(),
+        settings.external_ai_model,
+        settings.external_ai_reasoning,
+        settings.generation_timeout_seconds,
     )
-    lock_path = settings.codex_home / "generation.lock"
-    settings.codex_home.mkdir(parents=True, exist_ok=True, mode=0o700)
     while True:
         with factory.begin() as session:
             _heartbeat(session, worker_id, "generation")
@@ -98,12 +99,22 @@ def run_generation_worker(factory: sessionmaker[Session], settings: Settings) ->
                     run.status = "running"
                     run.error_code = None
                     run.finished_at = None
-            with (
-                lock_path.open("a+") as lock_handle,
-                GENERATION_DURATION.labels(provider=provider.name).time(),
-            ):
-                fcntl.flock(lock_handle, fcntl.LOCK_EX)
-                result = provider.generate(raw_payload)
+            with GENERATION_DURATION.labels(provider=provider.name).time():
+                submission_key = item.idempotency_key
+
+                def record_external_job(
+                    public_id: str, idempotency_key: str = submission_key
+                ) -> None:
+                    with factory.begin() as submission_session:
+                        submitted_run = submission_session.scalar(
+                            select(GenerationRun).where(
+                                GenerationRun.idempotency_key == idempotency_key
+                            )
+                        )
+                        if submitted_run:
+                            submitted_run.external_job_id = public_id
+
+                result = provider.generate(raw_payload, submission_key, record_external_job)
             validate_claims(result, inventory)
             with factory.begin() as session:
                 application = session.get(Application, application_id)
@@ -114,6 +125,7 @@ def run_generation_worker(factory: sessionmaker[Session], settings: Settings) ->
                 )
                 assert application and run
                 run.status = "completed"
+                run.external_job_id = provider.last_external_job_id
                 run.output_json = result.model_dump(mode="json")
                 run.structured_log = provider.last_structured_log
                 run.exit_code = provider.last_exit_code
@@ -141,7 +153,7 @@ def run_generation_worker(factory: sessionmaker[Session], settings: Settings) ->
             code = exc.code if isinstance(exc, GenerationError) else "configuration"
             GENERATION_FAILURES.labels(code=code).inc()
             if code in {"authentication", "usage_limit"}:
-                CODEX_FAILURES.labels(kind=code).inc()
+                EXTERNAL_AI_FAILURES.labels(kind=code).inc()
             with factory.begin() as session:
                 work = session.get(WorkItem, item.id)
                 if work:
@@ -196,7 +208,11 @@ def _claim_outbox(session: Session, worker_id: str, lease_seconds: int) -> Outbo
     now = datetime.now(UTC)
     event = session.scalar(
         select(OutboxEvent)
-        .where(OutboxEvent.status.in_(["pending", "retry"]), OutboxEvent.available_at <= now)
+        .where(
+            OutboxEvent.status.in_(["pending", "retry"]),
+            OutboxEvent.available_at <= now,
+            OutboxEvent.channel != "telegram",
+        )
         .order_by(OutboxEvent.available_at, OutboxEvent.created_at)
         .with_for_update(skip_locked=True)
         .limit(1)
@@ -212,11 +228,6 @@ def _claim_outbox(session: Session, worker_id: str, lease_seconds: int) -> Outbo
 def run_general_worker(factory: sessionmaker[Session], settings: Settings) -> None:
     worker_id = _worker_id("worker")
     storage = FilesystemArtifactStorage(settings.artifact_root)
-    telegram = (
-        TelegramHttpProvider(settings.telegram_token.get_secret_value())
-        if settings.telegram_token
-        else None
-    )
     smtp = None
     if settings.smtp_username and settings.smtp_password and settings.smtp_from:
         smtp = SmtpDeliveryProvider(
@@ -238,14 +249,7 @@ def run_general_worker(factory: sessionmaker[Session], settings: Settings) -> No
             if event.event_type == "prepare_review":
                 _prepare_review(factory, settings, storage, event)
             elif event.channel == "telegram":
-                if not telegram:
-                    raise RuntimeError("Telegram provider is not configured")
-                buttons = tuple(
-                    (str(row[0]), str(row[1])) for row in event.payload.get("buttons", [])
-                )
-                telegram.send_reply(
-                    TelegramReply(int(event.recipient), str(event.payload["text"]), buttons)
-                )
+                raise RuntimeError("Telegram notifications are delivered by the gateway")
             elif event.event_type == "review_material":
                 if not smtp or not event.recipient:
                     raise RuntimeError("review SMTP is not configured")
@@ -271,7 +275,7 @@ def run_general_worker(factory: sessionmaker[Session], settings: Settings) -> No
                         f"Unsupported requirements/gaps: {event.payload['gaps']}\n\n"
                         f"Warnings: {event.payload['warnings']}\n\n"
                         f"Plain-text CV preview:\n{event.payload['preview']}\n"
-                        f"Return the edited CV with /final {application.human_code}."
+                        f"Return the edited CV with /job_final {application.human_code}."
                     )
                 smtp.send(
                     Delivery(
@@ -401,7 +405,7 @@ def _prepare_review(
                 {
                     "text": (
                         f"Application {application.human_code} is ready for review. "
-                        f"{email_note} Use /final {application.human_code} when ready."
+                        f"{email_note} Use /job_final {application.human_code} when ready."
                     )
                 },
                 f"generation-ready:{application.id}:v1",

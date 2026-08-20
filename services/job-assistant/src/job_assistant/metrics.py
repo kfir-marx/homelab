@@ -12,8 +12,8 @@ GENERATION_DURATION = Histogram(
 GENERATION_FAILURES = Counter(
     "job_assistant_generation_failures_total", "Generation failures", ["code"]
 )
-CODEX_FAILURES = Counter(
-    "job_assistant_codex_failures_total", "Codex auth or limit failures", ["kind"]
+EXTERNAL_AI_FAILURES = Counter(
+    "job_assistant_external_ai_failures_total", "Broker auth or limit failures", ["kind"]
 )
 DELIVERY_FAILURES = Counter(
     "job_assistant_delivery_failures_total", "Notification failures", ["channel"]

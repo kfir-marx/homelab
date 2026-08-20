@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-ai
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/external-ai
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-ai
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - PruneLast=true
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: external-ai-secrets
+      jsonPointers: [/data]
+    - group: ""
+      kind: Secret
+      name: external-ai-codex-auth-bootstrap
+      jsonPointers: [/data]

@@ -1,13 +1,13 @@
-import os
-import shlex
+import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from job_assistant.career import CareerInventory
 from job_assistant.generation import (
     SYSTEM_PROMPT,
-    CodexCliGenerationProvider,
+    ExternalAiGenerationProvider,
     GenerationError,
     build_generation_payload,
     validate_claims,
@@ -78,35 +78,43 @@ def test_prompt_injection_is_delimited_as_data() -> None:
     assert "Do not browse" in SYSTEM_PROMPT
 
 
-def test_codex_provider_uses_ephemeral_read_only_schema_mode(tmp_path: Path) -> None:
-    executable = tmp_path / "fake-codex"
+def test_external_ai_provider_sends_schema_and_idempotency() -> None:
     output = result(["fact-1"]).model_dump_json()
-    executable.write_text(
-        "#!/bin/sh\n"
-        "set -eu\n"
-        "saw_ephemeral=false\n"
-        "saw_read_only=false\n"
-        "saw_schema=false\n"
-        "saw_web_search=false\n"
-        "output_path=\n"
-        'while [ "$#" -gt 0 ]; do\n'
-        '  case "$1" in\n'
-        "    --ephemeral) saw_ephemeral=true ;;\n"
-        "    read-only) saw_read_only=true ;;\n"
-        '    --output-schema) shift; test -f "$1"; saw_schema=true ;;\n'
-        '    --output-last-message) shift; output_path="$1" ;;\n'
-        '    --config) shift; test "$1" = \'web_search="disabled"\'; saw_web_search=true ;;\n'
-        "  esac\n"
-        "  shift\n"
-        "done\n"
-        'test "$saw_ephemeral" = true\n'
-        'test "$saw_read_only" = true\n'
-        'test "$saw_schema" = true\n'
-        'test "$saw_web_search" = true\n'
-        'test -n "$output_path"\n'
-        f"printf '%s' {shlex.quote(output)} > \"$output_path\"\n",
-        encoding="utf-8",
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            seen.update(json.loads(request.content))
+            return httpx.Response(202, json={"job_id": "X1234567"})
+        return httpx.Response(
+            200,
+            json={"job_id": "X1234567", "status": "completed", "result": output},
+        )
+
+    provider = ExternalAiGenerationProvider("http://external-ai", "token", "sol", "high", 5)
+    provider._client = httpx.Client(
+        transport=httpx.MockTransport(handler), base_url="http://external-ai"
     )
-    os.chmod(executable, 0o700)
-    provider = CodexCliGenerationProvider(str(executable), tmp_path / "codex-home", 5)
-    assert provider.generate({"career_inventory": {}, "job": {}}).professional_summary == "Engineer"
+    generated = provider.generate({"career_inventory": {}, "job": {}}, "stable-key")
+    assert generated.professional_summary == "Engineer"
+    assert seen["idempotency_key"] == "stable-key"
+    assert seen["output_schema"]
+
+
+def test_job_runtime_has_no_telegram_token_or_codex_auth_dependency() -> None:
+    repository = Path(__file__).resolve().parents[3]
+    workload = (repository / "kubernetes/system/job-assistant/workloads.yaml").read_text()
+    image = (repository / "services/job-assistant/Dockerfile").read_text()
+    assert "job-assistant-telegram" not in workload
+    assert "name: job-assistant-generation\n" not in workload
+    assert "component: generation\n" not in workload
+    assert "TELEGRAM_TOKEN" not in workload
+    assert "CODEX_HOME" not in workload
+    assert "auth.json" not in workload
+    assert "CODEX_CLI_VERSION" not in image
+    normal_worker, broker = workload.split("name: job-assistant-generation-broker", 1)
+    normal_worker = normal_worker.split("name: job-assistant-worker", 1)[1]
+    assert "JOB_ASSISTANT_GENERATION_DATABASE_URL" not in normal_worker
+    assert "JOB_ASSISTANT_EXTERNAL_AI_TOKEN" not in normal_worker
+    assert "JOB_ASSISTANT_EXTERNAL_AI_TOKEN" in broker
+    assert "JOB_ASSISTANT_SMTP_PASSWORD" not in broker

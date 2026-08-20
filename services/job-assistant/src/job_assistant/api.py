@@ -1,11 +1,26 @@
 from __future__ import annotations
 
+import hmac
+import json
+import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import func, select
 
+from .artifacts import FilesystemArtifactStorage
 from .config import Settings
 from .database import database_ready, make_engine, make_session_factory
 from .models import (
@@ -15,9 +30,11 @@ from .models import (
     JobSource,
     JobSourceOccurrence,
     OutboxEvent,
+    TelegramConversation,
     WorkerHeartbeat,
     WorkItem,
 )
+from .telegram import TelegramUpdateHandler
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -30,6 +47,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url=None if settings.environment == "production" else "/docs",
         redoc_url=None,
     )
+    telegram_handler = TelegramUpdateHandler(
+        settings, FilesystemArtifactStorage(settings.artifact_root), trusted_gateway=True
+    )
+
+    def gateway_auth(authorization: Annotated[str | None, Header()] = None) -> None:
+        expected = settings.gateway_api_token.get_secret_value()
+        if (
+            not expected
+            or not authorization
+            or not authorization.startswith("Bearer ")
+            or not hmac.compare_digest(authorization.removeprefix("Bearer "), expected)
+        ):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED)
+
+    def gateway_notification_auth(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> None:
+        expected = settings.gateway_notification_token.get_secret_value()
+        if (
+            not expected
+            or not authorization
+            or not authorization.startswith("Bearer ")
+            or not hmac.compare_digest(authorization.removeprefix("Bearer "), expected)
+        ):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED)
+
+    def typed_replies(replies: list[Any]) -> dict[str, list[dict[str, Any]]]:
+        return {
+            "replies": [
+                {"chat_id": reply.chat_id, "text": reply.text, "buttons": list(reply.buttons)}
+                for reply in replies
+            ]
+        }
 
     @application.get("/health/live")
     def liveness() -> dict[str, str]:
@@ -51,7 +101,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             item.role: item.last_seen_at
             >= now
             - timedelta(
-                seconds=(settings.codex_timeout_seconds + 120 if item.role == "generation" else 120)
+                seconds=(
+                    settings.generation_timeout_seconds + 120 if item.role == "generation" else 120
+                )
             )
             for item in heartbeats
         }
@@ -150,6 +202,90 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 SOURCE_CONSECUTIVE_FAILURES.labels(source=source_name).set(failures)
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    @application.get("/internal/telegram/pending", dependencies=[Depends(gateway_auth)])
+    def telegram_pending(user_id: int, chat_id: int) -> dict[str, bool]:
+        with factory() as session:
+            pending = session.scalar(
+                select(TelegramConversation.id).where(
+                    TelegramConversation.user_id == user_id,
+                    TelegramConversation.chat_id == chat_id,
+                    TelegramConversation.expires_at > datetime.now(UTC),
+                )
+            )
+        return {"pending": pending is not None}
+
+    @application.post("/internal/telegram/update", dependencies=[Depends(gateway_auth)])
+    def telegram_update(update: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+        with factory.begin() as session:
+            replies = telegram_handler.process(session, update)
+        return typed_replies(replies)
+
+    @application.post("/internal/telegram/document", dependencies=[Depends(gateway_auth)])
+    async def telegram_document(
+        update_json: Annotated[str, Form()], content: Annotated[UploadFile, File()]
+    ) -> dict[str, list[dict[str, Any]]]:
+        update = json.loads(update_json)
+        raw = await content.read(settings.max_upload_bytes + 1)
+        if len(raw) > settings.max_upload_bytes:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+        update["message"]["_file_bytes"] = raw
+        with factory.begin() as session:
+            replies = telegram_handler.process(session, update)
+        return typed_replies(replies)
+
+    @application.get(
+        "/internal/telegram/notifications",
+        dependencies=[Depends(gateway_notification_auth)],
+    )
+    def telegram_notifications() -> dict[str, list[dict[str, Any]]]:
+        now = datetime.now(UTC)
+        output: list[dict[str, Any]] = []
+        with factory.begin() as session:
+            events = session.scalars(
+                select(OutboxEvent)
+                .where(
+                    OutboxEvent.channel == "telegram",
+                    OutboxEvent.status.in_(["pending", "retry"]),
+                    OutboxEvent.available_at <= now,
+                )
+                .order_by(OutboxEvent.created_at)
+                .with_for_update(skip_locked=True)
+                .limit(20)
+            ).all()
+            for event in events:
+                event.status = "leased"
+                event.lease_owner = "telegram-gateway"
+                event.lease_expires_at = now + timedelta(minutes=2)
+                event.attempts += 1
+                output.append(
+                    {
+                        "id": str(event.id),
+                        "chat_id": int(event.recipient),
+                        "text": str(event.payload["text"]),
+                        "buttons": list(event.payload.get("buttons", [])),
+                    }
+                )
+        return {"notifications": output}
+
+    @application.post(
+        "/internal/telegram/notifications/{event_id}/ack",
+        dependencies=[Depends(gateway_notification_auth)],
+    )
+    def telegram_notification_ack(event_id: str) -> dict[str, str]:
+        with factory.begin() as session:
+            try:
+                identifier = uuid.UUID(event_id)
+            except ValueError as exc:
+                raise HTTPException(status.HTTP_404_NOT_FOUND) from exc
+            event = session.get(OutboxEvent, identifier)
+            if not event or event.channel != "telegram":
+                raise HTTPException(status.HTTP_404_NOT_FOUND)
+            event.status = "delivered"
+            event.delivered_at = datetime.now(UTC)
+            event.lease_owner = None
+            event.lease_expires_at = None
+        return {"status": "delivered"}
 
     return application
 

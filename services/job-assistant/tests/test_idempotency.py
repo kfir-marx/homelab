@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from job_assistant.telegram import TelegramUpdateHandler
 
 
 @pytest.fixture
-def session() -> Session:
+def session() -> Generator[Session, None, None]:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as value:
@@ -78,7 +79,7 @@ def test_duplicate_telegram_apply_creates_one_application(session: Session, tmp_
     session.flush()
     handler = TelegramUpdateHandler(
         Settings(
-            telegram_allowed_user_ids={123},
+            telegram_allowed_user_ids=frozenset({123}),
             artifact_root=tmp_path,
             career_inventory_path=(
                 Path(__file__).parents[1] / "config/career-inventory.example.yaml"
@@ -104,7 +105,7 @@ def test_duplicate_telegram_apply_creates_one_application(session: Session, tmp_
 
 def test_invalid_telegram_user_is_silently_ignored(session: Session, tmp_path: Path) -> None:
     handler = TelegramUpdateHandler(
-        Settings(telegram_allowed_user_ids={123}, artifact_root=tmp_path),
+        Settings(telegram_allowed_user_ids=frozenset({123}), artifact_root=tmp_path),
         FilesystemArtifactStorage(tmp_path),
     )
     update = {
@@ -135,7 +136,7 @@ def test_manual_metadata_conversation_survives_and_completes(
     session.add(conversation)
     session.flush()
     handler = TelegramUpdateHandler(
-        Settings(telegram_allowed_user_ids={123}, artifact_root=tmp_path),
+        Settings(telegram_allowed_user_ids=frozenset({123}), artifact_root=tmp_path),
         FilesystemArtifactStorage(tmp_path),
     )
     reply = handler._continue_conversation(

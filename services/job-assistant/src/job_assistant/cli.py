@@ -9,13 +9,11 @@ import typer
 import uvicorn
 
 from .api import create_app
-from .artifacts import FilesystemArtifactStorage
 from .config import Settings
 from .database import make_engine, make_session_factory
 from .database_roles import provision_generation_role
 from .discovery import run_discovery
 from .logging import configure_logging
-from .telegram import TelegramHttpProvider, TelegramUpdateHandler, run_long_polling
 from .workers import run_general_worker, run_generation_worker
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
@@ -38,26 +36,15 @@ def api() -> None:
 
 
 @app.command()
-def telegram() -> None:
-    """Run the allowlisted Telegram bot using long polling."""
-    settings, factory = _runtime()
-    if not settings.telegram_token:
-        raise typer.BadParameter("JOB_ASSISTANT_TELEGRAM_TOKEN is required")
-    handler = TelegramUpdateHandler(settings, FilesystemArtifactStorage(settings.artifact_root))
-    provider = TelegramHttpProvider(settings.telegram_token.get_secret_value())
-    run_long_polling(factory, handler, provider)  # type: ignore[arg-type]
-
-
-@app.command()
 def worker() -> None:
-    """Run queue, Telegram-outbox, and email-delivery work."""
+    """Run domain queue and approved-delivery work."""
     settings, factory = _runtime()
     run_general_worker(factory, settings)  # type: ignore[arg-type]
 
 
 @app.command()
-def generation_worker() -> None:
-    """Run isolated Codex generation work (Kubernetes role: generation)."""
+def broker_worker() -> None:
+    """Run the restricted external-ai generation queue consumer."""
     settings, factory = _runtime()
     run_generation_worker(factory, settings)  # type: ignore[arg-type]
 

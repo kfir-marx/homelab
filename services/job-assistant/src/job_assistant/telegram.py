@@ -2,17 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import httpx
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from .artifacts import FilesystemArtifactStorage
 from .career import load_inventory
@@ -30,7 +27,7 @@ from .domain import (
     transition_outreach,
 )
 from .generation import build_generation_payload
-from .interfaces import NormalizedJob, Notification
+from .interfaces import NormalizedJob
 from .models import (
     Application,
     ApplicationContact,
@@ -50,15 +47,15 @@ from .sources.manual import fetch_public_job
 from .states import ApplicationStatus, JobStatus, OutreachStatus
 
 HELP = """Commands:
-/add <public-job-url> — add a job
-/status <code> — show lifecycle state
-/contact <code> — start contact entry
-/final <code> — upload final CV, then paste final message
-/approve <code> — review the selected delivery target
-/manual <code> — mark manual outreach required
-/submitted <code> — record the official application submission
-/reopen <code> — explicitly reopen a skipped/expired job
-/help — show this guide"""
+/job_add <public-job-url> — add a job
+/job_status <code> — show lifecycle state
+/job_contact <code> — start contact entry
+/job_final <code> — upload final CV, then paste final message
+/job_approve <code> — review the selected delivery target
+/job_manual <code> — mark manual outreach required
+/job_submitted <code> — record the official application submission
+/job_reopen <code> — explicitly reopen a skipped/expired job
+/job_help — show this guide"""
 
 
 @dataclass(frozen=True)
@@ -69,9 +66,16 @@ class TelegramReply:
 
 
 class TelegramUpdateHandler:
-    def __init__(self, settings: Settings, artifact_storage: FilesystemArtifactStorage) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        artifact_storage: FilesystemArtifactStorage,
+        *,
+        trusted_gateway: bool = False,
+    ) -> None:
         self.settings = settings
         self.artifact_storage = artifact_storage
+        self.trusted_gateway = trusted_gateway
 
     def process(self, session: Session, update: dict[str, Any]) -> list[TelegramReply]:
         update_id = int(update["update_id"])
@@ -94,7 +98,7 @@ class TelegramUpdateHandler:
         if not actor or not chat:
             return []
         user_id, chat_id = int(actor["id"]), int(chat["id"])
-        if user_id not in self.settings.telegram_allowed_user_ids:
+        if not self.trusted_gateway and user_id not in self.settings.telegram_allowed_user_ids:
             return []
         if callback:
             return self._callback(session, chat_id, user_id, str(callback.get("data", "")))
@@ -113,14 +117,14 @@ class TelegramUpdateHandler:
                 return [reply]
         text = str(message.get("text", "")).strip()
         if not text.startswith("/"):
-            return [TelegramReply(chat_id, "Use /help to see available commands.")]
+            return [TelegramReply(chat_id, "Use /job_help to see available commands.")]
         command, _, argument = text.partition(" ")
         command = command.split("@", 1)[0].casefold()
         if command == "/help":
             return [TelegramReply(chat_id, HELP)]
         if command == "/add":
             if not argument:
-                return [TelegramReply(chat_id, "Usage: /add <public-job-url>")]
+                return [TelegramReply(chat_id, "Usage: /job_add <public-job-url>")]
             url = argument.strip()
             try:
                 validate_public_http_url(url)
@@ -175,7 +179,7 @@ class TelegramUpdateHandler:
             "/reopen",
         }:
             if not argument:
-                return [TelegramReply(chat_id, f"Usage: {command} <application-code>")]
+                return [TelegramReply(chat_id, f"Usage: /job_{command[1:]} <application-code>")]
             application = get_application_by_code(session, argument.strip())
             if not application:
                 return [TelegramReply(chat_id, "Unknown application code.")]
@@ -379,7 +383,7 @@ class TelegramUpdateHandler:
             if not conversation or not conversation.data.get("candidate_email"):
                 return [
                     TelegramReply(
-                        chat_id, "Contact verification session expired; use /contact CODE."
+                        chat_id, "Contact verification session expired; use /job_contact CODE."
                     )
                 ]
             address = str(conversation.data["candidate_email"])
@@ -432,7 +436,8 @@ class TelegramUpdateHandler:
             return [
                 TelegramReply(
                     chat_id,
-                    f"Verified contact selected: {address}. Use /approve {application.human_code}.",
+                    f"Verified contact selected: {address}. Use /job_approve "
+                    f"{application.human_code}.",
                 )
             ]
         if action == "confirm":
@@ -538,7 +543,7 @@ class TelegramUpdateHandler:
             session.delete(conversation)
             return TelegramReply(
                 conversation.chat_id,
-                "Final material received. Use /contact CODE, then /approve CODE. "
+                "Final material received. Use /job_contact CODE, then /job_approve CODE. "
                 "Nothing has been sent.",
             )
         if conversation.state == "awaiting_contact":
@@ -567,7 +572,8 @@ class TelegramUpdateHandler:
             return TelegramReply(chat_id, "Final CV and message are not both ready.")
         if not application.approved_contact_id:
             return TelegramReply(
-                chat_id, "No verified contact is selected; use /contact CODE or /manual CODE."
+                chat_id,
+                "No verified contact is selected; use /job_contact CODE or /job_manual CODE.",
             )
         contact = session.get(Contact, application.approved_contact_id)
         already_sent = (
@@ -593,7 +599,7 @@ class TelegramUpdateHandler:
         if not allowed:
             return TelegramReply(
                 chat_id,
-                f"Automatic delivery blocked: {reason}. Use /manual {application.human_code}.",
+                f"Automatic delivery blocked: {reason}. Use /job_manual {application.human_code}.",
             )
         transition_application(
             session, application, ApplicationStatus.APPROVED, f"telegram:{user_id}"
@@ -656,82 +662,3 @@ class TelegramUpdateHandler:
         conversation.application_id = None
         conversation.data = {"job_id": str(job_id)}
         conversation.expires_at = datetime.now(UTC) + timedelta(hours=24)
-
-
-class TelegramHttpProvider:
-    def __init__(self, token: str, timeout: float = 35) -> None:
-        self.base = f"https://api.telegram.org/bot{token}"
-        self.timeout = timeout
-
-    def get_updates(self, offset: int | None) -> list[dict[str, Any]]:
-        response = httpx.get(
-            f"{self.base}/getUpdates",
-            params={"offset": offset, "timeout": 30},
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        return list(response.json()["result"])
-
-    def download_document(self, file_id: str, maximum: int) -> bytes:
-        metadata = httpx.get(
-            f"{self.base}/getFile", params={"file_id": file_id}, timeout=self.timeout
-        ).json()["result"]
-        token = self.base.rsplit("bot", 1)[-1]
-        response = httpx.get(
-            f"https://api.telegram.org/file/bot{token}/{metadata['file_path']}",
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        if len(response.content) > maximum:
-            raise ValueError("Telegram document exceeds maximum size")
-        return response.content
-
-    def send_reply(self, reply: TelegramReply) -> str:
-        body: dict[str, Any] = {
-            "chat_id": reply.chat_id,
-            "text": reply.text,
-            "disable_web_page_preview": True,
-        }
-        if reply.buttons:
-            body["reply_markup"] = {
-                "inline_keyboard": [
-                    [{"text": label, "callback_data": data}] for label, data in reply.buttons
-                ]
-            }
-        response = httpx.post(f"{self.base}/sendMessage", json=body, timeout=self.timeout)
-        response.raise_for_status()
-        return str(response.json().get("result", {}).get("message_id", ""))
-
-    def send(self, notification: Notification) -> str:
-        return self.send_reply(
-            TelegramReply(int(notification.recipient), notification.text, notification.buttons)
-        )
-
-
-def run_long_polling(
-    factory: sessionmaker[Session], handler: TelegramUpdateHandler, provider: TelegramHttpProvider
-) -> None:
-    offset: int | None = None
-    while True:
-        try:
-            updates = provider.get_updates(offset)
-            for update in updates:
-                offset = int(update["update_id"]) + 1
-                document = (update.get("message") or {}).get("document")
-                if document:
-                    update["message"]["_file_bytes"] = provider.download_document(
-                        str(document["file_id"]), handler.settings.max_upload_bytes
-                    )
-                with factory.begin() as session:
-                    replies = handler.process(session, update)
-                    for index, reply in enumerate(replies):
-                        put_outbox(
-                            session,
-                            "telegram",
-                            "telegram_reply",
-                            str(reply.chat_id),
-                            {"text": reply.text, "buttons": list(reply.buttons)},
-                            f"telegram-reply:{update['update_id']}:{index}",
-                        )
-        except (httpx.HTTPError, IntegrityError, ValueError):
-            time.sleep(5)

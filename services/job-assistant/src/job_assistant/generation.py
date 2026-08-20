@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import tempfile
-from pathlib import Path
+import time
+from collections.abc import Callable
 from typing import Any
+
+import httpx
 
 from .career import CareerInventory
 from .interfaces import GenerationResult
@@ -25,31 +25,6 @@ class GenerationError(RuntimeError):
         self.retryable = retryable
         self.exit_code = exit_code
         self.structured_log = structured_log or []
-
-
-def _redacted_structured_log(stdout: str) -> list[dict[str, Any]]:
-    """Retain execution metadata without storing prompts or generated CV content."""
-    events: list[dict[str, Any]] = []
-    for line in stdout.splitlines()[-500:]:
-        try:
-            raw = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(raw, dict):
-            continue
-        event: dict[str, Any] = {"type": str(raw.get("type", "unknown"))[:100]}
-        item = raw.get("item")
-        if isinstance(item, dict):
-            event["item_type"] = str(item.get("type", "unknown"))[:100]
-        usage = raw.get("usage")
-        if isinstance(usage, dict):
-            event["usage"] = {
-                str(key)[:100]: value
-                for key, value in usage.items()
-                if isinstance(value, (int, float))
-            }
-        events.append(event)
-    return events
 
 
 def generation_schema() -> dict[str, Any]:
@@ -87,111 +62,79 @@ run commands, read files, or contact anyone. Return only the requested schema.
 """
 
 
-class CodexCliGenerationProvider:
-    name = "codex-cli"
+class ExternalAiGenerationProvider:
+    name = "external-ai"
 
-    def __init__(self, executable: str, codex_home: Path, timeout_seconds: int = 600) -> None:
-        self.executable = executable
-        self.codex_home = codex_home
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        model: str,
+        reasoning: str,
+        timeout_seconds: int = 600,
+    ) -> None:
+        self.model = model
+        self.reasoning = reasoning
         self.timeout_seconds = timeout_seconds
+        self._client = httpx.Client(
+            base_url=base_url.rstrip("/"),
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20,
+        )
+        self.last_external_job_id: str | None = None
         self.last_exit_code: int | None = None
         self.last_structured_log: list[dict[str, Any]] = []
 
-    def generate(self, payload: dict[str, Any]) -> GenerationResult:
+    def generate(
+        self,
+        payload: dict[str, Any],
+        idempotency_key: str,
+        on_submitted: Callable[[str], None] | None = None,
+    ) -> GenerationResult:
         prompt = (
             SYSTEM_PROMPT
             + "\nJOB_DATA_AND_INVENTORY_BEGIN\n"
             + json.dumps(payload, ensure_ascii=False)
             + "\nJOB_DATA_AND_INVENTORY_END\n"
         )
-        self.codex_home.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with tempfile.TemporaryDirectory(prefix="job-generation-") as temporary:
-            root = Path(temporary)
-            schema_path = root / "schema.json"
-            output_path = root / "result.json"
-            schema_path.write_text(json.dumps(generation_schema()), encoding="utf-8")
-            command = [
-                self.executable,
-                "exec",
-                "--ephemeral",
-                "--sandbox",
-                "read-only",
-                "--ignore-user-config",
-                "--skip-git-repo-check",
-                "--json",
-                "--output-schema",
-                str(schema_path),
-                "--output-last-message",
-                str(output_path),
-                "--config",
-                'web_search="disabled"',
-                "-",
-            ]
-            environment = {
-                "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-                "HOME": str(self.codex_home),
-                "CODEX_HOME": str(self.codex_home),
-                "LANG": "C.UTF-8",
-            }
-            try:
-                process = subprocess.run(  # noqa: S603 - fixed executable/argument vector; no shell
-                    command,
-                    input=prompt,
-                    cwd=root,
-                    env=environment,
-                    text=True,
-                    capture_output=True,
-                    timeout=self.timeout_seconds,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired as exc:
-                raise GenerationError(
-                    "Codex generation timed out", "timeout", retryable=True
-                ) from exc
-            self.last_exit_code = process.returncode
-            self.last_structured_log = _redacted_structured_log(process.stdout)
-            stderr = process.stderr[-8_000:]
-            folded = (stderr + process.stdout).casefold()
-            if process.returncode != 0:
-                if any(
-                    marker in folded
-                    for marker in ("401", "unauthorized", "login required", "authentication")
-                ):
+        try:
+            response = self._client.post(
+                "/v1/jobs",
+                json={
+                    "requester": "job-assistant",
+                    "idempotency_key": idempotency_key,
+                    "prompt": prompt,
+                    "model": self.model,
+                    "reasoning_effort": self.reasoning,
+                    "output_schema": generation_schema(),
+                    "timeout_seconds": self.timeout_seconds,
+                    "correlation": {"workflow": "cv-generation"},
+                },
+            )
+            response.raise_for_status()
+            job = response.json()
+            self.last_external_job_id = str(job["job_id"])
+            if on_submitted:
+                on_submitted(self.last_external_job_id)
+            deadline = time.monotonic() + self.timeout_seconds + 60
+            while time.monotonic() < deadline:
+                current = self._client.get(f"/v1/jobs/{self.last_external_job_id}")
+                current.raise_for_status()
+                job = current.json()
+                if job["status"] == "completed":
+                    return GenerationResult.model_validate_json(job["result"])
+                if job["status"] in {"failed", "cancelled"}:
+                    code = str(job.get("error_code") or job["status"])
                     raise GenerationError(
-                        "Codex authentication requires manual recovery",
-                        "authentication",
-                        True,
-                        process.returncode,
-                        self.last_structured_log,
+                        f"external AI generation failed: {code}",
+                        code,
+                        code in {"usage_limit", "timeout"},
                     )
-                if any(
-                    marker in folded for marker in ("usage limit", "rate limit", "429", "quota")
-                ):
-                    raise GenerationError(
-                        "Codex usage limit reached",
-                        "usage_limit",
-                        True,
-                        process.returncode,
-                        self.last_structured_log,
-                    )
-                raise GenerationError(
-                    f"Codex exited with status {process.returncode}",
-                    exit_code=process.returncode,
-                    structured_log=self.last_structured_log,
-                )
-            if not output_path.is_file():
-                raise GenerationError(
-                    "Codex did not produce structured output",
-                    "missing_output",
-                    exit_code=process.returncode,
-                    structured_log=self.last_structured_log,
-                )
-            try:
-                return GenerationResult.model_validate_json(output_path.read_text(encoding="utf-8"))
-            except ValueError as exc:
-                raise GenerationError(
-                    "Codex output failed schema validation",
-                    "invalid_output",
-                    exit_code=process.returncode,
-                    structured_log=self.last_structured_log,
-                ) from exc
+                time.sleep(2)
+        except httpx.HTTPError as exc:
+            raise GenerationError("external AI is unavailable", "broker_unavailable", True) from exc
+        except ValueError as exc:
+            raise GenerationError(
+                "external AI output failed schema validation", "invalid_output"
+            ) from exc
+        raise GenerationError("external AI generation timed out", "timeout", True)

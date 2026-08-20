@@ -187,13 +187,13 @@ jobs:
           )
           before_count="$(grep --extended-regexp --only-matching --no-filename \
             "image: ${IMAGE_NAME}:[^[:space:]]+" "${manifests[@]}" | wc --lines)"
-          test "${before_count}" -eq 6
+          test "${before_count}" -eq 5
           sed --in-place --regexp-extended \
             "s|(image: ${IMAGE_NAME}:)[^[:space:]]+|\\1${IMAGE_TAG}|" \
             "${manifests[@]}"
           after_count="$(grep --fixed-strings --only-matching --no-filename \
             "image: ${IMAGE_NAME}:${IMAGE_TAG}" "${manifests[@]}" | wc --lines)"
-          test "${after_count}" -eq 6
+          test "${after_count}" -eq 5
       - name: Create or update the release PR
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
