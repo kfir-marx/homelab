@@ -34,6 +34,7 @@ spec:
         app: job-assistant
         component: postgres
     spec:
+      priorityClassName: homelab-job-assistant
       automountServiceAccountToken: false
       securityContext:
         seccompProfile:

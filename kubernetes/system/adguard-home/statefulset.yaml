@@ -16,6 +16,7 @@ spec:
       labels:
         app: adguard-home
     spec:
+      priorityClassName: homelab-adguard-home
       securityContext:
         seccompProfile:
           type: RuntimeDefault

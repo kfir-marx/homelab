@@ -21,6 +21,7 @@ spec:
             app: job-assistant
             component: discovery
         spec:
+          priorityClassName: homelab-job-assistant
           restartPolicy: Never
           automountServiceAccountToken: false
           securityContext:

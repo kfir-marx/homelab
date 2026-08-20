@@ -40,6 +40,7 @@ spec:
           limits:
             cpu: 500m
             memory: 512Mi
+        priorityClassName: homelab-github-actions-controller
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

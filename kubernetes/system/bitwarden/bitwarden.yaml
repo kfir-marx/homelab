@@ -37,6 +37,7 @@ spec:
         app: bitwarden
         component: server
     spec:
+      priorityClassName: homelab-bitwarden
       securityContext:
         seccompProfile:
           type: RuntimeDefault

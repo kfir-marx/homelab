@@ -48,6 +48,7 @@ spec:
         app: immich
         component: postgres
     spec:
+      priorityClassName: homelab-immich
       securityContext:
         # uid/gid 999 = postgres user inside the upstream image. Matches
         # the chown done in storage.yaml's host-side setup.

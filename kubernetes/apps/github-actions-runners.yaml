@@ -45,6 +45,7 @@ spec:
 
           listenerTemplate:
             spec:
+              priorityClassName: homelab-github-actions-runners
               securityContext:
                 runAsNonRoot: true
                 seccompProfile:
@@ -71,6 +72,7 @@ spec:
 
           template:
             spec:
+              priorityClassName: homelab-github-actions-runners
               tolerations:
                 - key: nvidia.com/gpu
                   operator: Equal

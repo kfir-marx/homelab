@@ -23,6 +23,7 @@ spec:
       labels:
         app: cloudflared
     spec:
+      priorityClassName: homelab-cloudflared
       affinity:
         # Spread replicas across nodes so a single node loss doesn't
         # drop both connections.

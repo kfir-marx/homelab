@@ -1,0 +1,26 @@
+# Cluster-scoped PriorityClasses must exist before application Pods reference
+# them. The sync wave applies this Application before the workload Applications.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: workload-priorities
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/workload-priorities
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

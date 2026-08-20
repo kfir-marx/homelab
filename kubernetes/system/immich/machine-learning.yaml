@@ -50,6 +50,7 @@ spec:
         app: immich
         component: machine-learning
     spec:
+      priorityClassName: homelab-immich
       containers:
         - name: immich-machine-learning
           image: ghcr.io/immich-app/immich-machine-learning:v3.1.0

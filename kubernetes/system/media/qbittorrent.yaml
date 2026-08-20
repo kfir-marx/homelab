@@ -17,6 +17,7 @@ spec:
       labels:
         app: qbittorrent
     spec:
+      priorityClassName: homelab-media
       securityContext:
         seccompProfile:
           type: RuntimeDefault

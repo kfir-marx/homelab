@@ -17,6 +17,7 @@ spec:
       labels:
         app: sonarr
     spec:
+      priorityClassName: homelab-media
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -104,6 +105,7 @@ spec:
       labels:
         app: radarr
     spec:
+      priorityClassName: homelab-media
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -191,6 +193,7 @@ spec:
       labels:
         app: whisparr
     spec:
+      priorityClassName: homelab-media
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -278,6 +281,7 @@ spec:
       labels:
         app: prowlarr
     spec:
+      priorityClassName: homelab-media
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -358,6 +362,7 @@ spec:
       labels:
         app: flaresolverr
     spec:
+      priorityClassName: homelab-media
       securityContext:
         seccompProfile:
           type: RuntimeDefault

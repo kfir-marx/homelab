@@ -25,6 +25,7 @@ spec:
       labels:
         app: tailscale-router
     spec:
+      priorityClassName: homelab-tailscale-router
       serviceAccountName: tailscale-router
       containers:
         - name: tailscale

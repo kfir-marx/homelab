@@ -1,0 +1,86 @@
+# Higher values win during scheduling preemption. Values are deliberately below
+# the reserved system-{cluster,node}-critical PriorityClasses (>= 1,000,000,000).
+# Within each tier, values preserve the order in application-priority.txt.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-tailscale-router
+value: 300060
+description: "Priority 1: tailscale-router"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-cloudflared
+value: 300050
+description: "Priority 1: cloudflared"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-cert-manager
+value: 300040
+description: "Priority 1: cert-manager"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-adguard-home
+value: 300030
+description: "Priority 1: adguard-home"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-bitwarden
+value: 200040
+description: "Priority 2: bitwarden"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-immich
+value: 200030
+description: "Priority 2: immich"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-nvidia-gpu-operator
+value: 200020
+description: "Priority 2: nvidia-gpu-operator"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-media
+value: 200010
+description: "Priority 2: media"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-monitoring
+value: 100040
+description: "Priority 3: monitoring"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-job-assistant
+value: 100030
+description: "Priority 3: job-assistant"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-github-actions-runners
+value: 100020
+description: "Priority 3: github-actions-runners"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-github-actions-controller
+value: 100010
+description: "Priority 3: github-actions-controller"

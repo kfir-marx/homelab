@@ -16,6 +16,7 @@ spec:
         app: job-assistant
         component: migrate
     spec:
+      priorityClassName: homelab-job-assistant
       restartPolicy: Never
       automountServiceAccountToken: false
       securityContext:

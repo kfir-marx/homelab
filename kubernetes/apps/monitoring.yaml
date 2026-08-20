@@ -40,6 +40,7 @@ spec:
               kubeSchedulerRecording: false
 
           grafana:
+            priorityClassName: homelab-monitoring
             admin:
               existingSecret: monitoring-grafana-admin
               userKey: admin-user
@@ -78,6 +79,7 @@ spec:
 
           prometheus:
             prometheusSpec:
+              priorityClassName: homelab-monitoring
               replicas: 1
               retention: 15d
               # Keep a safety margin below the 50 GiB PVC capacity.
@@ -122,6 +124,7 @@ spec:
 
           alertmanager:
             alertmanagerSpec:
+              priorityClassName: homelab-monitoring
               replicas: 1
               retention: 120h
               securityContext:
@@ -156,6 +159,7 @@ spec:
                         homelab.kfir.dev/volume: monitoring-alertmanager
 
           prometheusOperator:
+            priorityClassName: homelab-monitoring
             resources:
               requests:
                 cpu: 100m
@@ -170,6 +174,7 @@ spec:
                 effect: NoSchedule
 
           kube-state-metrics:
+            priorityClassName: homelab-monitoring
             resources:
               requests:
                 cpu: 50m
@@ -182,6 +187,9 @@ spec:
                 operator: Equal
                 value: "true"
                 effect: NoSchedule
+
+          prometheus-node-exporter:
+            priorityClassName: homelab-monitoring
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

@@ -23,6 +23,7 @@ spec:
             app: job-assistant
             component: backup
         spec:
+          priorityClassName: homelab-job-assistant
           restartPolicy: Never
           automountServiceAccountToken: false
           securityContext:

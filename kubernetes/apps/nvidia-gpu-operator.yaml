@@ -22,6 +22,8 @@ spec:
       helm:
         releaseName: gpu-operator
         valuesObject:
+          operator:
+            priorityClassName: homelab-nvidia-gpu-operator
           # Required for Talos: these components are already installed as
           # version-matched system extensions in the immutable OS image.
           driver:
@@ -51,10 +53,13 @@ spec:
                   targetLabel: instance
 
           daemonsets:
+            priorityClassName: homelab-nvidia-gpu-operator
             tolerations:
               - key: nvidia.com/gpu
                 operator: Exists
                 effect: NoSchedule
+          node-feature-discovery:
+            priorityClassName: homelab-nvidia-gpu-operator
   destination:
     server: https://kubernetes.default.svc
     namespace: gpu-operator

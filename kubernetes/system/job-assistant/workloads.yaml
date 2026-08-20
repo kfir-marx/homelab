@@ -36,6 +36,7 @@ spec:
         app: job-assistant
         component: api
     spec:
+      priorityClassName: homelab-job-assistant
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -108,6 +109,7 @@ spec:
         app: job-assistant
         component: telegram
     spec:
+      priorityClassName: homelab-job-assistant
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -178,6 +180,7 @@ spec:
         app: job-assistant
         component: worker
     spec:
+      priorityClassName: homelab-job-assistant
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -273,6 +276,7 @@ spec:
         app: job-assistant
         component: generation
     spec:
+      priorityClassName: homelab-job-assistant
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

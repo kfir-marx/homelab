@@ -21,6 +21,7 @@ spec:
             app: bitwarden
             component: backup
         spec:
+          priorityClassName: homelab-bitwarden
           restartPolicy: Never
           securityContext:
             runAsNonRoot: true

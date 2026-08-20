@@ -21,6 +21,7 @@ spec:
       helm:
         releaseName: cert-manager
         valuesObject:
+          priorityClassName: homelab-cert-manager
           crds:
             enabled: true
           prometheus:
@@ -59,4 +60,3 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
-

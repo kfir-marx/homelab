@@ -35,6 +35,7 @@ spec:
         app: bitwarden
         component: postgres
     spec:
+      priorityClassName: homelab-bitwarden
       securityContext:
         seccompProfile:
           type: RuntimeDefault

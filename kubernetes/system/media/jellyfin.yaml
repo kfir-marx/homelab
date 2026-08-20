@@ -17,6 +17,7 @@ spec:
       labels:
         app: jellyfin
     spec:
+      priorityClassName: homelab-media
       nodeSelector:
         homelab.dev/gpu-node: gpu-3
       securityContext:

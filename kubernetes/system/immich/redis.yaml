@@ -47,6 +47,7 @@ spec:
         app: immich
         component: redis
     spec:
+      priorityClassName: homelab-immich
       securityContext:
         runAsNonRoot: true
         runAsUser: 999
