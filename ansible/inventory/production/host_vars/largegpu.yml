@@ -111,6 +111,24 @@ proxmox_backup_jobs:
 proxmox_backup_retired_job_ids:
   - personal-workstation
 
+# VM 502 is a space-efficient linked clone of template 101. This weekly
+# maintenance window promotes the stopped, backed-up state of 502 into a new
+# template 101 and then recreates 502 with the same VMID and guest identity.
+# The script never force-stops Windows and retains two source archives for
+# manual recovery. Keep this clear of the 04:15 cross-node backup window.
+proxmox_windows_template_refresh_enabled: true
+proxmox_windows_template_refresh_source_vmid: 502
+proxmox_windows_template_refresh_template_vmid: 101
+proxmox_windows_template_refresh_backup_storage: largegpu-hdd
+proxmox_windows_template_refresh_target_storage: local-lvm
+proxmox_windows_template_refresh_schedule: "Sun *-*-* 01:00:00"
+proxmox_windows_template_refresh_keep_backups: 2
+proxmox_windows_template_refresh_shutdown_timeout_seconds: 600
+proxmox_windows_template_refresh_clone_name: largegpu-win11
+proxmox_windows_template_refresh_conflicting_vmids:
+  - 402
+proxmox_windows_template_refresh_restart_if_previously_running: true
+
 # Planned NUT configuration: add this host to nut_servers only after its UPS
 # arrives, connect the USB data cable, and replace both empty values with the
 # four-digit lowercase IDs reported by `lsusb`.

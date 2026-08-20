@@ -6,6 +6,8 @@
 #
 # Template 101 is the retained Windows image. local-lvm has limited free space,
 # so VM 502 must remain a linked LVM-thin clone rather than a full clone.
+# An Ansible-installed Sunday maintenance timer promotes a verified backup of
+# 502 into a replacement template 101 and recreates this same resource VMID.
 windows_vms:
   largegpu-win11:
     proxmox_node: "largegpu"

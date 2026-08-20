@@ -8,6 +8,56 @@
     - role: proxmox_preflight
 
   tasks:
+    - name: Verify Windows template refresh timer is enabled
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-enabled
+          - refresh-windows-template.timer
+      register: verified_windows_template_refresh_timer_enabled
+      changed_when: false
+      check_mode: false
+      when: proxmox_windows_template_refresh_enabled | default(false) | bool
+      tags:
+        - windows-template-refresh
+
+    - name: Require enabled Windows template refresh timer
+      ansible.builtin.assert:
+        that:
+          - verified_windows_template_refresh_timer_enabled.stdout == 'enabled'
+        fail_msg: >-
+          refresh-windows-template.timer is not enabled; run the Proxmox
+          configuration play with the windows-template-refresh tag.
+      when: proxmox_windows_template_refresh_enabled | default(false) | bool
+      tags:
+        - windows-template-refresh
+
+    - name: Read Windows template refresh timer schedule
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - refresh-windows-template.timer
+          - --property=NextElapseUSecRealtime
+          - --value
+      register: verified_windows_template_refresh_timer_next_run
+      changed_when: false
+      check_mode: false
+      when: proxmox_windows_template_refresh_enabled | default(false) | bool
+      tags:
+        - windows-template-refresh
+
+    - name: Require a scheduled Windows template refresh run
+      ansible.builtin.assert:
+        that:
+          - verified_windows_template_refresh_timer_next_run.stdout | length > 0
+          - verified_windows_template_refresh_timer_next_run.stdout != 'n/a'
+        fail_msg: >-
+          refresh-windows-template.timer is enabled but has no next run.
+      when: proxmox_windows_template_refresh_enabled | default(false) | bool
+      tags:
+        - windows-template-refresh
+
     - name: Verify Proxmox guest shutdown orchestration is enabled
       ansible.builtin.command: systemctl is-enabled pve-guests.service
       register: verified_pve_guests_enabled

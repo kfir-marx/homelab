@@ -16,7 +16,7 @@ infrastructure.
 ```text
 Family and friends
         |
-        | HTTPS: jellyfin.547600.xyz / immich.547600.xyz
+        | HTTPS: jellyfin / seerr / immich public hostnames
         v
 Cloudflare edge --- outbound Cloudflare Tunnel ---> Jellyfin / Immich services
 
@@ -37,6 +37,12 @@ The two paths do not depend on one another. A Cloudflare Tunnel outage does not
 change private administration, and the public Jellyfin path does not traverse
 the tailnet.
 
+The homelab Telegram assistant is a third, outbound-only integration rather
+than a Tailscale ingress path. Telegram relays messages, so the cluster cannot
+verify that the phone was on the tailnet. Exact Telegram user-ID/direct-chat
+checks and a non-privileged gateway are its authorization boundary; see the
+[homelab assistant runbook](homelab-assistant-runbook.md).
+
 ## Cloudflare Tunnel: public services
 
 The in-cluster `cloudflared` deployment maintains outbound connections to
@@ -45,6 +51,7 @@ Cloudflare. No inbound port forwarding or public home IP is required.
 | Service | Public hostname | Internal target | Authentication |
 |---------|-----------------|-----------------|----------------|
 | Jellyfin | `jellyfin.547600.xyz` | `jellyfin.media.svc:8096` | Jellyfin account |
+| Seerr | `seerr.547600.xyz` | `seerr.media.svc:5055` | Individual Jellyfin account and Seerr permissions |
 | Immich | `immich.547600.xyz` | `immich-server.immich.svc:2283` | Immich account |
 
 Add only applications intended for external users to the tunnel. Do not put
@@ -87,8 +94,11 @@ application traffic remains WireGuard encrypted between peers.
 ## Security boundaries
 
 - Cloudflare Tunnel is limited to explicitly public services.
-- The cloudflared network policy permits only the documented Jellyfin and
-  Immich origins and Cloudflare tunnel endpoints. Adding a dashboard origin
+- The Telegram assistant exposes no listener. Its gateway can reach only
+  Telegram and the authenticated, ClusterIP-only model endpoint, and it has no
+  Kubernetes token or execution tools.
+- The cloudflared network policy permits only the documented Jellyfin, Seerr,
+  and Immich origins and Cloudflare tunnel endpoints. Adding a dashboard origin
   also requires a matching declarative policy change or it fails closed.
 - Bitwarden has no Cloudflare rule, public DNS address, LoadBalancer, NodePort,
   or Funnel. All private web applications use the shared Cilium Gateway with

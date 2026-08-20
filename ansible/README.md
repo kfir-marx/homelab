@@ -2,9 +2,11 @@
 
 Ansible owns configuration of physical Proxmox hosts after they have been
 installed and joined to `HomeLab-Cluster`. It does not install Proxmox, create
-or change corosync membership, manage VMs, or reboot a host during the normal
-configuration play. On `smallgpu` and `largegpu`, it also configures each
-directly attached UPS with Network UPS Tools (NUT).
+or change corosync membership, own VM declarations, or reboot a host during the
+normal configuration play. It does install the explicitly declared maintenance
+timer that refreshes Windows template 101 from Terraform-owned VM 502. On
+`smallgpu` and `largegpu`, it also configures each directly attached UPS with
+Network UPS Tools (NUT).
 
 The former `gpunvdgtx1060` node is no longer a Proxmox host. The separate
 `configure-ubuntu-workstation.yml` play configures its replacement Ubuntu
@@ -123,21 +125,23 @@ ansible-playbook playbooks/configure-proxmox.yml --check --diff --tags repositor
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nfs
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags storage
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags backup
+ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags windows-template-refresh
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nut
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags vfio
 ansible-playbook playbooks/verify-proxmox.yml --limit nfs_servers --tags nfs
 ansible-playbook playbooks/verify-proxmox.yml --limit local_storage_hosts --tags storage
 ansible-playbook playbooks/verify-proxmox.yml --limit backup_hosts --tags backup
+ansible-playbook playbooks/verify-proxmox.yml --limit largegpu --tags windows-template-refresh
 ansible-playbook playbooks/verify-proxmox.yml --limit nut_servers --tags nut
 ```
 
 Available configuration tags are `repositories`, `packages`, `nfs`, `storage`,
-`backup`, `nut`, and `vfio`. Common preflight checks (hostname, Proxmox major
-version, and quorate cluster membership) always run. Filesystem checks run only
-with NFS or directory-storage work, while PCI/IOMMU and running-VM conflict
-checks run only with VFIO work. A repository-, package-, storage-, backup-,
-NFS-, or NUT-only run is therefore not blocked by a GPU legitimately assigned
-to a running VM.
+`backup`, `windows-template-refresh`, `nut`, and `vfio`. Common preflight checks
+(hostname, Proxmox major version, and quorate cluster membership) always run.
+Filesystem checks run only with NFS or directory-storage work, while PCI/IOMMU
+and running-VM conflict checks run only with VFIO work. A repository-, package-,
+storage-, backup-, Windows-template-, NFS-, or NUT-only run is therefore not
+blocked by a GPU legitimately assigned to a running VM.
 
 ## Local directory storage and backups
 
@@ -174,6 +178,14 @@ restoration is handled separately by `playbooks/restore-proxmox-node.yml`; it
 selects the latest archive per declared VM, refuses existing VM IDs or volumes,
 and requires `proxmox_restore_confirm=true`. See
 [`docs/proxmox-node-disaster-recovery.md`](../docs/proxmox-node-disaster-recovery.md).
+
+The `proxmox_windows_template_refresh` role installs a weekly systemd timer
+on `largegpu`. Every Sunday at 01:00 it backs up linked workstation VM 502,
+rebuilds that backup as template 101, and recreates 502 as a linked clone while
+preserving its Proxmox VMID and Windows-facing identity. Two staging archives
+are retained. The first run should be supervised; see
+[`docs/windows-template-refresh.md`](../docs/windows-template-refresh.md) for
+the exact transaction and recovery procedure.
 
 ## UPS shutdown and recovery
 

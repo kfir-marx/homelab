@@ -22,7 +22,7 @@ apply step is required.
 | `bitwarden/server` | Gateway to TCP/8080 | PostgreSQL TCP/5432; cluster DNS; public-only TCP 80/443 for website icons; `smtp.gmail.com` TCP/587 |
 | `bitwarden/backup` | None | PostgreSQL TCP/5432 and cluster DNS |
 | `bitwarden/postgres` | Server and backup to TCP/5432 | None |
-| `cloudflared` | None | Cluster DNS; Cloudflare tunnel domains on TCP/UDP 7844; Jellyfin on TCP/8096 and Immich on TCP/2283 |
+| `cloudflared` | None | Cluster DNS; Cloudflare tunnel domains on TCP/UDP 7844; Jellyfin on TCP/8096, Seerr on TCP/5055, and Immich on TCP/2283 |
 | `immich/server` | Gateway and Cloudflared to TCP/2283 | PostgreSQL 5432, Valkey 6379, ML 3003, cluster DNS, and public-only HTTPS |
 | `immich/machine-learning` | Server to TCP/3003 | Cluster DNS and public-only HTTPS for model downloads |
 | `immich/postgres` | Server to TCP/5432 | None |
@@ -32,8 +32,10 @@ apply step is required.
 | `job-assistant/generation` | None | Restricted PostgreSQL, cluster DNS, and Codex service HTTPS only |
 | `job-assistant/discovery` | None | PostgreSQL, cluster DNS, Gmail IMAP, and configured public ATS APIs |
 | `job-assistant/postgres` | Application roles and backup to TCP/5432 | None |
+| `homelab-assistant/telegram` | None | Cluster DNS, Telegram API HTTPS, and the authenticated in-namespace LLM API on TCP/8000 |
+| `homelab-assistant/inference` | Telegram gateway and node health probes to TCP/8000 | Cluster DNS and pinned-model download hosts on HTTPS |
 | `immich/redis` | Server to TCP/6379 | None |
-| `media` | Same-namespace application traffic; Gateway to each web UI; Cloudflared to Jellyfin TCP/8096; LAN/world peers to qBittorrent TCP/UDP 51413 | Cluster DNS; public-only TCP 80/443 for metadata, indexers, subtitle providers, and trackers; qBittorrent additionally reaches public TCP/UDP peers |
+| `media` | Same-namespace application traffic; Gateway to each web UI; Cloudflared to Jellyfin TCP/8096 and Seerr TCP/5055; LAN/world peers to qBittorrent TCP/UDP 51413 | Cluster DNS; public-only TCP 80/443 for metadata, indexers, subtitle providers, and trackers; qBittorrent additionally reaches public TCP/UDP peers |
 | `tailscale-router` | Public/LAN UDP 41641 (pinned in the Deployment) | Not isolated; see the Cilium Gateway hairpin exception below |
 | `monitoring` | Same-namespace traffic, Gateway to Grafana, and API-server webhook traffic | Not isolated: Prometheus must discover and scrape changing cluster targets |
 
@@ -112,6 +114,9 @@ curl --fail https://immich.home.547600.xyz/api/server/ping
 kubectl -n media rollout status deployment/jellyfin
 curl --fail https://jellyfin.home.547600.xyz/health
 curl --fail https://seerr.home.547600.xyz/api/v1/status
+
+kubectl -n homelab-assistant rollout status deployment/llm --timeout=30m
+kubectl -n homelab-assistant rollout status deployment/telegram-gateway
 
 kubectl -n cloudflared logs deployment/cloudflared
 kubectl -n tailscale-router logs deployment/tailscale-router

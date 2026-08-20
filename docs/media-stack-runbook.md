@@ -50,8 +50,13 @@ write to the shared, replaceable bulk-data tree.
 
 ## Access
 
-Public Jellyfin uses `https://jellyfin.547600.xyz` through Cloudflare Tunnel.
-Administrative and request interfaces use the private Gateway:
+Public Jellyfin and Seerr use Cloudflare Tunnel. Seerr remains available on the
+private Gateway as well; every other administrative interface is private:
+
+| Service | Public URL |
+|---|---|
+| Jellyfin | `https://jellyfin.547600.xyz` |
+| Seerr | `https://seerr.547600.xyz` |
 
 | Service | Private URL |
 |---|---|
@@ -74,12 +79,20 @@ forward the WebUI port.
 The in-cluster deployment is automated, but these account/router actions stay
 out of Git and require an operator:
 
-1. In Cloudflare Zero Trust, open the existing tunnel and add public hostname
-   `jellyfin.547600.xyz` with service URL
-   `http://jellyfin.media.svc.cluster.local:8096`. The initial deployment found
-   that this public hostname did not yet resolve; the private Jellyfin route
-   was healthy. Do not enable Cloudflare Access because native Jellyfin clients
-   cannot complete its browser redirect.
+1. In Cloudflare Zero Trust, open the existing tunnel and configure these
+   public hostnames. No home-router forwarding is needed:
+
+   | Public hostname | Service URL |
+   |---|---|
+   | `jellyfin.547600.xyz` | `http://jellyfin.media.svc.cluster.local:8096` |
+   | `seerr.547600.xyz` | `http://seerr.media.svc.cluster.local:5055` |
+
+   Do not enable Cloudflare Access because native Jellyfin and Wholphin clients
+   cannot reliably complete its browser redirect. Before sharing Seerr, disable
+   any unintended account-creation path, require individual Jellyfin accounts,
+   give ordinary users request-only permissions, and keep Seerr administrator
+   rights limited to the owner. Apply Cloudflare rate limiting/WAF rules if the
+   public hostname receives abusive traffic.
 2. Store the existing `media-backup-credentials` password in a password
    manager. Retrieve it without printing it into shell history:
 

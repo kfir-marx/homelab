@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "homelab-assistant"
+version = "0.1.0"
+description = "Allowlisted Telegram interface for the private homelab LLM"
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.28,<1",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.14,<2",
+  "pytest>=8.3,<9",
+  "respx>=0.22,<1",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+homelab-assistant = "homelab_assistant.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/homelab_assistant"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+

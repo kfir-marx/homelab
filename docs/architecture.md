@@ -157,15 +157,19 @@ The control-plane VIP is managed by Talos's built-in VIP mechanism — no extern
 
 Both `gpu-2` (Talos K8s GPU worker) and `largegpu-win11` (Windows gaming VM) are defined in Terraform for the same Proxmox host (`largegpu`), and **both have the RTX 3080 (`0000:08:00.0`) configured for PCIe passthrough**. Terraform creates both VMs; there is no config-time mutex.
 
-The exclusivity is enforced at **VM start time** by Proxmox itself: the GPU can only be bound to one running VM. To switch between them:
+The exclusivity is enforced at **VM start time** by Proxmox itself: the GPU can only be bound to one running VM. Wait for the source VM to stop completely before starting the destination VM so the RTX 3080's VFIO group has been released:
 
 ```bash
 # Talos → Windows
-qm shutdown 402 && qm start 502
+qm shutdown 402 && qm wait 402 --timeout 180 && qm start 502
 
 # Windows → Talos
-qm shutdown 502 && qm start 402
+qm shutdown 502 && qm wait 502 --timeout 180 && qm start 402
 ```
+
+If the graceful shutdown does not complete within three minutes, `qm wait`
+fails and the chained command leaves the destination VM stopped. Investigate
+the source VM instead of immediately forcing it off.
 
 The configured runtime allocation is:
 
@@ -194,7 +198,12 @@ The shared component supports two modes:
 `virtio-win.iso` (Fedora's signed driver ISO) must be attached manually on a SATA slot before the first install — `bpg/proxmox` v0.105 only allows one `cdrom` block per VM, and SATA is hot-pluggable (IDE is not).
 
 Template 101 must remain stopped. VM 502 is disposable and can be recreated
-from it by applying only the `windows-workstation` stack.
+from it by applying only the `windows-workstation` stack. A Sunday 01:00
+Ansible-installed maintenance timer first creates and verifies an independent
+backup of 502, then replaces template 101 with that state and recreates linked
+clone 502. Both IDs remain stable, as do 502's MAC, SMBIOS UUID, and VM
+generation ID. The detailed failure boundaries and recovery commands are in
+[`windows-template-refresh.md`](windows-template-refresh.md).
 
 ---
 
@@ -255,10 +264,11 @@ the data. Talos VM `402` is backed up at the VM level for fast node recovery,
 while its separately attached scratch disk remains excluded and disposable.
 
 `largegpu-hdd` stores the monthly Proxmox backup of durable Windows template VM
-`101`, with one retained copy. Every guest is also protected by staggered daily
-cross-node `vzdump` jobs: `smallgpu` writes to a dedicated directory on
-`largegpu-hdd` at 02:15, while `largegpu` writes to a dedicated directory on
-`smallgpu`'s NTFS bulk disk at 04:15. Both retain three recent and two weekly
+`101`, with one retained copy, plus the two most recent weekly VM 502 staging
+archives used to refresh that template. Every guest is also protected by
+staggered daily cross-node `vzdump` jobs: `smallgpu` writes to a dedicated
+directory on `largegpu-hdd` at 02:15, while `largegpu` writes to a dedicated
+directory on `smallgpu`'s NTFS bulk disk at 04:15. Both retain three recent and two weekly
 Zstandard archives. Proxmox registrations restrict each backup storage to its
 source node, and the server exports only the dedicated destination to the
 opposite host. Ansible registers `storage1-bulk` at the `/mnt/data10tb` export.
@@ -744,14 +754,19 @@ kubectl get applications -n argocd
 
 ### Switching between Talos GPU worker and Windows VM
 
-Both VMs are always present in state — toggle which is *running* via Proxmox:
+Both VMs are always present in state. Drain the Talos worker before switching
+to Windows, and wait for each source VM to stop completely before starting the
+other one:
 
 ```bash
 # Run Windows for gaming
-ssh root@192.168.1.107 'qm shutdown 402 && qm start 502'
+kubectl drain gpu-2 --ignore-daemonsets --delete-emptydir-data
+ssh root@192.168.1.107 'qm shutdown 402 && qm wait 402 --timeout 180 && qm start 502'
 
 # Back to Talos K8s GPU worker
-ssh root@192.168.1.107 'qm shutdown 502 && qm start 402'
+ssh root@192.168.1.107 'qm shutdown 502 && qm wait 502 --timeout 180 && qm start 402'
+kubectl wait --for=condition=Ready node/gpu-2 --timeout=5m
+kubectl uncordon gpu-2
 ```
 
 ## Conventions and design decisions

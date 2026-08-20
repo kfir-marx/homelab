@@ -109,6 +109,13 @@ description: "Priority 3: job-assistant"
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
+  name: homelab-assistant
+value: 1000250
+description: "Priority 3: private homelab LLM and Telegram gateway"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
   name: homelab-github-actions-runners
 value: 1000200
 description: "Priority 3: github-actions-runners"

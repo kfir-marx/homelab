@@ -1,0 +1,33 @@
+# Private GPU-backed LLM and its allowlisted Telegram gateway. The inference
+# API is ClusterIP-only; the gateway has no Kubernetes credentials or tools.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: homelab-assistant
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/homelab-assistant
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: homelab-assistant
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: homelab-assistant-secrets
+      jsonPointers:
+        - /data
+

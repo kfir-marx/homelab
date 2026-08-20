@@ -1,0 +1,142 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm
+  namespace: homelab-assistant
+spec:
+  type: ClusterIP
+  selector:
+    app: homelab-assistant
+    component: inference
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm
+  namespace: homelab-assistant
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: homelab-assistant
+      component: inference
+  template:
+    metadata:
+      labels:
+        app: homelab-assistant
+        component: inference
+    spec:
+      priorityClassName: homelab-assistant
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/hostname: gpu-2
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 2000
+        runAsGroup: 0
+        fsGroup: 0
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vllm
+          image: docker.io/vllm/vllm-openai:v0.26.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --model
+            - Qwen/Qwen3-8B-AWQ
+            - --revision
+            - 9e07647a76edf7424dfe621814b6a1fe8fc54d4a
+            - --served-model-name
+            - homelab-assistant
+            - --quantization
+            - awq
+            - --dtype
+            - half
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+            - --max-num-seqs
+            - "2"
+            - --generation-config
+            - vllm
+          env:
+            - name: HOME
+              value: /home/vllm
+            - name: HF_HOME
+              value: /home/vllm/.cache/huggingface
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+            - name: DO_NOT_TRACK
+              value: "1"
+            - name: VLLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: LLM_API_KEY
+          ports:
+            - name: http
+              containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 180
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "8"
+              memory: 24Gi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: model-cache
+              mountPath: /home/vllm/.cache/huggingface
+            - name: runtime
+              mountPath: /tmp
+            - name: config
+              mountPath: /home/vllm/.config
+            - name: shared-memory
+              mountPath: /dev/shm
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: llm-model-cache
+        - name: runtime
+          emptyDir:
+            sizeLimit: 4Gi
+        - name: config
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: shared-memory
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+

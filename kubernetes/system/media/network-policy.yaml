@@ -65,6 +65,17 @@ spec:
             - {port: "6767", protocol: TCP}
             - {port: "8080", protocol: TCP}
             - {port: "6246", protocol: TCP}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cloudflared-jellyfin-ingress
+  namespace: media
+spec:
+  endpointSelector:
+    matchLabels:
+      app: jellyfin
+  ingress:
     - fromEndpoints:
         - matchLabels:
             "k8s:io.kubernetes.pod.namespace": cloudflared
@@ -72,6 +83,24 @@ spec:
       toPorts:
         - ports:
             - {port: "8096", protocol: TCP}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cloudflared-seerr-ingress
+  namespace: media
+spec:
+  endpointSelector:
+    matchLabels:
+      app: seerr
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": cloudflared
+            "k8s:app": cloudflared
+      toPorts:
+        - ports:
+            - {port: "5055", protocol: TCP}
 ---
 # Metadata, indexer, tracker, and image/plugin access is public-only. Internal
 # service calls are authorized separately by media-internal above.

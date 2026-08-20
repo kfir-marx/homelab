@@ -1,0 +1,98 @@
+---
+- name: Validate Windows template refresh configuration
+  ansible.builtin.assert:
+    that:
+      - proxmox_windows_template_refresh_source_vmid | int >= 100
+      - proxmox_windows_template_refresh_template_vmid | int >= 100
+      - >-
+        proxmox_windows_template_refresh_source_vmid | int
+        != proxmox_windows_template_refresh_template_vmid | int
+      - >-
+        proxmox_windows_template_refresh_conflicting_vmids | map('int')
+        | select('equalto', proxmox_windows_template_refresh_source_vmid | int)
+        | list | length == 0
+      - proxmox_windows_template_refresh_backup_storage is match('^[a-zA-Z][a-zA-Z0-9_-]+$')
+      - proxmox_windows_template_refresh_target_storage is match('^[a-zA-Z][a-zA-Z0-9_-]+$')
+      - proxmox_windows_template_refresh_schedule | length > 0
+      - proxmox_windows_template_refresh_keep_backups | int >= 1
+      - proxmox_windows_template_refresh_shutdown_timeout_seconds | int >= 60
+      - proxmox_windows_template_refresh_clone_name is match('^[a-zA-Z0-9][a-zA-Z0-9._-]*$')
+      - >-
+        proxmox_windows_template_refresh_conflicting_vmids | map('string')
+        | reject('match', '^[1-9][0-9]*$') | list | length == 0
+    fail_msg: >-
+      The Windows template refresh requires distinct valid VM IDs, valid storage
+      IDs, at least one retained backup, and a shutdown timeout of at least 60s.
+
+- name: Read Windows template refresh storage status
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ inventory_hostname }}/storage/{{ item }}/status"
+      - --output-format
+      - json
+  register: proxmox_windows_template_refresh_storage_status
+  changed_when: false
+  check_mode: false
+  loop:
+    - "{{ proxmox_windows_template_refresh_backup_storage }}"
+    - "{{ proxmox_windows_template_refresh_target_storage }}"
+
+- name: Require active backup and target storage
+  ansible.builtin.assert:
+    that:
+      - (item.stdout | from_json).active | int == 1
+      - (item.stdout | from_json).enabled | int == 1
+      - >-
+        (item.item == proxmox_windows_template_refresh_backup_storage
+         and 'backup' in (item.stdout | from_json).content.split(','))
+        or
+        (item.item == proxmox_windows_template_refresh_target_storage
+         and 'images' in (item.stdout | from_json).content.split(','))
+    fail_msg: >-
+      Storage {{ item.item }} is not active or does not support the required
+      content type for Windows template refresh.
+  loop: "{{ proxmox_windows_template_refresh_storage_status.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Install Windows template refresh script
+  ansible.builtin.template:
+    src: refresh-windows-template.sh.j2
+    dest: /usr/local/sbin/refresh-windows-template
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install Windows template refresh service
+  ansible.builtin.template:
+    src: refresh-windows-template.service.j2
+    dest: /etc/systemd/system/refresh-windows-template.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: proxmox_windows_template_refresh_service_unit
+
+- name: Install Windows template refresh timer
+  ansible.builtin.template:
+    src: refresh-windows-template.timer.j2
+    dest: /etc/systemd/system/refresh-windows-template.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: proxmox_windows_template_refresh_timer_unit
+
+- name: Enable and start Windows template refresh timer
+  ansible.builtin.systemd_service:
+    name: refresh-windows-template.timer
+    daemon_reload: >-
+      {{ proxmox_windows_template_refresh_service_unit.changed
+         or proxmox_windows_template_refresh_timer_unit.changed }}
+    enabled: true
+    state: >-
+      {{ 'restarted'
+         if (proxmox_windows_template_refresh_service_unit.changed
+             or proxmox_windows_template_refresh_timer_unit.changed)
+         else 'started' }}
+  when: not ansible_check_mode

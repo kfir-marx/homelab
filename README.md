@@ -207,6 +207,7 @@ export are unavailable even though the API on `largegpu` remains up.
 | [Monitoring runbook](docs/monitoring-runbook.md) | Prometheus/Grafana deployment, storage, access, and verification |
 | [Job assistant architecture](docs/job-assistant-architecture.md) | Trust boundaries, queues, state machines, deduplication, and delivery safety |
 | [Job assistant runbook](docs/job-assistant-runbook.md) | Private inputs, Codex auth, secrets, deployment, restore, and troubleshooting |
+| [Homelab assistant runbook](docs/homelab-assistant-runbook.md) | GPU LLM, Telegram security boundary, secrets, rollout, and incident response |
 | [GPU Operator runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, rollout, CUDA validation, and metrics |
 | [Jellyfin media stack runbook](docs/media-stack-runbook.md) | Backup restoration, storage, GPU transcoding, credential rotation, and cleanup policy |
 | [Ubuntu workstation runbook](docs/ubuntu-workstation-runbook.md) | Critical NFS service and local NVIDIA/HDMI recovery |

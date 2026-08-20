@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly SOURCE_VMID={{ proxmox_windows_template_refresh_source_vmid | int }}
+readonly TEMPLATE_VMID={{ proxmox_windows_template_refresh_template_vmid | int }}
+readonly NODE={{ inventory_hostname | quote }}
+readonly BACKUP_STORAGE={{ proxmox_windows_template_refresh_backup_storage | quote }}
+readonly TARGET_STORAGE={{ proxmox_windows_template_refresh_target_storage | quote }}
+readonly KEEP_BACKUPS={{ proxmox_windows_template_refresh_keep_backups | int }}
+readonly SHUTDOWN_TIMEOUT={{ proxmox_windows_template_refresh_shutdown_timeout_seconds | int }}
+readonly CLONE_NAME={{ proxmox_windows_template_refresh_clone_name | quote }}
+readonly RESTART_IF_RUNNING={{ proxmox_windows_template_refresh_restart_if_previously_running | bool | ternary('true', 'false') }}
+readonly CONFLICTING_VMIDS=({% for vmid in proxmox_windows_template_refresh_conflicting_vmids %}{{ vmid | int }} {% endfor %})
+
+was_running=false
+source_destroyed=false
+archive=""
+phase=preflight
+
+log() {
+  printf '%s refresh-windows-template: %s\n' "$(date --iso-8601=seconds)" "$*"
+}
+
+vm_exists() {
+  qm status "$1" >/dev/null 2>&1
+}
+
+vm_status() {
+  qm status "$1" | awk '{print $2}'
+}
+
+on_exit() {
+  local rc=$?
+  if (( rc == 0 )); then
+    return
+  fi
+
+  log "FAILED during ${phase}; retained recovery archive: ${archive:-not-created}"
+  if [[ "${was_running}" == true && "${source_destroyed}" == false ]] \
+    && vm_exists "${SOURCE_VMID}" \
+    && [[ "$(vm_status "${SOURCE_VMID}")" == stopped ]]; then
+    log "attempting to restart unchanged VM ${SOURCE_VMID} after pre-destruction failure"
+    qm start "${SOURCE_VMID}" || true
+  fi
+}
+trap on_exit EXIT
+
+exec 9>/run/lock/refresh-windows-template.lock
+if ! flock --nonblock 9; then
+  log "another refresh is already running; skipping"
+  exit 0
+fi
+
+for command in awk flock pvesh pvesm python3 qm qmrestore vzdump zstd; do
+  command -v "${command}" >/dev/null 2>&1 || {
+    log "required command is missing: ${command}"
+    exit 1
+  }
+done
+
+vm_exists "${SOURCE_VMID}" || {
+  log "source VM ${SOURCE_VMID} does not exist on ${NODE}"
+  exit 1
+}
+vm_exists "${TEMPLATE_VMID}" || {
+  log "template VM ${TEMPLATE_VMID} does not exist on ${NODE}"
+  exit 1
+}
+
+source_config="$(qm config "${SOURCE_VMID}")"
+template_config="$(qm config "${TEMPLATE_VMID}")"
+grep -q '^template: 1$' <<<"${template_config}" || {
+  log "VM ${TEMPLATE_VMID} is not a template"
+  exit 1
+}
+if grep -q '^template: 1$' <<<"${source_config}"; then
+  log "source VM ${SOURCE_VMID} is unexpectedly a template"
+  exit 1
+fi
+if grep -q '^protection: 1$' <<<"${source_config}" \
+  || grep -q '^protection: 1$' <<<"${template_config}"; then
+  log "source or template VM is protected; refusing destructive rotation"
+  exit 1
+fi
+if grep -Eq '^(ide|sata|scsi|virtio)[0-9]+:.*,backup=0(,|$)' <<<"${source_config}"; then
+  log "source VM has a backup-excluded disk; refusing a lossy template refresh"
+  exit 1
+fi
+
+source_net0="$(awk -F ': ' '$1 == "net0" {print $2}' <<<"${source_config}")"
+source_smbios1="$(awk -F ': ' '$1 == "smbios1" {print $2}' <<<"${source_config}")"
+source_vmgenid="$(awk -F ': ' '$1 == "vmgenid" {print $2}' <<<"${source_config}")"
+
+if [[ "$(vm_status "${SOURCE_VMID}")" == running ]]; then
+  was_running=true
+fi
+
+for conflicting_vmid in "${CONFLICTING_VMIDS[@]}"; do
+  if vm_exists "${conflicting_vmid}" \
+    && [[ "$(vm_status "${conflicting_vmid}")" == running ]] \
+    && [[ "${was_running}" == true ]]; then
+    log "VMs ${SOURCE_VMID} and ${conflicting_vmid} are both running; refusing to continue"
+    exit 1
+  fi
+done
+
+if [[ "${was_running}" == true ]]; then
+  phase=shutdown
+  log "gracefully shutting down VM ${SOURCE_VMID}"
+  qm shutdown "${SOURCE_VMID}" --timeout "${SHUTDOWN_TIMEOUT}"
+fi
+[[ "$(vm_status "${SOURCE_VMID}")" == stopped ]] || {
+  log "VM ${SOURCE_VMID} did not stop cleanly; refusing to force-stop it"
+  exit 1
+}
+
+phase=backup
+backup_started="$(date +%s)"
+log "creating an independent vzdump backup of VM ${SOURCE_VMID} on ${BACKUP_STORAGE}"
+vzdump "${SOURCE_VMID}" \
+  --storage "${BACKUP_STORAGE}" \
+  --mode stop \
+  --compress zstd \
+  --prune-backups "keep-last=${KEEP_BACKUPS}"
+
+backup_json="$(
+  pvesh get "/nodes/${NODE}/storage/${BACKUP_STORAGE}/content" \
+    --content backup \
+    --vmid "${SOURCE_VMID}" \
+    --output-format json
+)"
+archive="$(
+  python3 -c '
+import json
+import sys
+
+started = int(sys.argv[1])
+backups = [
+    item for item in json.load(sys.stdin)
+    if int(item.get("ctime", 0)) >= started
+]
+if not backups:
+    raise SystemExit("vzdump completed but no new backup archive was found")
+print(max(backups, key=lambda item: int(item.get("ctime", 0)))["volid"])
+' "${backup_started}" <<<"${backup_json}"
+)"
+
+archive_path="$(pvesm path "${archive}")"
+[[ -f "${archive_path}" ]] || {
+  log "backup volume does not resolve to a file: ${archive}"
+  exit 1
+}
+log "verifying Zstandard checksum for ${archive}"
+zstd --quiet --test "${archive_path}"
+
+phase=remove-source
+log "destroying linked clone VM ${SOURCE_VMID}"
+qm destroy "${SOURCE_VMID}"
+source_destroyed=true
+
+phase=remove-template
+log "destroying old template VM ${TEMPLATE_VMID}"
+qm destroy "${TEMPLATE_VMID}"
+
+phase=restore-template
+log "restoring ${archive} as VM ${TEMPLATE_VMID} on ${TARGET_STORAGE}"
+qmrestore "${archive}" "${TEMPLATE_VMID}" \
+  --storage "${TARGET_STORAGE}" \
+  --unique 1
+[[ "$(vm_status "${TEMPLATE_VMID}")" == stopped ]] || {
+  log "restored VM ${TEMPLATE_VMID} is not stopped"
+  exit 1
+}
+
+phase=convert-template
+log "converting VM ${TEMPLATE_VMID} to a template"
+qm template "${TEMPLATE_VMID}"
+grep -q '^template: 1$' < <(qm config "${TEMPLATE_VMID}") || {
+  log "VM ${TEMPLATE_VMID} did not become a template"
+  exit 1
+}
+
+phase=recreate-source
+log "creating linked clone VM ${SOURCE_VMID} from template ${TEMPLATE_VMID}"
+qm clone "${TEMPLATE_VMID}" "${SOURCE_VMID}" \
+  --full 0 \
+  --name "${CLONE_NAME}"
+
+identity_args=()
+[[ -n "${source_net0}" ]] && identity_args+=(--net0 "${source_net0}")
+[[ -n "${source_smbios1}" ]] && identity_args+=(--smbios1 "${source_smbios1}")
+[[ -n "${source_vmgenid}" ]] && identity_args+=(--vmgenid "${source_vmgenid}")
+if [[ -n "${source_net0}" || -n "${source_smbios1}" || -n "${source_vmgenid}" ]]; then
+  qm set "${SOURCE_VMID}" "${identity_args[@]}"
+fi
+
+grep -q '^template: 1$' < <(qm config "${SOURCE_VMID}") && {
+  log "recreated VM ${SOURCE_VMID} is unexpectedly a template"
+  exit 1
+}
+
+if [[ "${was_running}" == true && "${RESTART_IF_RUNNING}" == true ]]; then
+  phase=restart
+  for conflicting_vmid in "${CONFLICTING_VMIDS[@]}"; do
+    if vm_exists "${conflicting_vmid}" \
+      && [[ "$(vm_status "${conflicting_vmid}")" == running ]]; then
+      log "VM ${conflicting_vmid} became active; leaving VM ${SOURCE_VMID} stopped"
+      exit 1
+    fi
+  done
+  log "restarting VM ${SOURCE_VMID} because it was running before refresh"
+  qm start "${SOURCE_VMID}"
+fi
+
+phase=complete
+log "refresh complete: VM ${SOURCE_VMID} now depends on updated template ${TEMPLATE_VMID}"

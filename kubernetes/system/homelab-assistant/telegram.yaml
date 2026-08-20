@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-gateway
+  namespace: homelab-assistant
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: homelab-assistant
+      component: telegram
+  template:
+    metadata:
+      labels:
+        app: homelab-assistant
+        component: telegram
+    spec:
+      priorityClassName: homelab-assistant
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          # The first service commit builds a content-addressed image and opens
+          # an automated PR that replaces this bootstrap tag before rollout.
+          image: ghcr.io/kfir-marx/homelab-assistant:sha-bootstrap
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOMELAB_ASSISTANT_TELEGRAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: TELEGRAM_TOKEN
+            - name: HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: TELEGRAM_ALLOWED_USER_IDS
+            - name: HOMELAB_ASSISTANT_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: LLM_API_KEY
+            - name: HOMELAB_ASSISTANT_LLM_BASE_URL
+              value: http://llm:8000/v1
+            - name: HOMELAB_ASSISTANT_LLM_MODEL
+              value: homelab-assistant
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              cpu: 250m
+              memory: 192Mi
+
