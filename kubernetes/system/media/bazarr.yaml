@@ -17,7 +17,7 @@ spec:
       labels:
         app: bazarr
     spec:
-      priorityClassName: homelab-media
+      priorityClassName: homelab-media-bazarr
       securityContext:
         seccompProfile:
           type: RuntimeDefault

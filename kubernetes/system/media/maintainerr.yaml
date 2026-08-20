@@ -17,7 +17,7 @@ spec:
       labels:
         app: maintainerr
     spec:
-      priorityClassName: homelab-media
+      priorityClassName: homelab-media-maintainerr
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch

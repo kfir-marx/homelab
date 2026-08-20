@@ -17,7 +17,7 @@ spec:
       labels:
         app: seerr
     spec:
-      priorityClassName: homelab-media
+      priorityClassName: homelab-media-seerr
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
