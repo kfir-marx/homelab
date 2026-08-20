@@ -131,6 +131,14 @@ variable "control_plane_nodes" {
     memory_mb    = number
     disk_size_gb = number
   }))
+
+  validation {
+    condition = (
+      length(var.control_plane_nodes) == 1 ||
+      (length(var.control_plane_nodes) >= 3 && length(var.control_plane_nodes) % 2 == 1)
+    )
+    error_message = "Control-plane node count must be one or an odd number of at least three so etcd can form a useful quorum."
+  }
 }
 
 variable "worker_nodes" {

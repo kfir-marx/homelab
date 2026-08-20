@@ -1,5 +1,6 @@
 ---
-# VM 502 and Talos GPU worker 402 share largegpu's RTX 3080. Only one may run:
+# VM 502 and Talos GPU worker 402 share largegpu's RTX 3080. Only one may run;
+# cp-1 stays resident in either mode:
 #   Talos → Windows: qm shutdown 402 && qm start 502
 #   Windows → Talos: qm shutdown 502 && qm start 402
 #
@@ -12,8 +13,10 @@ windows_vms:
     template_vm_id: 101
     full_clone: false
 
-    cores: 16
-    memory_mb: 61440
+    # Leaves two of largegpu's 16 hardware threads for cp-1.
+    cores: 14
+    # Leaves 4 GiB for cp-1 and about 6.7 GiB nominal host headroom.
+    memory_mb: 53248
     disk_size_gb: 635
 
     # Ignored in clone mode, but retained for a future deliberate reinstall.

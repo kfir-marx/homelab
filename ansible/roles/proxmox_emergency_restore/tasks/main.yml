@@ -4,18 +4,8 @@
     that:
       - inventory_hostname == 'smallgpu'
       - ansible_facts.hostname == 'smallgpu'
-      - proxmox_emergency_restore_vm_ids | length > 0
-      - proxmox_emergency_restore_vm_ids | difference([201, 403]) | length == 0
-    fail_msg: This one-time recovery role may target only smallgpu and VMs 201/403.
-
-- name: Require VM 201 to be restored in a separate earlier run
-  ansible.builtin.assert:
-    that:
-      - proxmox_emergency_restore_vm_ids == [201]
-        or proxmox_emergency_restore_vm_ids == [403]
-    fail_msg: >-
-      Restore one VM per run. Run the default VM 201 recovery first, verify
-      Talos/etcd/Kubernetes, then run with proxmox_emergency_restore_vm_ids=[403].
+      - proxmox_emergency_restore_vm_ids == [403]
+    fail_msg: This one-time recovery role may target only smallgpu VM 403.
 
 - name: Create the read-only emergency NFS mount point
   ansible.builtin.file:
@@ -98,7 +88,6 @@
     get_checksum: false
     get_mime: false
   loop:
-    - vm-201-disk-0.qcow2
     - vm-403-disk-1.qcow2
     - vm-403-disk-2.qcow2
   register: proxmox_emergency_restore_image_stats

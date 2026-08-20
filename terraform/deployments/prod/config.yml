@@ -29,14 +29,13 @@ cilium_load_balancer_ip_stop: "192.168.1.229"
 # ── ArgoCD ───────────────────────────────────────────────────────────────────
 argocd_target_revision: "main"
 
-# ── Control-plane node (single-node control plane; intentionally not HA) ─────
-# smallgpu is back online and has 15.5 GiB RAM. The CP gets 2c/4GiB and the
-# RTX 2060 worker gets 10c/8GiB, leaving ~3.5 GiB physical RAM for Proxmox,
-# QEMU overhead, and bulk NFS. Return to 3 CPs only after adding memory or
-# reducing worker allocations across the physical failure domains.
+# ── Control-plane nodes ───────────────────────────────────────────────────────
+# The single control plane lives on the more reliable largegpu host. Terraform
+# migrates the existing VM in place so its single-member etcd data is retained.
+# This favors smallgpu failure tolerance and frees RAM for its application worker.
 control_plane_nodes:
   cp-1:
-    proxmox_node: "smallgpu"
+    proxmox_node: "largegpu"
     vm_id: 201
     ip_address: "192.168.1.211/24"
     cores: 2
@@ -51,15 +50,15 @@ worker_nodes: {}
 # ── Proxmox GPU nodes (PCIe passthrough) ────────────────────────────────────
 gpu_nodes:
   # largegpu: Ryzen 7 5800X (8c/16t), 62.7 GiB RAM, RTX 3080 at 08:00.
-  # The Talos GPU VM is 16c/56GiB 
-  # It remains mutually exclusive with the 60 GiB
-  # Windows VM because both pass through the RTX 3080. Stop 402 before 502.
+  # The Talos GPU VM and Windows VM are each capped at 14 vCPU / 52 GiB so
+  # cp-1 can remain resident. The GPU VMs remain mutually exclusive because both
+  # pass through the RTX 3080. Stop 402 before 502.
   gpu-2:
     proxmox_node: "largegpu"
     vm_id: 402
     ip_address: "192.168.1.232/24"
-    cores: 16
-    memory_mb: 57344
+    cores: 14
+    memory_mb: 53248
     disk_size_gb: 159
     # Disposable node-local scratch on the otherwise-idle largegpu HDD.
     # The 400 GiB cap protects the higher-priority Proxmox backup reserve.
@@ -72,8 +71,8 @@ gpu_nodes:
         pcie: true
 
   # smallgpu: RTX 2060 at 09:00; GPU, audio, USB, and UCSI functions share
-  # IOMMU group 18 and are passed through together. CP + this VM reserve 12 GiB
-  # total, leaving ~3.5 GiB for Proxmox, QEMU overhead, and planned bulk NFS.
+  # IOMMU group 18 and are passed through together. This VM reserves 12 GiB,
+  # leaving ~3.5 GiB for Proxmox, QEMU overhead, and bulk NFS.
   # Unlike gpu-2, this node is not tainted: it also runs ordinary pods.
   # Host prerequisite verified 2026-07-22: PCI IDs 10de:1e89, 10de:10f8,
   # 10de:1ad8, and 10de:1ad9 bind to vfio-pci and /dev/vfio/18 exists.
@@ -82,7 +81,7 @@ gpu_nodes:
     vm_id: 403
     ip_address: "192.168.1.233/24"
     cores: 10
-    memory_mb: 8192
+    memory_mb: 12288
     disk_size_gb: 100
     dedicated: false
     # Live SQLite/config state for the media stack. This stays local because

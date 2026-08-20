@@ -9,9 +9,9 @@ proxmox_native_restore_backup_storage_by_node:
 
 proxmox_native_restore_vm_ids_by_node:
   smallgpu:
-    - 201
     - 403
   largegpu:
+    - 201
     - 101
     - 402
 
@@ -22,4 +22,3 @@ proxmox_native_restore_expected_ips:
 
 proxmox_native_restore_expected_hostpci:
   403: "09:00"
-

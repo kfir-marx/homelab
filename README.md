@@ -68,8 +68,8 @@ flowchart TB
     IaC --> CP
     IaC --> GPU2
     IaC --> GPU3
-    Small -. hosts .-> CP
     Small -. hosts .-> GPU3
+    Large -. hosts .-> CP
     Large -. hosts .-> GPU2
     Argo --> Platform --> Apps
     Small -. bulk storage .-> Apps
@@ -146,15 +146,20 @@ under [`kubernetes/system/`](kubernetes/system/).
 
 | Decision | Trade-off |
 |---|---|
-| Single control plane | Fits the real memory and failure-domain constraints, but control-plane maintenance causes downtime |
+| Single control plane on `largegpu` | Keeps the API available when the less reliable `smallgpu` fails and frees its RAM for applications, but `largegpu` failure causes control-plane downtime |
 | Static NFS volumes | Simple and transparent data placement, but no dynamic provisioning and the server remains a dependency |
 | Borrowed GPU hosts | Adds substantial compute capacity, but only reproducible data may depend on those machines |
 | RTX 3080 shared by Talos and Windows | Maximizes hardware use, but only one VM can own the GPU at a time |
 | Public Git repository | Makes the architecture reviewable; plaintext credentials and generated access files stay out of Git, while recovery material is committed only as SOPS/age ciphertext |
 
-These constraints are documented rather than hidden. The target for future
-high availability is three control-plane nodes across distinct physical hosts
-once the hardware and memory budget support it.
+These constraints are documented rather than hidden. Host-failure HA still
+requires three control-plane nodes across three distinct physical hosts once
+the hardware budget supports it.
+
+When `gpu-2` is stopped for Windows, the 12 GiB `gpu-3` VM is the only worker;
+the 4 GiB formerly assigned to `cp-1` on `smallgpu` is therefore available to
+application workloads. When `smallgpu` itself is down, its worker and bulk NFS
+export are unavailable even though the API on `largegpu` remains up.
 
 ## Repository tour
 

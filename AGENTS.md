@@ -27,7 +27,9 @@ Keep changes declarative and make them in the layer that owns the resource.
   reproducible or disposable data.
 - Talos VM `402` and Windows VM `502` share the RTX 3080 and cannot run
   together.
-- The single control plane is an intentional capacity decision.
+- The single Talos control plane, `cp-1`, lives on `largegpu`. This deliberately
+  favors availability when the less reliable `smallgpu` host fails; it is not
+  control-plane HA and loss of `largegpu` makes the Kubernetes API unavailable.
 - Never partition, format, force-mount, or clear safety flags on existing disks.
 - Preserve `Retain` behavior and the critical/bulk/scratch storage boundaries.
 

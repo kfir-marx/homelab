@@ -166,9 +166,13 @@ ansible-playbook -i inventory/production/hosts.yml \
   -e proxmox_native_restore_start=true
 ```
 
-For `smallgpu`, VM 201 is restored before VM 403. Validate 201 before relying
-on 403. VM 403 must retain `hostpci` device `09:00`; the role checks this before
-optional startup.
+For `smallgpu`, restore VM 403. It must retain `hostpci` device `09:00`; the
+role checks this before optional startup. The control plane remains on
+`largegpu` throughout a `smallgpu` recovery.
+
+For `largegpu`, restore control-plane VM 201 before the Windows template and
+GPU worker, then validate the Kubernetes API before relying on VM 402. Do not
+start VM 402 and Windows VM 502 together.
 
 ## Validate Talos and Kubernetes
 
@@ -185,9 +189,10 @@ kubectl --kubeconfig kubeconfig.yaml get pv,pvc -A
 ```
 
 For VM 403, verify `gpu-3` is Ready, `nvidia.com/gpu` allocatable is `1`, the
-`media-state` disk is visible, and GPU Operator pods are ready. If VM 201 or
-etcd fails, stop and collect Talos health, service state, VM console, and
-Proxmox task logs. Do not bootstrap a replacement etcd cluster.
+`media-state` disk is visible, and GPU Operator pods are ready. If the restored
+control-plane member does not rejoin etcd, stop and collect Talos health,
+service state, VM console, and Proxmox task logs. Do not bootstrap a replacement
+etcd cluster.
 
 ## Inspect drift without applying it
 
@@ -224,7 +229,7 @@ delete the emergency qcow2 images.
 6. Run host Ansible in check mode, review it, then converge one node.
 7. Run native restore in check mode and read the selected archives.
 8. Restore with confirmation; start only when explicitly enabled.
-9. Validate VM 201, Talos API, etcd, Kubernetes, then VM 403 and GPU.
+9. If `largegpu` was restored, validate VM 201, the Talos API, etcd, and
+   Kubernetes before validating the worker VM(s) and GPU.
 10. Run a read-only Terraform plan. Never run `talosctl bootstrap` or
     `terraform apply` as part of this restore.
-

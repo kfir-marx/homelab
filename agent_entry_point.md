@@ -16,10 +16,12 @@ This repository declaratively manages a homelab across three layers:
 3. Argo CD reconciles applications and cluster resources from
    `kubernetes/apps/` and `kubernetes/system/`.
 
-The production model currently defines one Talos control plane and two
-GPU-capable workers across the `smallgpu` and `largegpu` Proxmox hosts. The
-separate Ubuntu workstation is an NFS server and desktop; it is not a Proxmox
-host or Kubernetes worker.
+The production model defines one Talos control-plane VM on `largegpu` and two
+GPU-capable workers across the `smallgpu` and `largegpu` Proxmox hosts. This
+favors availability when the less reliable `smallgpu` host fails and frees its
+RAM for application workloads, but it is not control-plane HA. The separate
+Ubuntu workstation is an NFS server and desktop; it is not a Proxmox host or
+Kubernetes worker.
 
 ## Source-of-truth order
 
@@ -65,8 +67,9 @@ for a single-layer change.
   disposable data may depend on them.
 - The RTX 3080 on `largegpu` is shared by Talos VM `402` and Windows VM `502`.
   They must never be started at the same time.
-- The single control plane is intentional. Do not add control-plane VMs without
-  revisiting physical failure domains and RAM headroom.
+- The single control plane deliberately runs on `largegpu`. Preserve its 4 GiB
+  allocation in either RTX 3080 runtime mode and do not describe this topology
+  as resilient to loss of `largegpu`.
 - Existing filesystems are adopted, validated, and mounted. Automation must not
   partition, format, force-mount, or clear filesystem safety flags.
 - Static persistent volumes use explicit storage classes and `Retain`. Critical

@@ -1,6 +1,8 @@
 # Windows is intentionally a separate stack and state from the Talos cluster.
 # VM 502 and Talos GPU worker 402 share largegpu's RTX 3080, so only one may
-# run at a time. Terraform manages both definitions but does not toggle them.
+# run at a time. The resident control-plane VM does not share the GPU and stays
+# running in either mode. Terraform manages both definitions but does not
+# toggle them.
 
 module "windows_vms" {
   source   = "../../components/proxmox-windows-vm"

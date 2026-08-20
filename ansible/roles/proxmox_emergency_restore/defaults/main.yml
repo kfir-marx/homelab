@@ -6,32 +6,18 @@ proxmox_emergency_restore_mount_point: /mnt/proxmox-recovery-smallgpu
 proxmox_emergency_restore_directory: proxmox-recovary-smallgpu
 proxmox_emergency_restore_storage: local-lvm
 
-# Restore the control plane by default. Restore 403 only after 201, Talos,
-# etcd, and the Kubernetes API have been verified independently.
+# The control plane now lives on largegpu; this retired-image workflow restores
+# only smallgpu's mixed worker.
 proxmox_emergency_restore_vm_ids:
-  - 201
+  - 403
 
 proxmox_emergency_restore_vms:
-  201:
-    name: cp-1
-    machine: q35
-    bios: seabios
-    cores: 2
-    memory_mb: 4096
-    ip_address: 192.168.1.211/24
-    gateway: 192.168.1.1
-    bridge: vmbr0
-    cloud_init: true
-    disks:
-      - interface: scsi0
-        image: vm-201-disk-0.qcow2
-        options: aio=io_uring,backup=1,cache=none,discard=on,iothread=0,replicate=1,ssd=1
   403:
     name: gpu-3
     machine: q35
     bios: ovmf
     cores: 10
-    memory_mb: 8192
+    memory_mb: 12288
     ip_address: 192.168.1.233/24
     gateway: 192.168.1.1
     bridge: vmbr0

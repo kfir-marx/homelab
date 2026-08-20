@@ -39,6 +39,12 @@ variable "memory_mb" {
   default = 8192
 }
 
+variable "migrate" {
+  description = "Migrate the existing VM in place when its Proxmox node changes"
+  type        = bool
+  default     = false
+}
+
 variable "disk_size_gb" {
   type    = number
   default = 50
@@ -94,6 +100,7 @@ resource "proxmox_virtual_environment_vm" "this" {
   node_name = var.proxmox_node
   vm_id     = var.vm_id
   tags      = ["talos", "terraform"]
+  migrate   = var.migrate
 
   # Every repo-managed Talos image includes the qemu-guest-agent extension.
   agent {

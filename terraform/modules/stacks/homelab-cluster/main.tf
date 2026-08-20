@@ -8,7 +8,8 @@
 
 locals {
   # The Talos GPU worker and separately-managed Windows workstation use the
-  # same GPU on largegpu. Proxmox enforces exclusivity at start time:
+  # same GPU on largegpu. The resident control-plane VM uses no passthrough
+  # devices and remains running in either mode. Proxmox enforces GPU exclusivity:
   #   `qm shutdown 402 && qm start 502`   (Talos → Windows)
   #   `qm shutdown 502 && qm start 402`   (Windows → Talos)
   base_image_nodes = distinct(concat(
@@ -101,6 +102,7 @@ module "control_plane_vms" {
   gateway       = var.network_gateway
   bridge        = var.network_bridge
   image_file_id = proxmox_download_file.talos_image["${each.value.proxmox_node}/base"].id
+  migrate       = true
 
   pci_devices = []
 }
