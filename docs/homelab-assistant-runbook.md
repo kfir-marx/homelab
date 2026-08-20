@@ -22,6 +22,10 @@ route. Network policy admits API traffic only from the Telegram gateway and
 node-originated health probes. A bearer key is an additional control, not a
 substitute for that isolation.
 
+The container root remains read-only. An ephemeral writable cache holds vLLM,
+FlashInfer, and Triton compilation artifacts, while the nested Hugging Face
+cache mount retains only the replaceable model snapshot across pod restarts.
+
 The gateway accepts only direct chats where the Telegram sender ID, chat ID,
 and configured allowlist agree. It has no service-account token, shell, host
 mount, persistent conversation store, or model-controlled tools. `/new` clears
@@ -59,6 +63,8 @@ quality. The model and vLLM versions are intentionally pinned.
 makes inference unavailable; the Telegram gateway stays up and reports a
 temporary failure. The cache persists on gpu-2's scratch disk, but is
 replaceable and may be downloaded again. Do not move this PVC to critical NFS.
+Download egress includes the exact Hugging Face/Xet hosts used by the pinned
+snapshot, including the regional `us.aws.cdn.hf.co` large-file redirect.
 
 ## First image release
 
@@ -85,7 +91,7 @@ printf '\n'
 read -rp 'Allowed numeric Telegram user IDs (comma-separated): ' telegram_ids
 printf '%s' "${telegram_ids}" >"${assistant_secret_dir}/TELEGRAM_ALLOWED_USER_IDS"
 unset telegram_ids
-openssl rand -base64 48 >"${assistant_secret_dir}/LLM_API_KEY"
+openssl rand -base64 48 | tr -d '\n' >"${assistant_secret_dir}/LLM_API_KEY"
 
 kubectl create namespace homelab-assistant --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n homelab-assistant create secret generic homelab-assistant-secrets \

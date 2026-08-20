@@ -7,4 +7,4 @@ resources:
   - inference.yaml
   - telegram.yaml
   - network-policy.yaml
-
+  - model-download-cdn-network-policy.yaml

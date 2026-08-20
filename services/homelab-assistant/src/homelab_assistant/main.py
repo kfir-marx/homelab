@@ -42,11 +42,18 @@ def run(settings: Settings) -> None:
             time.sleep(5)
 
 
-def main() -> None:
+def configure_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # Telegram embeds the bot token in every API URL. httpx logs complete URLs
+    # at INFO, so inheriting the application log level would disclose it.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def main() -> None:
+    configure_logging()
     settings = Settings()  # type: ignore[call-arg]
     run(settings)
 
