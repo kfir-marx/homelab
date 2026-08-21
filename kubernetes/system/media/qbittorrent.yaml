@@ -90,6 +90,10 @@ spec:
             - name: state
               mountPath: /config
               subPath: qbittorrent
+            - name: qbittorrent-settings
+              mountPath: /config/enable-sequential.sh
+              subPath: enable-sequential.sh
+              readOnly: true
             - name: data
               mountPath: /data
       volumes:

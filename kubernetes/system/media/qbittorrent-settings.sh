@@ -4,7 +4,7 @@
 # place instead of being replaced by a ConfigMap.
 set -eu
 
-config=/config/qBittorrent/qBittorrent.conf
+config=${QBITTORRENT_CONFIG:-/config/qBittorrent/qBittorrent.conf}
 mkdir -p "$(dirname "$config")"
 touch "$config"
 
@@ -14,8 +14,18 @@ set_ini() {
   value=$3
   temporary="${config}.tmp"
 
-  awk -v section="[$section]" -v key="$key" -v value="$value" '
-    BEGIN { in_section = 0; found_section = 0; wrote_value = 0 }
+  # awk -v processes backslash escapes, while qBittorrent preference keys use
+  # literal backslashes. Pass them through the environment so matching remains
+  # byte-for-byte exact.
+  INI_SECTION="[$section]" INI_KEY="$key" INI_VALUE="$value" awk '
+    BEGIN {
+      section = ENVIRON["INI_SECTION"]
+      key = ENVIRON["INI_KEY"]
+      value = ENVIRON["INI_VALUE"]
+      in_section = 0
+      found_section = 0
+      wrote_value = 0
+    }
     /^\[/ {
       if (in_section && !wrote_value) {
         print key "=" value
@@ -56,8 +66,15 @@ set_ini BitTorrent 'Session\MaxConnectionsPerTorrent' 200
 set_ini BitTorrent 'Session\GlobalUploadSpeedLimit' 10000
 set_ini BitTorrent 'Session\GlobalDownloadSpeedLimit' 0
 set_ini BitTorrent 'Session\QueueingSystemEnabled' true
-set_ini BitTorrent 'Session\MaxActiveDownloads' 4
+# The backing NTFS3 filesystem serializes file extension work. Keep download
+# concurrency at one so qBittorrent cannot occupy every NFS worker while a
+# file is being extended.
+set_ini BitTorrent 'Session\MaxActiveDownloads' 1
 set_ini BitTorrent 'Session\MaxUploadsPerTorrent' 10
+# The torrent-added hook calls the Web API from inside this same container.
+# Bypass authentication only for localhost; routed WebUI clients still require
+# the configured credentials.
+set_ini Preferences 'WebUI\LocalHostAuth' false
 
 chown 1000:1000 "$config"
 chmod 0660 "$config"

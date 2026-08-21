@@ -21,7 +21,6 @@ spec:
           labels:
             app: media-state-backup
         spec:
-          priorityClassName: homelab-media
           restartPolicy: Never
           nodeSelector:
             kubernetes.io/hostname: gpu-3

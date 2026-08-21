@@ -18,6 +18,7 @@ resources:
 configMapGenerator:
   - name: qbittorrent-settings
     files:
+      - enable-sequential.sh=qbittorrent-enable-sequential.sh
       - reconcile.sh=qbittorrent-settings.sh
     options:
       disableNameSuffixHash: true

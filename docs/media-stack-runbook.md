@@ -226,6 +226,13 @@ Open `https://whisparr.home.547600.xyz` and complete the setup in this order:
    `http://qbittorrent:8080` with category `whisparr`. In qBittorrent, make the
    matching category save to `/data/torrents/whisparr`. No remote path mapping
    is needed because both applications use the same `/data` mount.
+   The reconciled torrent-added hook enables sequential downloading but must
+   not prioritize the last piece. A last-piece write to a new file can force
+   the NTFS3 backing filesystem to initialize the entire sparse gap, blocking
+   NFS service long enough to interrupt Jellyfin playback. The hook's Web API
+   bypass is restricted to localhost, and active download concurrency remains
+   capped at one to keep NFS worker capacity available for media reads. Do not
+   force-start downloads in bulk: `forcedDL` torrents bypass that queue limit.
 3. Copy the Whisparr API key from **Settings > General**. In Prowlarr, open
    **Settings > Apps**, add a Whisparr application, and use Prowlarr server URL
    `http://prowlarr:9696`, application server URL `http://whisparr:6969`, and
