@@ -31,6 +31,16 @@ stop Prometheus, move the old directory aside on the NFS server, create a fresh
 directory with the ownership below, and allow Prometheus to start with an empty
 history.
 
+Grafana's embedded SQLite database is also sensitive to lock contention on
+NFS, particularly with Grafana 13's concurrent unified-storage workers. The
+chart values limit Grafana to one open database connection, keep SQLite WAL
+disabled, and retry transient locked queries and transactions. Database
+migration locking is disabled because this is a single-replica deployment and
+the separate migration lock would consume that sole connection. Do not scale
+Grafana above one replica with this SQLite configuration. If Grafana logs still
+report `SQLITE_BUSY`, stop Grafana before backing up or checking
+`/var/lib/grafana/grafana.db`; never copy a live SQLite database.
+
 ## One-time preparation
 
 Create the exact exported directories on `smallgpu`:

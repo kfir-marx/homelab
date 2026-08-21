@@ -59,6 +59,19 @@ spec:
               enabled: true
               existingClaim: monitoring-grafana
             grafana.ini:
+              # Grafana's embedded SQLite database lives on the NFS-backed
+              # persistence volume. Serialize access and retry transient lock
+              # contention; Grafana 13's unified-storage workers otherwise
+              # exhaust the default pool and make the health endpoint hang.
+              database:
+                max_idle_conn: 1
+                max_open_conn: 1
+                # Safe only because this deployment is single-replica. The
+                # separate migration lock would consume the sole connection.
+                migration_locking: false
+                query_retries: 10
+                transaction_retries: 10
+                wal: false
               server:
                 domain: grafana.home.547600.xyz
                 root_url: https://grafana.home.547600.xyz
