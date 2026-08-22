@@ -38,6 +38,7 @@ spec:
         component: api
     spec:
       priorityClassName: homelab-job-assistant
+      enableServiceLinks: false
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -128,6 +129,7 @@ spec:
         component: worker
     spec:
       priorityClassName: homelab-job-assistant
+      enableServiceLinks: false
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -219,6 +221,7 @@ spec:
         component: generation-broker
     spec:
       priorityClassName: homelab-job-assistant
+      enableServiceLinks: false
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

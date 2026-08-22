@@ -35,6 +35,7 @@ spec:
         component: postgres
     spec:
       priorityClassName: homelab-job-assistant
+      enableServiceLinks: false
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

@@ -18,6 +18,7 @@ spec:
     spec:
       priorityClassName: homelab-job-assistant
       restartPolicy: Never
+      enableServiceLinks: false
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
