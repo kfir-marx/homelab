@@ -62,7 +62,8 @@ def discover() -> None:
 def migrate() -> None:
     """Apply database migrations."""
     settings = Settings()
-    service_root = Path(__file__).resolve().parents[2]
+    configured_root = os.environ.get("JOB_ASSISTANT_MIGRATION_ROOT")
+    service_root = Path(configured_root) if configured_root else Path(__file__).resolve().parents[2]
     environment = os.environ.copy()
     environment["JOB_ASSISTANT_DATABASE_URL"] = settings.database_url.get_secret_value()
     result = subprocess.run(  # noqa: S603
