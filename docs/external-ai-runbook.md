@@ -19,7 +19,8 @@ The implementation follows the official OpenAI documentation for
 
 ## Storage and Secrets
 
-Create these NFS directories for their manifest UID/GID before sync:
+The Ubuntu workstation's Ansible host variables declare these NFS directories
+with their manifest UID/GID. Converge the workstation's NFS role before sync:
 
 ```text
 /mnt/storage2-bulk/external-ai/postgres
