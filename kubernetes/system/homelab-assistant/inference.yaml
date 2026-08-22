@@ -70,7 +70,7 @@ spec:
             - vllm
             - --enable-auto-tool-choice
             - --tool-call-parser
-            - qwen3
+            - hermes
           env:
             - name: HOME
               value: /home/vllm
