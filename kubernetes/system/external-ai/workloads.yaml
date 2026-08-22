@@ -42,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api
-          image: ghcr.io/kfir-marx/homelab-external-ai:sha-91b9079035b50def025b776e42a3efcbb5d8d206
+          image: ghcr.io/kfir-marx/homelab-external-ai:sha-015c127d3f7ebaef148a18a4bd1df8a01c4f7f0e
           args: [api]
           env:
             - name: EXTERNAL_AI_DATABASE_URL
@@ -135,7 +135,7 @@ spec:
               readOnly: true
       containers:
         - name: worker
-          image: ghcr.io/kfir-marx/homelab-external-ai:sha-91b9079035b50def025b776e42a3efcbb5d8d206
+          image: ghcr.io/kfir-marx/homelab-external-ai:sha-015c127d3f7ebaef148a18a4bd1df8a01c4f7f0e
           args: [worker]
           env:
             - name: EXTERNAL_AI_DATABASE_URL
