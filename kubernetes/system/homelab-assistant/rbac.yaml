@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: homelab-assistant
+  namespace: homelab-assistant
+  labels:
+    app: homelab-assistant
+    component: telegram
+---
+# Cluster-wide diagnostic access. The gateway exposes only bounded GET/list and
+# pod-log tools to the model; RBAC independently prevents every mutating verb.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homelab-assistant-cluster-reader
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: [get, list, watch]
+  - nonResourceURLs:
+      - /api
+      - /api/*
+      - /apis
+      - /apis/*
+      - /healthz
+      - /healthz/*
+      - /livez
+      - /livez/*
+      - /readyz
+      - /readyz/*
+      - /version
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: homelab-assistant-cluster-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: homelab-assistant-cluster-reader
+subjects:
+  - kind: ServiceAccount
+    name: homelab-assistant
+    namespace: homelab-assistant

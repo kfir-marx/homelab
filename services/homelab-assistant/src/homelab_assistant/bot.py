@@ -263,10 +263,16 @@ class AssistantBot:
         return "\n".join(lines)
 
     def _context(self, session: SessionRecord, new_text: str) -> list[dict[str, str]]:
+        tool_reserve = (
+            self.settings.tool_context_reserve_tokens
+            if callable(getattr(self.llm, "complete_with_tools", None))
+            else 0
+        )
         available = (
             effective_prompt_budget(self.settings)
             - estimate_tokens(new_text)
             - estimate_tokens(self.settings.system_prompt)
+            - tool_reserve
         )
         turns: list[list[MessageRecord]] = []
         for item in self.store.messages(session.id):
@@ -314,7 +320,12 @@ class AssistantBot:
                 (("Compact", "session:compact"), ("New", "session:new")),
             )
         messages = self._context(session, text)
-        result = _completion(self.llm.complete(messages, self.settings.max_output_tokens), messages)
+        complete_with_tools = getattr(self.llm, "complete_with_tools", None)
+        if callable(complete_with_tools):
+            raw_result = complete_with_tools(messages, self.settings.max_output_tokens, text)
+        else:
+            raw_result = self.llm.complete(messages, self.settings.max_output_tokens)
+        result = _completion(raw_result, messages)
         self.store.append(session.id, "user", text, provider="telegram", model="human")
         self.store.append(
             session.id,
@@ -327,6 +338,10 @@ class AssistantBot:
         )
         if session.topic == "Untitled":
             self.store.update_topic(owner_id, session.id, _topic(text))
+        if result.handoff:
+            return self._prepare_handover(
+                owner_id, chat_id, result.handoff.model, result.handoff.reasoning
+            )
         if result.prompt_tokens >= budget * 0.8 and self.store.warn_once(session.id):
             return Reply(
                 chat_id,

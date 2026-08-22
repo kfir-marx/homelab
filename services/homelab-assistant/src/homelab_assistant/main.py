@@ -9,6 +9,8 @@ from .bot import AssistantBot
 from .clients import ExternalAiClient, JobAssistantClient, LlmClient, TelegramClient
 from .config import Settings
 from .sessions import SessionStore
+from .skills import load_skills
+from .tools import AssistantTools, KubernetesClient
 
 LOG = logging.getLogger("homelab_assistant")
 
@@ -17,18 +19,34 @@ def run(settings: Settings) -> None:
     if not settings.telegram_allowed_user_ids:
         raise ValueError("HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS must not be empty")
     telegram = TelegramClient(settings.telegram_token.get_secret_value())
+    skills = load_skills(settings.skills_directory)
+    if skills:
+        settings = settings.model_copy(
+            update={"system_prompt": settings.system_prompt + "\n\nAvailable skills:\n\n" + skills}
+        )
+    kubernetes = KubernetesClient(
+        settings.kubernetes_api_url,
+        settings.kubernetes_token_file,
+        settings.kubernetes_ca_file,
+        settings.kubernetes_timeout_seconds,
+        settings.tool_result_max_chars,
+    )
+    external_ai_enabled = bool(settings.external_ai_token.get_secret_value())
     llm = LlmClient(
         settings.llm_base_url,
         settings.llm_api_key.get_secret_value(),
         settings.llm_model,
         settings.llm_timeout_seconds,
+        AssistantTools(kubernetes, external_ai_enabled),
+        settings.max_tool_rounds,
+        settings.max_tool_context_chars,
     )
     store = SessionStore(settings.session_database_url.get_secret_value())
     external_ai = (
         ExternalAiClient(
             settings.external_ai_base_url, settings.external_ai_token.get_secret_value()
         )
-        if settings.external_ai_token.get_secret_value()
+        if external_ai_enabled
         else None
     )
     job_assistant = (

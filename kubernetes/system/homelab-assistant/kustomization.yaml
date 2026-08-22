@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
+  - rbac.yaml
   - storage.yaml
   - postgres.yaml
   - inference.yaml

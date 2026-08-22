@@ -31,7 +31,7 @@ apply step is required.
 | `job-assistant/generation-broker` | None | Restricted PostgreSQL role, cluster DNS, and external-ai TCP/8080 only |
 | `job-assistant/discovery` | None | PostgreSQL, cluster DNS, Gmail IMAP, and configured public ATS APIs |
 | `job-assistant/postgres` | Application roles and backup to TCP/5432 | None |
-| `homelab-assistant/telegram` | None | Cluster DNS, Telegram API HTTPS, local LLM TCP/8000, job API TCP/8080, external-ai TCP/8080, and PostgreSQL TCP/5432 |
+| `homelab-assistant/telegram` | None | Cluster DNS, Kubernetes API HTTPS for read-only diagnostics, Telegram API HTTPS, local LLM TCP/8000, job API TCP/8080, external-ai TCP/8080, and PostgreSQL TCP/5432 |
 | `homelab-assistant/inference` | Telegram gateway and node health probes to TCP/8000 | Cluster DNS and pinned-model download hosts on HTTPS |
 | `homelab-assistant/postgres` | Telegram gateway to TCP/5432 | Cluster DNS only |
 | `external-ai/api` | Homelab gateway, job generation broker, and Prometheus to TCP/8080 | PostgreSQL and cluster DNS only |

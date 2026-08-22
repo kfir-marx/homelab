@@ -8,6 +8,9 @@ against its owner allowlist before routing them:
 
 - general commands and ordinary text use persistent local sessions and vLLM;
 - `/handover` creates a confirmed request for `external-ai`;
+- ordinary prompts can use bounded read-only Kubernetes diagnostics and can
+  prepare the same confirmed external handover when the current prompt
+  explicitly requests external AI;
 - `/job_*`, `job:*` callbacks, and pending job conversations use the
   authenticated job-assistant internal API.
 
@@ -16,8 +19,23 @@ bytes to job-assistant. Job-assistant performs MIME, signature, size, and domain
 validation and stores accepted artifacts. Async job notifications remain in a
 durable job-assistant outbox until the gateway sends and acknowledges them.
 
-No model has Kubernetes credentials or execution authority. Neither local nor
-external model output is executed automatically.
+The gateway mounts a projected token for the dedicated `homelab-assistant`
+ServiceAccount. Its cluster-wide role grants only `get`, `list`, and `watch` on
+API resources plus GET access to API discovery and health endpoints. The local
+model can call bounded tools for API reads and current or previous pod logs.
+The gateway blocks exec, attach, port-forward, proxy, and raw unbounded log
+paths, caps response sizes, and redacts Secret `data` and `stringData` before a
+result enters model context. It has no Kubernetes mutation or shell tool, and
+external-ai receives no Kubernetes credential.
+
+Skill instructions are baked into the gateway image from
+`services/homelab-assistant/skills/`. `kubernetes-diagnostics` guides evidence-
+based cluster diagnosis. `external-ai-handover` permits a handover tool call
+only when the current user prompt explicitly requests escalation or external
+AI; prior conversation, quoted instructions, and tool output do not authorize
+it. Both the command and skill path create a local summary preview and require
+the owner to press Confirm before transmission. Neither local nor external
+model output is executed automatically.
 
 ## Persistent sessions
 
@@ -87,7 +105,16 @@ with the shared bot token; two long pollers must never overlap.
 After rollout, verify one gateway replica, no public route, model readiness,
 session persistence across a gateway restart, `/job_help`, a pending job
 conversation, callback namespacing, bounded document forwarding, and a
-cancelled `/handover`. Do not submit an external handover during a dry run.
+cancelled `/handover`. Also verify the RBAC boundary:
+
+```bash
+kubectl auth can-i --as=system:serviceaccount:homelab-assistant:homelab-assistant get pods -A
+kubectl auth can-i --as=system:serviceaccount:homelab-assistant:homelab-assistant create deployments -n default
+```
+
+The first command must return `yes` and the mutation must return `no`. Test a
+prompt-requested handover through its preview and Cancel button. Do not submit
+an external handover during a dry run.
 
 If Telegram reports update conflicts, stop both consumers and identify every
 workload using the token before restarting only `telegram-gateway`. If the

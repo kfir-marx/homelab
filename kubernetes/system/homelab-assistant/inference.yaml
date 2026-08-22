@@ -68,6 +68,9 @@ spec:
             - "2"
             - --generation-config
             - vllm
+            - --enable-auto-tool-choice
+            - --tool-call-parser
+            - qwen3
           env:
             - name: HOME
               value: /home/vllm

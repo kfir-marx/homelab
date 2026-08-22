@@ -18,7 +18,8 @@ spec:
         component: telegram
     spec:
       priorityClassName: homelab-assistant
-      automountServiceAccountToken: false
+      serviceAccountName: homelab-assistant
+      automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001

@@ -6,12 +6,15 @@ from typing import Any
 
 import httpx
 
+from .tools import AssistantTools, HandoffRequest
+
 
 @dataclass(frozen=True)
 class Completion:
     content: str
     prompt_tokens: int
     completion_tokens: int
+    handoff: HandoffRequest | None = None
 
 
 class TelegramClient:
@@ -75,8 +78,20 @@ class TelegramClient:
 
 
 class LlmClient:
-    def __init__(self, base_url: str, api_key: str, model: str, timeout: float) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        timeout: float,
+        tools: AssistantTools | None = None,
+        maximum_tool_rounds: int = 6,
+        maximum_tool_context_chars: int = 6_000,
+    ) -> None:
         self.model = model
+        self.tools = tools
+        self.maximum_tool_rounds = maximum_tool_rounds
+        self.maximum_tool_context_chars = maximum_tool_context_chars
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
@@ -84,30 +99,113 @@ class LlmClient:
         )
 
     def complete(self, messages: list[dict[str, str]], max_tokens: int) -> Completion:
+        return self._request_completion(messages, max_tokens)
+
+    def complete_with_tools(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        current_user_text: str,
+    ) -> Completion:
+        if not self.tools:
+            return self.complete(messages, max_tokens)
+        working: list[dict[str, Any]] = [dict(item) for item in messages]
+        handoff: HandoffRequest | None = None
+        completion_tokens = 0
+        tool_context_chars = 0
+        for _ in range(self.maximum_tool_rounds):
+            payload = self._payload(working, max_tokens)
+            payload["tools"] = self.tools.definitions
+            payload["tool_choice"] = "auto"
+            response = self._client.post("/chat/completions", json=payload)
+            response.raise_for_status()
+            message, usage = self._response_message(response)
+            completion_tokens += int(usage.get("completion_tokens", 0))
+            calls = message.get("tool_calls")
+            if not isinstance(calls, list) or not calls:
+                content = message.get("content")
+                if not isinstance(content, str) or not content.strip():
+                    raise ValueError("LLM returned an empty response")
+                return Completion(
+                    content.strip(),
+                    int(usage.get("prompt_tokens", 0)),
+                    completion_tokens,
+                    handoff,
+                )
+            working.append(
+                {
+                    "role": "assistant",
+                    "content": message.get("content"),
+                    "tool_calls": calls,
+                }
+            )
+            for call in calls:
+                if not isinstance(call, dict):
+                    raise ValueError("LLM returned an invalid tool call")
+                function = call.get("function")
+                if not isinstance(function, dict):
+                    raise ValueError("LLM returned an invalid tool function")
+                try:
+                    arguments = json.loads(str(function.get("arguments", "{}")))
+                except json.JSONDecodeError as exc:
+                    raise ValueError("LLM returned invalid tool arguments") from exc
+                if not isinstance(arguments, dict):
+                    raise ValueError("LLM tool arguments must be an object")
+                result = self.tools.execute(
+                    str(function.get("name", "")), arguments, current_user_text
+                )
+                if result.handoff:
+                    handoff = result.handoff
+                available = max(0, self.maximum_tool_context_chars - tool_context_chars)
+                result_content = result.content[:available]
+                if len(result.content) > available:
+                    result_content += "\n[aggregate tool context budget exhausted]"
+                tool_context_chars += len(result_content)
+                working.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": str(call.get("id", "")),
+                        "name": str(function.get("name", "")),
+                        "content": result_content,
+                    }
+                )
+        raise ValueError("LLM exceeded the tool-call round limit")
+
+    def _request_completion(self, messages: list[dict[str, str]], max_tokens: int) -> Completion:
         response = self._client.post(
-            "/chat/completions",
-            json={
-                "model": self.model,
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": 0.4,
-                "chat_template_kwargs": {"enable_thinking": False},
-            },
+            "/chat/completions", json=self._payload([dict(item) for item in messages], max_tokens)
         )
         response.raise_for_status()
-        payload = response.json()
-        try:
-            content = payload["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError("LLM returned an invalid chat-completion response") from exc
+        message, usage = self._response_message(response)
+        content = message.get("content")
         if not isinstance(content, str) or not content.strip():
             raise ValueError("LLM returned an empty response")
-        usage = payload.get("usage", {})
         return Completion(
             content.strip(),
             int(usage.get("prompt_tokens", 0)),
             int(usage.get("completion_tokens", 0)),
         )
+
+    def _payload(self, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": 0.4,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+
+    @staticmethod
+    def _response_message(response: httpx.Response) -> tuple[dict[str, Any], dict[str, Any]]:
+        payload = response.json()
+        try:
+            message = payload["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError("LLM returned an invalid chat-completion response") from exc
+        if not isinstance(message, dict):
+            raise ValueError("LLM returned an invalid chat-completion message")
+        usage = payload.get("usage", {})
+        return message, usage if isinstance(usage, dict) else {}
 
     def ready(self) -> bool:
         try:

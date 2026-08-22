@@ -87,6 +87,26 @@ spec:
             - port: "443"
               protocol: TCP
 ---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kubernetes-api-egress
+  namespace: homelab-assistant
+spec:
+  endpointSelector:
+    matchLabels:
+      app: homelab-assistant
+      component: telegram
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+---
 # vLLM can download only the pinned public model snapshot. After the cache is
 # warm this rule can be removed for a fully offline inference pod.
 apiVersion: cilium.io/v2

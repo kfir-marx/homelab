@@ -1,5 +1,5 @@
 # Private GPU-backed LLM and its allowlisted Telegram gateway. The inference
-# API is ClusterIP-only; the gateway has no Kubernetes credentials or tools.
+# API is ClusterIP-only; the gateway has cluster-wide read-only diagnostic RBAC.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -30,4 +30,3 @@ spec:
       name: homelab-assistant-secrets
       jsonPointers:
         - /data
-

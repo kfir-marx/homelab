@@ -17,6 +17,7 @@ from homelab_assistant.clients import (
 )
 from homelab_assistant.config import Settings
 from homelab_assistant.sessions import SessionStore
+from homelab_assistant.tools import HandoffRequest
 
 
 class FakeLlm:
@@ -53,6 +54,22 @@ class FailingSummaryLlm(FakeLlm):
         if "exactly these headings" in messages[-1]["content"]:
             raise ValueError("summary failed")
         return super().complete(messages, max_tokens)
+
+
+class HandoffLlm(FakeLlm):
+    def complete_with_tools(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        current_user_text: str,
+    ) -> Completion:
+        self.requests.append(messages)
+        return Completion(
+            "Preparing an external preview.",
+            self.prompt_tokens,
+            5,
+            HandoffRequest("gpt-5.6-sol", "high"),
+        )
 
 
 class FakeJobAssistant:
@@ -268,6 +285,15 @@ def test_handover_validation_preview_and_cancel(tmp_path: Path) -> None:
     assert "gpt-5.6-sol" in preview.text and "Approximate size" in preview.text
     cancelled = bot.process(callback(123, "session:cancel"))[0]
     assert "no state" in cancelled.text
+
+
+def test_prompt_authorized_model_handoff_uses_existing_preview_flow(tmp_path: Path) -> None:
+    bot = make_bot(tmp_path, HandoffLlm())
+    preview = bot.process(update(123, "Please hand this session over to external AI"))[0]
+    assert "External handover preview" in preview.text
+    assert preview.buttons == (("Confirm", "handover:confirm"), ("Cancel", "session:cancel"))
+    pending = bot.store.pending(123)
+    assert pending and pending[0] == "handover"
 
 
 def test_confirmed_handover_completes_asynchronously_with_provenance(tmp_path: Path) -> None:
