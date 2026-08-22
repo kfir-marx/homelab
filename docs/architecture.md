@@ -19,7 +19,6 @@ Talos, and ArgoCD owns in-cluster workloads.
 │  terraform/           Provisions Proxmox VMs + Talos                │
 │  kubernetes/          ArgoCD-managed app manifests + storage PVs    │
 │  .github/workflows/   CI: lint, validate, security scan, plan       │
-│  atlantis.yaml        PR-driven terragrunt plan/apply               │
 └────────────┬──────────────────────────────────┬─────────────────────┘
              │                                  │
        Terragrunt apply                  ArgoCD sync (automated)
@@ -304,7 +303,7 @@ To consume one: create a PVC in the app's namespace with the matching `storageCl
 | Remote state       | S3 `kfir-homelab-tfstate` + native lockfile + IAM role assumption | Encrypted state with cross-account `sts:AssumeRole` |
 | GitOps engine      | ArgoCD (Helm chart `argo-cd` v7.8.13)           | Manages all in-cluster workloads from Git                |
 | CI                 | GitHub Actions                                  | Runs `terraform fmt`, `validate`, `tfsec`, and `plan` on PRs |
-| CD / Terraform PRs | Atlantis                                        | Runs `terragrunt plan` on PR open, `apply` on PR approval |
+| Terraform apply    | Manual Terragrunt outside Kubernetes            | Keeps cluster changes and recovery independent of in-cluster runners |
 
 ### Why username/password auth instead of API token
 
@@ -329,7 +328,6 @@ authentication is required.
 ├── .github/
 │   └── workflows/
 │       └── terraform-plan.yml            # CI pipeline: lint → security → plan
-├── atlantis.yaml                         # Atlantis repo-level config
 ├── ansible/                              # Physical Proxmox + Ubuntu host configuration
 │   ├── inventory/production/             # Hosts, group vars, hardware-specific host vars
 │   ├── playbooks/                        # Configure, verify, and explicit reboot entry points
@@ -405,7 +403,6 @@ authentication is required.
 | `kubernetes/system/storage/storage2-bulk.yaml` | NFS-backed `PV` + `StorageClass` — critical tier (800 GB ext4 on Ubuntu) | Resizing the carved LV, host-side export setup |
 | `kubernetes/apps/` | ArgoCD watches this directory for Application manifests | Deploying any new workload |
 | `.github/workflows/terraform-plan.yml` | CI: format check → validate → plan posted to PR | Changing CI behavior |
-| `atlantis.yaml` | Defines which dirs Atlantis watches and apply requirements | Adding environments, changing approval rules |
 
 ---
 
@@ -568,7 +565,9 @@ Prerequisites:
 
 Terragrunt creates the bucket on first init if it does not exist.
 
-The same role is used by the Atlantis runner, by GitHub Actions, and locally — no per-workstation credential duplication.
+The same role is used by GitHub Actions and local operators, so the target role
+policy is shared even though each execution environment needs its own source
+AWS credentials.
 
 ---
 
@@ -641,18 +640,23 @@ deliberate privileged workload boundary. Authentication, rollout, rotation,
 and the trust restrictions are in
 [`github-actions-runners-runbook.md`](github-actions-runners-runbook.md).
 
-### Atlantis (`atlantis.yaml`)
+### Terraform apply execution boundary
 
-Atlantis provides the PR-driven plan/apply workflow:
+Terraform apply is intentionally manual in the current architecture. After
+reviewing the PR plan, run the matching stack through
+`terraform/run-terragrunt.sh` from an administrative machine outside
+Kubernetes. For example:
 
-- **Watches:** Separate projects cover `homelab-cluster` and `windows-workstation`.
-- **Auto-plan:** Enabled — opens a plan on every PR that modifies watched files.
-- **Apply requirements:** `approved` + `mergeable`.
-- **Parallel plan:** Enabled. **Parallel apply:** Disabled (one environment at a time).
-- **Workflow:** Custom `terragrunt` workflow that runs `terragrunt plan -out=$PLANFILE` and `terragrunt apply $PLANFILE`.
+```bash
+./terraform/run-terragrunt.sh prod homelab-cluster apply
+```
 
-Both stacks are Proxmox-only, so Atlantis can provide gated apply for each
-without access to the Ubuntu workstation.
+The Actions Runner Controller and its ephemeral runners are Argo-managed
+workloads inside the cluster that the `homelab-cluster` stack creates. They are
+appropriate for CI and non-mutating plans while the cluster is healthy, but
+using them as the only apply executor would make cluster changes and recovery
+depend on the infrastructure being changed. The S3 state backend remains
+external to the cluster; the dependency is the runner, not the state.
 
 ---
 

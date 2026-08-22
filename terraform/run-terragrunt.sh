@@ -51,8 +51,8 @@ require_env() {
 }
 
 setup_environment() {
-  # Local runs load the gitignored .env file. CI systems such as Atlantis inject
-  # the same variables directly and do not need a file in the checkout.
+  # Local runs load the gitignored .env file. CI systems inject the same
+  # variables directly and do not need a file in the checkout.
   if [[ -f "$ENV_FILE" ]]; then
     set -a
     # shellcheck disable=SC1090

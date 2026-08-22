@@ -58,7 +58,7 @@ jobs:
           soft_fail: true # Don't block PRs yet — tune rules first.
 
   # ────────────────────────────────────────────────────────────────────────────
-  # Plan (for visibility — Atlantis handles the real apply)
+  # Plan for PR visibility. Applies run from a machine outside Kubernetes.
   # ────────────────────────────────────────────────────────────────────────────
   plan:
     name: "Terraform Plan (${{ matrix.stack }})"

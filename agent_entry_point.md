@@ -51,7 +51,7 @@ Do not silently edit code to match prose. Establish which side is stale first.
 | Remote access or DNS | `docs/remote-access.md` | Tailscale/AdGuard runbook and matching manifests |
 | Secrets or bare-metal credential recovery | `docs/secrets-disaster-recovery.md` | `scripts/secrets.sh`, `secrets/inventory.tsv`, then the consuming layer |
 | Monitoring or GPUs | matching runbook | Argo CD application and system manifests |
-| CI or delivery | `.github/workflows/terraform-plan.yml`, `docs/github-actions-runners-runbook.md`, `atlantis.yaml` | `kubernetes/apps/github-actions-*.yaml`, `terraform/run-terragrunt.sh` |
+| CI or delivery | `.github/workflows/terraform-plan.yml`, `docs/github-actions-runners-runbook.md` | `kubernetes/apps/github-actions-*.yaml`, `terraform/run-terragrunt.sh` |
 | Broad architecture change | relevant config and manifests first | only the affected sections of `docs/architecture.md` |
 
 Use `rg` to locate symbols and read narrow sections. Do not load every runbook

@@ -119,8 +119,9 @@ makes failures easier to reason about.
   do not format disks, serialize changes, and keep reboots explicit. Static
   Kubernetes volumes use the `Retain` policy.
 - **Pull requests show infrastructure impact.** CI checks formatting, runs a
-  security scan, and posts Terragrunt plans on ephemeral in-cluster runners;
-  Atlantis requires an approved, mergeable PR before apply.
+  security scan, and posts Terragrunt plans. Terraform applies run manually
+  from outside Kubernetes so cluster recovery never depends on an in-cluster
+  runner.
 - **Recovery knowledge lives beside the code.** Operational runbooks document
   enrollment, verification, failure modes, and recovery rather than relying on
   memory.
@@ -131,7 +132,7 @@ makes failures easier to reason about.
 flowchart LR
     Change["Pull request"] --> Checks["Format + tfsec + plan"]
     Checks --> Review["Human review"]
-    Review --> Apply["Atlantis / Terragrunt apply"]
+    Review --> Apply["Manual Terragrunt apply<br/>outside Kubernetes"]
     Apply --> Talos["Proxmox VMs + Talos bootstrap"]
     Talos --> Argo["Argo CD app-of-apps"]
     Argo --> Reconcile["Continuous sync + self-heal"]
@@ -140,7 +141,9 @@ flowchart LR
 Infrastructure changes and application changes have different deployment
 paths. Terraform creates the platform and bootstraps Argo CD; after that, Argo
 CD watches [`kubernetes/apps/`](kubernetes/apps/) and reconciles the resources
-under [`kubernetes/system/`](kubernetes/system/).
+under [`kubernetes/system/`](kubernetes/system/). The self-hosted Actions
+runners live inside that platform, so they are used for CI but are not the
+execution boundary for Terraform apply or cluster recovery.
 
 ## Deliberate trade-offs
 
@@ -178,8 +181,7 @@ export are unavailable even though the API on `largegpu` remains up.
 ├── secrets/                  SOPS-encrypted disaster-recovery material
 ├── scripts/secrets.sh        Capture, validate, and restore encrypted secrets
 ├── docs/                     Architecture notes and operational runbooks
-├── .github/workflows/        Pull-request checks and infrastructure plans
-└── atlantis.yaml             Reviewed Terragrunt plan/apply workflow
+└── .github/workflows/        Pull-request checks and infrastructure plans
 ```
 
 ### A five-minute technical tour
@@ -191,8 +193,7 @@ export are unavailable even though the API on `largegpu` remains up.
    [`terraform/modules/stacks/homelab-cluster/main.tf`](terraform/modules/stacks/homelab-cluster/main.tf).
 4. See the GitOps app-of-apps pattern in [`kubernetes/apps/`](kubernetes/apps/).
 5. Review the guarded delivery pipeline in
-   [`.github/workflows/terraform-plan.yml`](.github/workflows/terraform-plan.yml)
-   and [`atlantis.yaml`](atlantis.yaml).
+   [`.github/workflows/terraform-plan.yml`](.github/workflows/terraform-plan.yml).
 
 ## Documentation
 
