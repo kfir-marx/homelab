@@ -33,7 +33,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: discover
-              image: ghcr.io/kfir-marx/homelab-job-assistant:sha-117ba6e83e21c97fddc99c6c2a2f15ea71d09733
+              image: ghcr.io/kfir-marx/homelab-job-assistant:sha-4adbce9f64d4f657b6aca1fccedb5b6900239bda
               imagePullPolicy: IfNotPresent
               args: [discover]
               env:
