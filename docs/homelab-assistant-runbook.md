@@ -78,10 +78,11 @@ pin PR.
 
 ## Rollout and recovery
 
-Create `/mnt/storage2-bulk/homelab-assistant/postgres` for UID/GID `999` before
-Argo synchronization. During the staged cutover, scale down the old
-job-assistant Telegram poller before starting this gateway with the shared bot
-token; two long pollers must never overlap.
+The Ubuntu workstation's Ansible host variables declare
+`/mnt/storage2-bulk/homelab-assistant/postgres` with UID/GID `999`. Converge the
+workstation's NFS role before Argo synchronization. During the staged cutover,
+scale down the old job-assistant Telegram poller before starting this gateway
+with the shared bot token; two long pollers must never overlap.
 
 After rollout, verify one gateway replica, no public route, model readiness,
 session persistence across a gateway restart, `/job_help`, a pending job
