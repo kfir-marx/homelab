@@ -231,7 +231,7 @@ Open `https://whisparr.home.547600.xyz` and complete the setup in this order:
    the NTFS3 backing filesystem to initialize the entire sparse gap, blocking
    NFS service long enough to interrupt Jellyfin playback. The hook's Web API
    bypass is restricted to localhost, and active download concurrency remains
-   capped at one to keep NFS worker capacity available for media reads. Do not
+   capped at 5 to keep NFS worker capacity available for media reads. Do not
    force-start downloads in bulk: `forcedDL` torrents bypass that queue limit.
 3. Copy the Whisparr API key from **Settings > General**. In Prowlarr, open
    **Settings > Apps**, add a Whisparr application, and use Prowlarr server URL

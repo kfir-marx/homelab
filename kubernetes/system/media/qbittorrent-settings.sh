@@ -69,7 +69,7 @@ set_ini BitTorrent 'Session\QueueingSystemEnabled' true
 # The backing NTFS3 filesystem serializes file extension work. Keep download
 # concurrency at one so qBittorrent cannot occupy every NFS worker while a
 # file is being extended.
-set_ini BitTorrent 'Session\MaxActiveDownloads' 10
+set_ini BitTorrent 'Session\MaxActiveDownloads' 5
 set_ini BitTorrent 'Session\MaxUploadsPerTorrent' 10
 # The torrent-added hook calls the Web API from inside this same container.
 # Bypass authentication only for localhost; routed WebUI clients still require
