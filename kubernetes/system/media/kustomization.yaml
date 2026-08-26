@@ -11,11 +11,17 @@ resources:
   - qbittorrent.yaml
   - seerr.yaml
   - maintainerr.yaml
+  - maintainerr-storage-cleanup.yaml
   - backup.yaml
   - httproutes.yaml
   - network-policy.yaml
 
 configMapGenerator:
+  - name: maintainerr-storage-cleanup
+    files:
+      - cleanup.py=maintainerr_storage_cleanup.py
+    options:
+      disableNameSuffixHash: true
   - name: qbittorrent-settings
     files:
       - enable-sequential.sh=qbittorrent-enable-sequential.sh

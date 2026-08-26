@@ -299,31 +299,45 @@ syncs.
 
 ## Maintainerr cleanup policy
 
-Maintainerr should first run in observation mode. Configure integrations with
-the internal service URLs (`http://jellyfin:8096`, `http://seerr:5055`,
-`http://radarr:7878`, `http://sonarr:8989`, and
-`http://qbittorrent:8080`). Enable qBittorrent download-data deletion only
-after confirming hardlinks and the desired seed ratio/time limits.
+Configure Maintainerr integrations with the internal service URLs
+(`http://jellyfin:8096`, `http://seerr:5055`, `http://radarr:7878`,
+`http://sonarr:8989`, and `http://qbittorrent:8080`). There must be exactly one
+Radarr and one Sonarr connection. Enable qBittorrent download-data deletion
+after confirming hardlinks and the desired seed ratio/time limits; the storage
+controller deliberately uses Maintainerr actions so this cleanup remains
+coordinated with Arr, Seerr, and qBittorrent.
 
-Recommended initial rules:
+Maintainerr's native collection handler is batch-oriented and cannot stop when
+a free-space target is reached. The `maintainerr-storage-cleanup` CronJob runs
+hourly and supplies that high/low-water behavior:
 
-- Global pin: an Arr `keep` tag, a Jellyfin favorite, or a Maintainerr manual
-  exclusion always wins.
-- Movie candidate: at least 30 days old and not watched in 45 days.
-- Show candidate: whole show only, no recent playback, and either ended or no
-  recently added episode. Do not automatically delete individual episodes or
-  seasons because qBittorrent cleanup intentionally works at whole-show level.
-- Disk condition: less than 15 percent free on the selected Radarr/Sonarr root
-  path.
-- Grace period: seven days in a visible `Leaving Soon` collection.
-- Action: `Unmonitor and delete files`, clear the Seerr request, and remove the
-  qBittorrent data only after its seed limit is met.
+- It starts only below `500 GB` free on the shared `media-data` filesystem and
+  deletes one file at a time until the filesystem has more than `1 TB` free.
+- Candidates are ordered lexicographically: watched files first, then older
+  Arr import/download dates, then larger individual files. Movies and episodes
+  share the same ordered list, so a 5 GiB movie sorts ahead of a 2 GiB episode
+  when watch state and import date are tied.
+- Movie actions unmonitor the movie and delete all its files. Episode actions
+  unmonitor and delete that individual Sonarr episode file. A multi-episode
+  file is considered watched only after all episodes backed by it were watched.
+- An Arr `keep` tag, a Jellyfin favorite from any user, or a Maintainerr
+  exclusion on the item or its parent prevents deletion.
+- The controller creates one rule-less Maintainerr action collection per media
+  library. These collections have no deletion delay, so Maintainerr's normal
+  batch handler ignores them; the controller invokes the single-item action
+  endpoint only after checking current free space.
 
-Maintainerr has no safe global dry-run button. Leave the destructive action
-disabled for at least one full rule cycle and inspect every candidate before
-enabling it. Native collection handling is batch-oriented and may reclaim more
-than the minimum required. Add a high-water/low-water controller only if that
-behavior is observed to be too aggressive.
+The CronJob is active (`DRY_RUN=false`). Set `DRY_RUN=true` in
+`kubernetes/system/media/maintainerr-storage-cleanup.yaml` to log the ordered
+deletion plan without changing media. In dry-run mode, nominal reclaimed sizes
+can overestimate real recovery because torrents may still hold hardlinks.
+
+After every action, the controller waits for the filesystem's free space to
+increase. If it does not, it preserves a safety marker under the retained media
+state volume and stops before deleting another item. This most commonly means
+qBittorrent retained the download because its seed goal was not met. Resolve
+that torrent or seed-limit state; the next scheduled run clears the marker only
+after it observes that space was actually reclaimed.
 
 ## GPU verification
 

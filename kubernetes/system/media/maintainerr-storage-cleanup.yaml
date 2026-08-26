@@ -1,0 +1,111 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: maintainerr-storage-cleanup
+  namespace: media
+spec:
+  # Maintainerr's native handler is batch-oriented. This controller checks the
+  # real shared filesystem hourly and invokes Maintainerr one item at a time.
+  schedule: "17 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3300
+      template:
+        metadata:
+          labels:
+            app: maintainerr-storage-cleanup
+        spec:
+          restartPolicy: Never
+          priorityClassName: homelab-media-maintainerr
+          nodeSelector:
+            kubernetes.io/hostname: gpu-3
+          securityContext:
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: prepare-state
+              image: busybox:1.37.0
+              command:
+                - sh
+                - -ec
+                - install -d -o 1000 -g 1000 -m 0770 /state/maintainerr-storage-cleanup
+              securityContext:
+                runAsUser: 0
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+                  add: [CHOWN, FOWNER]
+              volumeMounts:
+                - name: state
+                  mountPath: /state
+          containers:
+            - name: controller
+              image: python:3.13.7-alpine3.22
+              imagePullPolicy: IfNotPresent
+              command: [python3, /app/cleanup.py]
+              env:
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: TZ
+                  valueFrom:
+                    configMapKeyRef:
+                      name: media-config
+                      key: TZ
+                - name: MAINTAINERR_URL
+                  value: http://maintainerr:6246
+                - name: MEDIA_PATH
+                  value: /data
+                - name: STATE_PATH
+                  value: /state/pending-no-reclaim.json
+                - name: TRIGGER_FREE_GB
+                  value: "500"
+                - name: TARGET_FREE_GB
+                  value: "1000"
+                - name: MIN_RECLAIM_MIB
+                  value: "16"
+                - name: RECLAIM_POLL_SECONDS
+                  value: "30"
+                - name: DRY_RUN
+                  value: "false"
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+              volumeMounts:
+                - name: controller
+                  mountPath: /app
+                  readOnly: true
+                - name: data
+                  mountPath: /data
+                  readOnly: true
+                - name: state
+                  mountPath: /state
+                  subPath: maintainerr-storage-cleanup
+          volumes:
+            - name: controller
+              configMap:
+                name: maintainerr-storage-cleanup
+                defaultMode: 0555
+            - name: data
+              persistentVolumeClaim:
+                claimName: media-data
+            - name: state
+              persistentVolumeClaim:
+                claimName: media-state
