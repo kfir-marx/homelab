@@ -18,7 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "mypy>=1.14,<2",
-  "pytest>=8.3,<9",
+  "pytest>=9.1.1,<10",
   "respx>=0.22,<1",
   "ruff>=0.9,<1",
 ]
