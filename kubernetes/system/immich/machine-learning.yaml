@@ -53,7 +53,7 @@ spec:
       priorityClassName: homelab-immich
       containers:
         - name: immich-machine-learning
-          image: ghcr.io/immich-app/immich-machine-learning:v3.1.0
+          image: ghcr.io/immich-app/immich-machine-learning:v3.1.0@sha256:5a0839dc5303cd7215bcd2180a26aed3af41675aefb3e75e5157e9f10ad16e6e
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ
