@@ -474,7 +474,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9,<1" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "structlog", specifier = ">=24.4,<26" },
-    { name = "tenacity", specifier = ">=9,<10" },
+    { name = "tenacity", specifier = ">=9.1.4,<10" },
     { name = "typer", specifier = ">=0.15,<1" },
     { name = "types-bleach", marker = "extra == 'dev'", specifier = ">=6.2,<7" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0,<7" },
