@@ -6,6 +6,7 @@ on:
       - services/external-ai/**
       - kubernetes/apps/external-ai.yaml
       - kubernetes/system/external-ai/**
+      - "!kubernetes/system/external-ai/workloads.yaml"
       - .github/workflows/external-ai.yml
   push:
     branches: [main]

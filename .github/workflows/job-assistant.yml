@@ -7,6 +7,9 @@ on:
       - "services/job-assistant/**"
       - "kubernetes/apps/job-assistant.yaml"
       - "kubernetes/system/job-assistant/**"
+      - "!kubernetes/system/job-assistant/discovery.yaml"
+      - "!kubernetes/system/job-assistant/migrate.yaml"
+      - "!kubernetes/system/job-assistant/workloads.yaml"
       - "docs/job-assistant-*.md"
       - ".github/workflows/job-assistant.yml"
   push:
@@ -15,6 +18,9 @@ on:
       - "services/job-assistant/**"
       - "kubernetes/apps/job-assistant.yaml"
       - "kubernetes/system/job-assistant/**"
+      - "!kubernetes/system/job-assistant/discovery.yaml"
+      - "!kubernetes/system/job-assistant/migrate.yaml"
+      - "!kubernetes/system/job-assistant/workloads.yaml"
       - "docs/job-assistant-*.md"
       - ".github/workflows/job-assistant.yml"
 
