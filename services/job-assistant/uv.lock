@@ -464,7 +464,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "pydantic-settings", specifier = ">=2.7,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3,<9" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6,<7" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.3.0,<7" },
     { name = "pytest-postgresql", marker = "extra == 'dev'", specifier = ">=6.1,<7" },
     { name = "python-docx", specifier = ">=1.1,<2" },
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
