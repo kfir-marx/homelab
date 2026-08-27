@@ -468,7 +468,7 @@ requires-dist = [
     { name = "pytest-postgresql", marker = "extra == 'dev'", specifier = ">=6.1,<7" },
     { name = "python-docx", specifier = ">=1.1,<2" },
     { name = "python-multipart", specifier = ">=0.0.20,<1" },
-    { name = "pyyaml", specifier = ">=6.0,<7" },
+    { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "reportlab", specifier = ">=5.0.0,<6" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.22,<1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9,<1" },
