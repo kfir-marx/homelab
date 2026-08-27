@@ -455,7 +455,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.14,<2" },
     { name = "beautifulsoup4", specifier = ">=4.12,<5" },
-    { name = "bleach", specifier = ">=6.2,<7" },
+    { name = "bleach", specifier = ">=6.4.0,<7" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.14,<2" },
