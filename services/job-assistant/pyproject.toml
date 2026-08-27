@@ -37,7 +37,7 @@ dev = [
   "respx>=0.22,<1",
   "ruff>=0.9,<1",
   "types-PyYAML>=6.0,<7",
-  "types-bleach>=6.2,<7",
+  "types-bleach>=6.4.0.20260728,<7",
   "types-reportlab>=4.2,<5",
 ]
 
