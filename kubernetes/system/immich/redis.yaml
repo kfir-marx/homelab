@@ -31,7 +31,7 @@ metadata:
     app: immich
     component: redis
 spec:
-  replicas: 1
+  replicas: 0
   strategy:
     # Valkey is stateful-ish (queue can drop in-flight jobs on a hard
     # cut); Recreate avoids two replicas briefly racing on the same

@@ -37,7 +37,7 @@ metadata:
     app: immich
     component: machine-learning
 spec:
-  replicas: 1
+  replicas: 0
   strategy:
     type: Recreate
   selector:
