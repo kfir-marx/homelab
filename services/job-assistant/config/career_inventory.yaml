@@ -1,0 +1,339 @@
+schema_version: 1
+
+person:
+  name: Kfir Marx
+  email: kfir.marx@gmail.com
+  location: Herzliya, Israel
+
+experiences:
+  - id: exp-pmo-full-stack-blockchain
+    employer: Prime Minister's Office
+    start_date: 2017-09-01  # Month-level precision
+    end_date: 2021-03-01  # Month-level precision
+    official_title: Full Stack and Blockchain Engineer
+    allowed_display_titles:
+      - Full Stack Developer
+      - Software Engineer
+      - Full Stack and Automation Engineer
+    responsibilities:
+      - id: fact-pmo-full-stack-development
+        text: Developed software for classified systems using Vue.js, C#/.NET, Python, and Java.
+        metrics: []
+        technologies: [Vue.js, C# .NET, Python, Java]
+        tags: [software-engineering, full-stack, classified-environment]
+        evidence: documented
+        allowed_variations:
+          - Built full-stack applications for restricted environments using Vue.js, C#/.NET, Python, and Java.
+          - Developed frontend, backend, and automation components for classified systems.
+
+      - id: fact-pmo-automation
+        text: Built Python and Selenium automation and web-crawling tools for repeatable data-collection workflows.
+        metrics: []
+        technologies: [Python, Selenium]
+        tags: [automation, web-crawling, data-collection]
+        evidence: documented
+        allowed_variations:
+          - Automated repeatable data-collection workflows with Python and Selenium.
+          - Developed Python-based browser automation and crawling tools.
+
+      - id: fact-pmo-android-research
+        text: Worked on Android automation and application analysis using Java and Frida.
+        metrics: []
+        technologies: [Android, Java, Frida]
+        tags: [mobile, automation, application-analysis]
+        evidence: documented
+        allowed_variations:
+          - Developed Android automation and analysis tooling with Java and Frida.
+
+      - id: fact-pmo-blockchain-research
+        text: Conducted software research and development related to blockchain and Bitcoin technologies.
+        metrics: []
+        technologies: [Blockchain, Bitcoin]
+        tags: [research-and-development, blockchain]
+        evidence: documented
+        allowed_variations:
+          - Researched and developed software involving blockchain and Bitcoin technologies.
+
+      - id: fact-pmo-team-devops-ownership
+        text: Took ownership of team-level DevOps work, including Azure DevOps CI and Ansible-based deployment to CentOS systems in an air-gapped environment.
+        metrics: []
+        technologies: [Azure DevOps, Ansible, CentOS, Linux]
+        tags: [devops, ci-cd, configuration-management, air-gapped]
+        evidence: self_reported
+        allowed_variations:
+          - Owned CI and deployment automation for the development team using Azure DevOps and Ansible.
+          - Maintained CI/CD and CentOS deployment automation in a restricted environment.
+
+    achievements:
+      - id: fact-pmo-build-time-reduction
+        text: Reduced a software build process from approximately 15 minutes to approximately 10 minutes.
+        metrics:
+          - name: build_duration
+            before: 15
+            after: 10
+            unit: minutes
+        technologies: [Azure DevOps]
+        tags: [ci-cd, performance, developer-productivity]
+        evidence: self_reported
+        allowed_variations:
+          - Cut build duration by roughly one third, from about 15 minutes to about 10 minutes.
+
+  - id: exp-pmo-devops
+    employer: Prime Minister's Office
+    start_date: 2021-03-01  # Month-level precision
+    end_date: 2023-09-30  # Month-level precision
+    official_title: DevOps Engineer
+    allowed_display_titles:
+      - DevOps Engineer
+      - CI/CD Engineer
+      - Platform Engineer
+    responsibilities:
+      - id: fact-pmo-devops-platform-scale
+        text: Worked in a five-person DevOps team that supported approximately 500 developers.
+        metrics:
+          - name: supported_developers
+            value: 500
+            qualifier: approximately
+          - name: devops_team_size
+            value: 5
+        technologies: []
+        tags: [devops, platform-engineering, developer-enablement]
+        evidence: self_reported
+        allowed_variations:
+          - Supported roughly 500 developers as part of a five-engineer DevOps team.
+
+      - id: fact-pmo-python-pipelines
+        text: Helped migrate CI/CD pipelines toward Python-based implementations and maintained shared developer tooling.
+        metrics: []
+        technologies: [Python, CI/CD]
+        tags: [ci-cd, automation, developer-tooling]
+        evidence: self_reported
+        allowed_variations:
+          - Developed and maintained Python-based CI/CD pipelines and shared developer tools.
+          - Contributed to a migration of delivery pipelines to Python-based automation.
+
+      - id: fact-pmo-restricted-production
+        text: Operated and improved delivery tooling for restricted and air-gapped production environments.
+        metrics: []
+        technologies: [Linux, CI/CD]
+        tags: [operations, air-gapped, production, security]
+        evidence: self_reported
+        allowed_variations:
+          - Supported CI/CD and developer tooling in secure, air-gapped environments.
+
+      - id: fact-pmo-devops-toolchain
+        text: Worked with Linux, containers, Kubernetes, configuration management, CI/CD, monitoring, logging, secrets management, and source-control platforms.
+        metrics: []
+        technologies: [Linux, Docker, Kubernetes, Ansible, Jenkins, Git, GitLab, Azure DevOps, Prometheus, Grafana, Elasticsearch, Kibana, Vault, SonarQube, Python, Bash]
+        tags: [devops, kubernetes, observability, automation, security]
+        evidence: documented
+        allowed_variations:
+          - Supported a DevOps toolchain spanning CI/CD, Kubernetes, automation, observability, and secrets management.
+
+    achievements: []
+
+  - id: exp-hcl-israel
+    employer: HCL Israel
+    start_date: 2023-11-15
+    end_date: 2026-07-30
+    official_title: Senior Software Engineer I, E2
+    allowed_display_titles:
+      - DevOps Engineer
+      - Senior DevOps Engineer
+      - Platform Engineer
+      - Cloud DevOps Engineer
+    responsibilities:
+      - id: fact-hcl-azure-production
+        text: Managed multi-region production infrastructure and services in Microsoft Azure.
+        metrics: []
+        technologies: [Microsoft Azure]
+        tags: [cloud, production, multi-region, operations]
+        evidence: documented
+        allowed_variations:
+          - Operated production workloads across multiple Azure regions.
+          - Managed multi-region Azure production infrastructure.
+
+      - id: fact-hcl-kubernetes-platform
+        text: Built and operated Kubernetes environments from the infrastructure layer through application deployment.
+        metrics: []
+        technologies: [Kubernetes, AKS, K3s, Docker, containerd, Helm, Argo CD]
+        tags: [kubernetes, platform-engineering, gitops, containers]
+        evidence: documented
+        allowed_variations:
+          - Managed Kubernetes platforms spanning infrastructure, cluster services, and application delivery.
+          - Operated AKS and Kubernetes workloads using Helm and Argo CD.
+
+      - id: fact-hcl-infrastructure-as-code
+        text: Provisioned and maintained cloud and Kubernetes infrastructure using Terraform and Terragrunt.
+        metrics: []
+        technologies: [Terraform, Terragrunt, Microsoft Azure, Kubernetes]
+        tags: [infrastructure-as-code, cloud, automation]
+        evidence: documented
+        allowed_variations:
+          - Managed cloud infrastructure as code with Terraform and Terragrunt.
+
+      - id: fact-hcl-cicd
+        text: Developed and stabilized CI/CD systems and self-service development environments using Jenkins, Python, and infrastructure as code.
+        metrics: []
+        technologies: [Jenkins, Python, Terraform, Terragrunt]
+        tags: [ci-cd, automation, developer-experience, reliability]
+        evidence: documented
+        allowed_variations:
+          - Built reliable CI/CD automation and self-service developer environments with Jenkins, Python, and Terraform.
+          - Improved Jenkins-based delivery systems and automated environment provisioning.
+
+      - id: fact-hcl-observability
+        text: Implemented and maintained monitoring, alerting, and centralized logging for production systems.
+        metrics: []
+        technologies: [Prometheus, Grafana, Elasticsearch, Kibana]
+        tags: [observability, monitoring, alerting, logging, production]
+        evidence: documented
+        allowed_variations:
+          - Operated production observability using Prometheus, Grafana, Elasticsearch, and Kibana.
+
+      - id: fact-hcl-secrets-artifacts-backups
+        text: Managed secrets, secure artifacts, and daily backup and restore processes for production services.
+        metrics:
+          - name: backup_frequency
+            value: daily
+        technologies: [Vault]
+        tags: [security, secrets-management, artifact-management, backup, disaster-recovery]
+        evidence: documented
+        allowed_variations:
+          - Managed Vault-based secrets, secure artifacts, and daily backup and restore workflows.
+
+      - id: fact-hcl-incident-response
+        text: Troubleshot production incidents and delivered technical workshops to improve team knowledge and operational practices.
+        metrics: []
+        technologies: []
+        tags: [incident-response, troubleshooting, knowledge-sharing]
+        evidence: documented
+        allowed_variations:
+          - Responded to production incidents and led technical knowledge-sharing workshops.
+
+      - id: fact-hcl-distributed-collaboration
+        text: Collaborated with distributed engineering teams in Israel, the United Kingdom, the United States, and India.
+        metrics: []
+        technologies: []
+        tags: [collaboration, distributed-teams, communication]
+        evidence: documented
+        allowed_variations:
+          - Coordinated DevOps work across engineering teams in Israel, the UK, the US, and India.
+
+    achievements:
+      - id: fact-hcl-on-demand-environments
+        text: Designed and owned queue-aware, on-demand Azure development environments with automated provisioning, pre-warming, and scale-down for cost control.
+        metrics: []
+        technologies: [Microsoft Azure, Python, Jenkins, Jenkins API, Lockable Resources, Terraform, Terragrunt, Kubernetes, Redis]
+        tags: [platform-engineering, developer-experience, cloud, automation, cost-optimization]
+        evidence: documented
+        allowed_variations:
+          - Built an on-demand Azure development environment platform using Jenkins, Python, Terraform, Kubernetes, and Redis.
+          - Designed queue-aware environment provisioning with pre-warming and automated scale-down.
+
+      - id: fact-hcl-cicd-improvement-estimate
+        text: Improved CI/CD performance by an estimated 50 percent through automation and platform improvements.
+        metrics:
+          - name: ci_cd_performance_improvement
+            value: 50
+            unit: percent
+            qualifier: estimated
+        technologies: [Jenkins, Python]
+        tags: [ci-cd, performance, developer-productivity]
+        evidence: self_reported
+        allowed_variations:
+          - Delivered an estimated 50 percent improvement in CI/CD performance.
+
+projects:
+  - id: project-homelab-platform
+    name: Personal homelab platform
+    description: Personal infrastructure and learning environment; not production employment.
+    facts:
+      - id: fact-homelab-proxmox-kubernetes
+        text: Built and maintained a multi-node homelab using Proxmox and Kubernetes.
+        metrics: []
+        technologies: [Proxmox, Kubernetes, Linux]
+        tags: [homelab, virtualization, kubernetes, infrastructure]
+        evidence: homelab
+        allowed_variations:
+          - Operate a multi-node Proxmox and Kubernetes homelab for infrastructure experimentation.
+
+      - id: fact-homelab-gitops
+        text: Used Helm and Argo CD to manage applications and Kubernetes configuration in the homelab.
+        metrics: []
+        technologies: [Helm, Argo CD, Kubernetes, GitOps]
+        tags: [homelab, gitops, kubernetes]
+        evidence: homelab
+        allowed_variations:
+          - Manage homelab applications through GitOps with Helm and Argo CD.
+
+      - id: fact-homelab-observability
+        text: Deployed monitoring and logging components for homelab services.
+        metrics: []
+        technologies: [Prometheus, Grafana, Elastic Stack]
+        tags: [homelab, observability, monitoring, logging]
+        evidence: homelab
+        allowed_variations:
+          - Run Prometheus, Grafana, and Elastic Stack components for homelab observability.
+
+      - id: fact-homelab-storage-recovery
+        text: Recovered virtual-machine storage and rebuilt a failed Proxmox node while preserving backed-up workloads.
+        metrics: []
+        technologies: [Proxmox, LVM, NFS, Linux]
+        tags: [homelab, disaster-recovery, storage, troubleshooting]
+        evidence: homelab
+        allowed_variations:
+          - Recovered VM storage and rebuilt a failed Proxmox node using LVM and NFS backups.
+
+  - id: project-homelab-automation
+    name: Homelab automation and AI assistants
+    description: Personal GitHub-based automation projects; not production employment.
+    facts:
+      - id: fact-homelab-ci-workflows
+        text: Created CI workflows for verification, linting, type checking, tests, database migrations, manifest rendering, container publishing, and release automation.
+        metrics: []
+        technologies: [GitHub Actions, Containers, CI/CD]
+        tags: [homelab, ci-cd, automation, software-quality]
+        evidence: homelab
+        allowed_variations:
+          - Built GitHub Actions workflows covering validation, tests, migrations, manifests, container publishing, and releases.
+
+      - id: fact-homelab-assistants
+        text: Developed personal Homelab Assistant and Job Assistant automation projects.
+        metrics: []
+        technologies: [Python, GitHub Actions]
+        tags: [homelab, automation, ai-assistant]
+        evidence: homelab
+        allowed_variations:
+          - Built personal automation assistants for homelab operations and job-search workflows.
+
+education:
+  - id: education-technion-bsc
+    institution: Technion - Israel Institute of Technology
+    location: Haifa, Israel
+    degree: B.Sc.
+    field_of_study: Computer Science
+    graduation_year: 2017
+    evidence: documented
+
+certifications: []
+
+languages:
+  - id: language-hebrew
+    text: Native proficiency in Hebrew.
+    metrics: []
+    technologies: []
+    tags: [language]
+    evidence: documented
+    allowed_variations:
+      - Hebrew - Native
+
+  - id: language-english
+    text: Excellent professional proficiency in English.
+    metrics: []
+    technologies: []
+    tags: [language]
+    evidence: documented
+    allowed_variations:
+      - English - Excellent professional proficiency
+      - Professional working proficiency in English.
