@@ -31,7 +31,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "mypy>=1.14,<2",
-  "pytest>=8.3,<9",
+  "pytest>=8.4.2,<9",
   "pytest-cov>=6,<7",
   "pytest-postgresql>=6.1,<7",
   "respx>=0.22,<1",
