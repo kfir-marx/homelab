@@ -180,7 +180,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9,<1" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "typer", specifier = ">=0.15,<1" },
-    { name = "uvicorn", specifier = ">=0.34,<1" },
+    { name = "uvicorn", specifier = ">=0.52.4,<1" },
 ]
 provides-extras = ["dev"]
 

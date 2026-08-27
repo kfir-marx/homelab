@@ -479,7 +479,7 @@ requires-dist = [
     { name = "types-bleach", marker = "extra == 'dev'", specifier = ">=6.2,<7" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0,<7" },
     { name = "types-reportlab", marker = "extra == 'dev'", specifier = ">=4.2,<5" },
-    { name = "uvicorn", specifier = ">=0.34,<1" },
+    { name = "uvicorn", specifier = ">=0.52.4,<1" },
 ]
 provides-extras = ["dev"]
 
