@@ -9,7 +9,7 @@ description = "Private durable broker for serialized ephemeral Codex executions"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115,<1",
-  "prometheus-client>=0.21,<1",
+  "prometheus-client>=0.26.0,<1",
   "psycopg[binary]>=3.2,<4",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.7,<3",
