@@ -92,17 +92,19 @@ module "control_plane_vms" {
   source   = "./modules/proxmox-vm"
   for_each = var.control_plane_nodes
 
-  hostname      = each.key
-  proxmox_node  = each.value.proxmox_node
-  vm_id         = each.value.vm_id
-  cores         = each.value.cores
-  memory_mb     = each.value.memory_mb
-  disk_size_gb  = each.value.disk_size_gb
-  ip_address    = each.value.ip_address
-  gateway       = var.network_gateway
-  bridge        = var.network_bridge
-  image_file_id = proxmox_download_file.talos_image["${each.value.proxmox_node}/base"].id
-  migrate       = true
+  hostname                 = each.key
+  proxmox_node             = each.value.proxmox_node
+  vm_id                    = each.value.vm_id
+  cores                    = each.value.cores
+  memory_mb                = each.value.memory_mb
+  disk_size_gb             = each.value.disk_size_gb
+  system_disk_datastore_id = each.value.system_disk_datastore_id
+  system_disk_file_format  = each.value.system_disk_file_format
+  ip_address               = each.value.ip_address
+  gateway                  = var.network_gateway
+  bridge                   = var.network_bridge
+  image_file_id            = proxmox_download_file.talos_image["${each.value.proxmox_node}/base"].id
+  migrate                  = true
 
   pci_devices = []
 }
@@ -111,16 +113,18 @@ module "worker_vms" {
   source   = "./modules/proxmox-vm"
   for_each = var.worker_nodes
 
-  hostname      = each.key
-  proxmox_node  = each.value.proxmox_node
-  vm_id         = each.value.vm_id
-  cores         = each.value.cores
-  memory_mb     = each.value.memory_mb
-  disk_size_gb  = each.value.disk_size_gb
-  ip_address    = each.value.ip_address
-  gateway       = var.network_gateway
-  bridge        = var.network_bridge
-  image_file_id = proxmox_download_file.talos_image["${each.value.proxmox_node}/base"].id
+  hostname                 = each.key
+  proxmox_node             = each.value.proxmox_node
+  vm_id                    = each.value.vm_id
+  cores                    = each.value.cores
+  memory_mb                = each.value.memory_mb
+  disk_size_gb             = each.value.disk_size_gb
+  system_disk_datastore_id = each.value.system_disk_datastore_id
+  system_disk_file_format  = each.value.system_disk_file_format
+  ip_address               = each.value.ip_address
+  gateway                  = var.network_gateway
+  bridge                   = var.network_bridge
+  image_file_id            = proxmox_download_file.talos_image["${each.value.proxmox_node}/base"].id
 
   pci_devices = []
 }
@@ -129,16 +133,18 @@ module "gpu_vms" {
   source   = "./modules/proxmox-vm"
   for_each = var.gpu_nodes
 
-  hostname      = each.key
-  proxmox_node  = each.value.proxmox_node
-  vm_id         = each.value.vm_id
-  cores         = each.value.cores
-  memory_mb     = each.value.memory_mb
-  disk_size_gb  = each.value.disk_size_gb
-  ip_address    = each.value.ip_address
-  gateway       = var.network_gateway
-  bridge        = var.network_bridge
-  image_file_id = proxmox_download_file.talos_image["${each.value.proxmox_node}/gpu"].id
+  hostname                 = each.key
+  proxmox_node             = each.value.proxmox_node
+  vm_id                    = each.value.vm_id
+  cores                    = each.value.cores
+  memory_mb                = each.value.memory_mb
+  disk_size_gb             = each.value.disk_size_gb
+  system_disk_datastore_id = each.value.system_disk_datastore_id
+  system_disk_file_format  = each.value.system_disk_file_format
+  ip_address               = each.value.ip_address
+  gateway                  = var.network_gateway
+  bridge                   = var.network_bridge
+  image_file_id            = proxmox_download_file.talos_image["${each.value.proxmox_node}/gpu"].id
 
   pci_devices = each.value.pci_devices
   data_disks = concat(

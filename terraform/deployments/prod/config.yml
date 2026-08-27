@@ -60,8 +60,12 @@ gpu_nodes:
     cores: 14
     memory_mb: 53248
     disk_size_gb: 159
-    # Disposable node-local scratch on the otherwise-idle largegpu HDD.
-    # The 400 GiB cap protects the higher-priority Proxmox backup reserve.
+    # Keep this disposable worker's system and scratch disks off local-lvm.
+    # Windows and cp-1 otherwise exhaust that NVMe thin pool when the linked
+    # Windows clone approaches its declared 635 GiB size.
+    system_disk_datastore_id: "largegpu-hdd"
+    system_disk_file_format: "qcow2"
+    # The 400 GiB scratch cap protects the higher-priority Proxmox backup reserve.
     scratch_disk:
       datastore_id: "largegpu-hdd"
       size_gb: 400

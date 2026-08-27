@@ -124,12 +124,14 @@ variable "argocd_app_path" {
 variable "control_plane_nodes" {
   description = "Control-plane node specs"
   type = map(object({
-    proxmox_node = string
-    vm_id        = number
-    ip_address   = string
-    cores        = number
-    memory_mb    = number
-    disk_size_gb = number
+    proxmox_node             = string
+    vm_id                    = number
+    ip_address               = string
+    cores                    = number
+    memory_mb                = number
+    disk_size_gb             = number
+    system_disk_datastore_id = optional(string, "local-lvm")
+    system_disk_file_format  = optional(string, "raw")
   }))
 
   validation {
@@ -144,12 +146,14 @@ variable "control_plane_nodes" {
 variable "worker_nodes" {
   description = "Pure-compute worker node specs"
   type = map(object({
-    proxmox_node = string
-    vm_id        = number
-    ip_address   = string
-    cores        = number
-    memory_mb    = number
-    disk_size_gb = number
+    proxmox_node             = string
+    vm_id                    = number
+    ip_address               = string
+    cores                    = number
+    memory_mb                = number
+    disk_size_gb             = number
+    system_disk_datastore_id = optional(string, "local-lvm")
+    system_disk_file_format  = optional(string, "raw")
   }))
   default = {}
 }
@@ -157,13 +161,15 @@ variable "worker_nodes" {
 variable "gpu_nodes" {
   description = "GPU worker node specs with PCIe passthrough devices"
   type = map(object({
-    proxmox_node = string
-    vm_id        = number
-    ip_address   = string
-    cores        = number
-    memory_mb    = number
-    disk_size_gb = number
-    dedicated    = optional(bool, true)
+    proxmox_node             = string
+    vm_id                    = number
+    ip_address               = string
+    cores                    = number
+    memory_mb                = number
+    disk_size_gb             = number
+    system_disk_datastore_id = optional(string, "local-lvm")
+    system_disk_file_format  = optional(string, "raw")
+    dedicated                = optional(bool, true)
     scratch_disk = optional(object({
       datastore_id = string
       size_gb      = number

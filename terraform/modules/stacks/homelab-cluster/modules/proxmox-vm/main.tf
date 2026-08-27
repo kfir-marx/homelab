@@ -50,6 +50,18 @@ variable "disk_size_gb" {
   default = 50
 }
 
+variable "system_disk_datastore_id" {
+  description = "Proxmox datastore for the Talos system disk"
+  type        = string
+  default     = "local-lvm"
+}
+
+variable "system_disk_file_format" {
+  description = "File format for the Talos system disk"
+  type        = string
+  default     = "raw"
+}
+
 variable "ip_address" {
   description = "Static IP in CIDR notation (e.g. 10.0.10.11/24)"
   type        = string
@@ -122,11 +134,11 @@ resource "proxmox_virtual_environment_vm" "this" {
   }
 
   disk {
-    datastore_id = "local-lvm"
+    datastore_id = var.system_disk_datastore_id
     interface    = "scsi0"
     size         = var.disk_size_gb
     file_id      = var.image_file_id
-    file_format  = "raw"
+    file_format  = var.system_disk_file_format
     ssd          = true
     discard      = "on"
   }
