@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "homelab-external-ai"
 version = "0.1.0"
 description = "Private durable broker for serialized ephemeral Codex executions"
-requires-python = ">=3.12"
+requires-python = ">=3.14.7"
 dependencies = [
   "fastapi>=0.115,<1",
   "prometheus-client>=0.21,<1",
