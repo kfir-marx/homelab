@@ -47,7 +47,7 @@ jobs:
     outputs:
       release: ${{ steps.release.outputs.release }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - name: Detect service or release-workflow changes
@@ -78,7 +78,7 @@ jobs:
     name: "Lint, type, and test"
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -103,7 +103,7 @@ jobs:
     name: "Render manifests"
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: azure/setup-kubectl@v5
         with:
           version: v1.34.0
@@ -148,7 +148,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -177,7 +177,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: main
       - name: Pin the published image tag
