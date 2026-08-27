@@ -23,7 +23,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-state
-          image: busybox:1.37.0
+          image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
           command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/sonarr"]
           securityContext:
             runAsUser: 0
@@ -111,7 +111,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-state
-          image: busybox:1.37.0
+          image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
           command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/radarr"]
           securityContext:
             runAsUser: 0
@@ -199,7 +199,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-state
-          image: busybox:1.37.0
+          image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
           command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/whisparr"]
           securityContext:
             runAsUser: 0
@@ -287,7 +287,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-state
-          image: busybox:1.37.0
+          image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
           command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/prowlarr"]
           securityContext:
             runAsUser: 0
