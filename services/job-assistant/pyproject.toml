@@ -36,7 +36,7 @@ dev = [
   "pytest-postgresql>=6.1,<7",
   "respx>=0.22,<1",
   "ruff>=0.9,<1",
-  "types-PyYAML>=6.0,<7",
+  "types-PyYAML>=6.0.12.20260815,<7",
   "types-bleach>=6.2,<7",
   "types-reportlab>=4.2,<5",
 ]

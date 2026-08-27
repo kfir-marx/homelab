@@ -477,7 +477,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9,<10" },
     { name = "typer", specifier = ">=0.15,<1" },
     { name = "types-bleach", marker = "extra == 'dev'", specifier = ">=6.2,<7" },
-    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0,<7" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20260815,<7" },
     { name = "types-reportlab", marker = "extra == 'dev'", specifier = ">=4.2,<5" },
     { name = "uvicorn", specifier = ">=0.34,<1" },
 ]
