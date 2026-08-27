@@ -73,7 +73,7 @@ jobs:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     services:
       postgres:
-        image: postgres:17.6-bookworm
+        image: postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
         env:
           POSTGRES_USER: job_assistant_test
           POSTGRES_PASSWORD: test-only-password
