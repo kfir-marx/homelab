@@ -139,7 +139,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.7,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3,<9" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.22,<1" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9,<1" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.3,<1" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
 ]
 provides-extras = ["dev"]
