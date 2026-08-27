@@ -28,7 +28,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migrate
-          image: ghcr.io/kfir-marx/homelab-job-assistant:sha-4adbce9f64d4f657b6aca1fccedb5b6900239bda
+          image: ghcr.io/kfir-marx/homelab-job-assistant:sha-843283431b922513037086f8e9a1f9ef44f09531
           imagePullPolicy: IfNotPresent
           args: [migrate]
           env:
