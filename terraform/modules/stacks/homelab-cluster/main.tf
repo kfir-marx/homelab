@@ -500,7 +500,7 @@ resource "helm_release" "argocd_root_app" {
   namespace  = "argocd"
   repository = "https://argoproj.github.io/argo-helm"
   chart      = "argocd-apps"
-  version    = "2.0.2"
+  version    = "2.0.5"
 
   values = [
     yamlencode({
