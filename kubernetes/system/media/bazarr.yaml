@@ -27,7 +27,10 @@ spec:
           command:
             - sh
             - -ec
-            - install -d -o 1000 -g 1000 -m 0770 /state/bazarr /state/bazarr/config
+            # Create only the application root here. After install assigns it
+            # to UID 1000, this capability-limited UID 0 process cannot create
+            # children inside it; the next init container can and does.
+            - install -d -o 1000 -g 1000 -m 0770 /state/bazarr
           securityContext:
             runAsUser: 0
             allowPrivilegeEscalation: false
@@ -45,7 +48,7 @@ spec:
             - name: MEDIA_STATE_ROOT
               value: /state
             - name: TMPDIR
-              value: /state/bazarr/config
+              value: /state/bazarr
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000

@@ -34,6 +34,20 @@ spec:
             - |
               install -d -o 1000 -g 1000 -m 0770 /state/jellyfin
               chmod 0777 /jellybridge
+
+              # Jellyfin defaults both options to false. Without them, a fast
+              # transcode/remux can retain the whole output and exceed the
+              # pod-local cache limit before playback finishes.
+              encoding_options=/state/jellyfin/config/encoding.xml
+              if [ -f "${encoding_options}" ]; then
+                sed -i \
+                  -e 's#<EnableThrottling>[^<]*</EnableThrottling>#<EnableThrottling>true</EnableThrottling>#' \
+                  -e 's#<EnableSegmentDeletion>[^<]*</EnableSegmentDeletion>#<EnableSegmentDeletion>true</EnableSegmentDeletion>#' \
+                  "${encoding_options}"
+                grep -q '<EnableThrottling>true</EnableThrottling>' "${encoding_options}"
+                grep -q '<EnableSegmentDeletion>true</EnableSegmentDeletion>' "${encoding_options}"
+                chown 1000:1000 "${encoding_options}"
+              fi
           securityContext:
             runAsUser: 0
             allowPrivilegeEscalation: false
@@ -124,6 +138,8 @@ spec:
             claimName: media-data
         - name: cache
           emptyDir:
+            # Protect gpu-3's system disk. Jellyfin throttles transcodes and
+            # deletes downloaded HLS segments to stay below this guardrail.
             sizeLimit: 20Gi
 ---
 apiVersion: v1

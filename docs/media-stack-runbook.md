@@ -16,7 +16,7 @@ filesystem.
 | Movies, shows, and torrents | `smallgpu:/mnt/data10tb/media` through `media-data-pv` | Replaceable; re-download if lost |
 | Live application state | `gpu-3:/var/mnt/media-state` through `media-state-pv` | Restore from encrypted backup |
 | Encrypted state backups | `ubuntu-workstation:/mnt/storage2-bulk/media/backups` | Retained for 30 days |
-| Jellyfin transcodes | Pod-local `/cache` `emptyDir` | Disposable |
+| Jellyfin transcodes | Pod-local `/cache` `emptyDir`, capped at 20 GiB | Disposable; throttled and downloaded HLS segments are deleted |
 
 The shared container layout is deliberately stable:
 
@@ -371,7 +371,27 @@ kubectl --kubeconfig kubeconfig.yaml -n media logs deploy/jellyfin | grep -i ffm
 
 In Jellyfin, select NVIDIA NVENC, enable only codecs supported by the RTX 2060,
 and trigger a lower-bitrate stream. Confirm a `jellyfin-ffmpeg` process appears
-in `nvidia-smi` and `/cache` remains bounded.
+in `nvidia-smi` and `/cache` remains bounded. The Deployment init container
+enforces **Throttle Transcodes** and **Delete Segments** in the retained
+`encoding.xml` on every pod start; do not disable them in the UI. The retained
+180-second throttle delay and 720-second segment window provide seek buffer
+without allowing a normal transcode to generate and retain the entire item.
+
+If a pod is evicted with `Usage of EmptyDir volume "cache" exceeds the limit
+"20Gi"`, verify the effective settings and current usage before changing the
+limit:
+
+```bash
+kubectl --kubeconfig kubeconfig.yaml -n media exec deploy/jellyfin -- \
+  grep -E 'EnableThrottling|EnableSegmentDeletion|ThrottleDelaySeconds|SegmentKeepSeconds' \
+  /config/config/encoding.xml
+kubectl --kubeconfig kubeconfig.yaml -n media exec deploy/jellyfin -- \
+  sh -c 'df -h /cache; du -h -d 1 /cache'
+```
+
+Do not remove or raise the `emptyDir` guardrail without first establishing a
+dedicated disposable cache disk; an unbounded cache competes with Talos and
+other pods for the `gpu-3` system disk.
 
 ## Rollback
 
