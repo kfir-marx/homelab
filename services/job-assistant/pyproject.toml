@@ -9,7 +9,7 @@ description = "Personal, human-approved job discovery and application assistance
 requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.14,<2",
-  "beautifulsoup4>=4.12,<5",
+  "beautifulsoup4>=4.15.0,<5",
   "bleach>=6.2,<7",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",

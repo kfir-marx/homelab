@@ -454,7 +454,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.14,<2" },
-    { name = "beautifulsoup4", specifier = ">=4.12,<5" },
+    { name = "beautifulsoup4", specifier = ">=4.15.0,<5" },
     { name = "bleach", specifier = ">=6.2,<7" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
