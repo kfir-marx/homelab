@@ -20,4 +20,4 @@ def test_telegram_user_ids_are_parsed_from_environment(
     monkeypatch.setenv("HOMELAB_ASSISTANT_LLM_API_KEY", "unit-test-placeholder")
     monkeypatch.setenv("HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS", value)
 
-    assert Settings().telegram_allowed_user_ids == expected  # type: ignore[call-arg]
+    assert Settings().telegram_allowed_user_ids == expected

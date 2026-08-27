@@ -111,8 +111,10 @@ out of Git and require an operator:
    databases.
 4. Configure Whisparr, qBittorrent, and its Prowlarr application/indexer sync as
    described below. API keys and tracker credentials remain out of Git.
-5. Configure Bazarr's Sonarr, Radarr, Jellyfin, subtitle-provider, and language
-   integrations as described below. Provider credentials remain out of Git.
+5. Confirm Bazarr's controller-reconciled Sonarr and Radarr connections, then
+   configure its authentication, Jellyfin integration, subtitle providers, and
+   language profiles as described below. Provider credentials remain out of
+   Git.
 6. Confirm the controller-reconciled Maintainerr connections, then leave
    deletion actions disabled for at least one complete candidate cycle. Apply
    the pin and cleanup policy below only after reviewing its proposed
@@ -206,9 +208,10 @@ not silently break:
 
 1. Change the qBittorrent WebUI password, then update Sonarr, Radarr, and
    Whisparr.
-2. Rotate Sonarr and Radarr API keys, then update Prowlarr, Seerr, and Bazarr.
-   The storage controller updates Maintainerr from the Arr config files on its
-   next hourly run.
+2. Rotate Sonarr and Radarr API keys, then update Prowlarr and Seerr. Restart
+   Bazarr so its init controller rereads both keys from the Arr config files.
+   The storage controller updates Maintainerr from the same files on its next
+   hourly run.
 3. Rotate the Whisparr API key, update its Prowlarr application, and force an
    application sync.
 4. Rotate the Prowlarr API key after its applications have re-synced.
@@ -258,25 +261,27 @@ Open `https://bazarr.home.547600.xyz` and complete the setup in this order:
 1. Enable Bazarr authentication before storing API keys or provider
    credentials. The route is private, but every trusted LAN or tailnet client
    can otherwise open the UI.
-2. Under **Settings > Sonarr**, enable Sonarr with address `sonarr`, port
-   `8989`, no SSL or URL base, and the current Sonarr API key.
-3. Under **Settings > Radarr**, enable Radarr with address `radarr`, port
-   `7878`, no SSL or URL base, and the current Radarr API key.
-4. Do not add path mappings. Sonarr, Radarr, and Bazarr all see movie and show
-   paths under the same `/data/media/...` hierarchy.
-5. In Jellyfin, create a dedicated Bazarr API key under **Dashboard > API
+2. Confirm **Settings > Sonarr** reports a working connection to `sonarr:8989`
+   and **Settings > Radarr** reports a working connection to `radarr:7878`.
+   Bazarr's init controller reads both API keys from retained Arr state and
+   enforces these internal addresses on every Bazarr start; no credential is
+   duplicated in Git.
+3. Do not add path mappings. The controller keeps them empty because Sonarr,
+   Radarr, and Bazarr all see movie and show paths under the same
+   `/data/media/...` hierarchy.
+4. In Jellyfin, create a dedicated Bazarr API key under **Dashboard > API
    Keys**. Configure Bazarr's Jellyfin integration with server URL
    `http://jellyfin:8096`, that key, and the applicable movie and TV libraries.
    This lets Bazarr refresh Jellyfin after subtitle changes.
-6. Add only the subtitle providers you intend to use. Keep provider usernames,
+5. Add only the subtitle providers you intend to use. Keep provider usernames,
    passwords, tokens, and cookies in Bazarr's local configuration, never in
    Git. Start with one or two providers to avoid unnecessary bans or rate
    limits, then test each provider from Bazarr.
-7. Create the required language profile or profiles, enable automatic subtitle
+6. Create the required language profile or profiles, enable automatic subtitle
    downloading, and assign a default profile to new movies and shows. For
    existing library entries, use Bazarr's mass editor to apply the profile;
    setting a default does not retroactively assign it.
-8. Run a manual search on one movie and one episode. Confirm the `.srt` files
+7. Run a manual search on one movie and one episode. Confirm the `.srt` files
    appear beside the video under `/data/media`, then refresh and play both in
    Jellyfin before enabling broad automatic searches.
 

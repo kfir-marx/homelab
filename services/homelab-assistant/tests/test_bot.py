@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 from typing import cast
 
 import pytest
 from pydantic import SecretStr
 
-from homelab_assistant import sessions as sessions_module
 from homelab_assistant.bot import AssistantBot, _namespace_job_update, effective_prompt_budget
 from homelab_assistant.clients import (
     Completion,
@@ -173,7 +173,7 @@ def test_session_ids_retry_collisions_and_are_case_insensitive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     characters = iter("000000000000ABCDEF")
-    monkeypatch.setattr(sessions_module.secrets, "choice", lambda _alphabet: next(characters))
+    monkeypatch.setattr(secrets, "choice", lambda _alphabet: next(characters))
     store = SessionStore(f"sqlite+pysqlite:///{tmp_path / 'collision.db'}")
     first = store.create(123)
     second = store.create(123)
@@ -364,12 +364,12 @@ def test_document_download_is_authorized_and_pending_only(tmp_path: Path) -> Non
         SessionStore(configured.session_database_url.get_secret_value()),
         job_assistant=cast(JobAssistantClient, fake_job),
     )
-    document = cast(dict[str, object], update(123, "unused"))
+    document = update(123, "unused")
     document_message = cast(dict[str, object], document["message"])
     document_message.pop("text")
     document_message["document"] = {"file_id": "bounded"}
     assert bot.wants_job_document(document)
-    unauthorized = cast(dict[str, object], update(999, "unused"))
+    unauthorized = update(999, "unused")
     unauthorized_message = cast(dict[str, object], unauthorized["message"])
     unauthorized_message.pop("text")
     unauthorized_message["document"] = {"file_id": "do-not-fetch"}
@@ -379,10 +379,10 @@ def test_document_download_is_authorized_and_pending_only(tmp_path: Path) -> Non
 
 
 def test_job_commands_and_callbacks_are_namespaced() -> None:
-    routed = _namespace_job_update(cast(dict[str, object], update(123, "/job_status ABC123")))
-    assert routed["message"]["text"] == "/status ABC123"  # type: ignore[index]
-    routed_callback = _namespace_job_update(cast(dict[str, object], callback(123, "job:apply:id")))
-    assert routed_callback["callback_query"]["data"] == "apply:id"  # type: ignore[index]
+    routed = _namespace_job_update(update(123, "/job_status ABC123"))
+    assert routed["message"]["text"] == "/status ABC123"
+    routed_callback = _namespace_job_update(callback(123, "job:apply:id"))
+    assert routed_callback["callback_query"]["data"] == "apply:id"
 
 
 def test_long_replies_are_split_within_telegram_limit() -> None:

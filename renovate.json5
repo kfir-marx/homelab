@@ -1,0 +1,89 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices"],
+  "timezone": "Asia/Jerusalem",
+  "schedule": ["* 0-4 * * 1"],
+  "minimumReleaseAge": "7 days",
+  "automerge": false,
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "separateMajorMinor": true,
+  "dependencyDashboard": true,
+  "labels": ["dependencies"],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["* 0-4 * * 1"]
+  },
+  "kubernetes": {
+    "managerFilePatterns": ["/^kubernetes\\/system\\/.*\\.ya?ml$/"]
+  },
+  "argocd": {
+    "managerFilePatterns": ["/^kubernetes\\/apps\\/[^/]+\\.ya?ml$/"]
+  },
+  "ignoreDeps": [
+    "ghcr.io/kfir-marx/homelab-assistant",
+    "ghcr.io/kfir-marx/homelab-job-assistant",
+    "ghcr.io/kfir-marx/homelab-external-ai"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Version pins carrying an explicit Renovate annotation",
+      "managerFilePatterns": ["/^terraform\\/deployments\\/config\\.yml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?(?: versioning=(?<versioning>\\S+))?\\s+[a-z_]+:\\s*[\\\"']?(?<currentValue>v?\\d+\\.\\d+\\.\\d+)[\\\"']?"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Do not block immutable digest pinning when registries lack release timestamps",
+      "matchUpdateTypes": ["pinDigest"],
+      "minimumReleaseAge": "0 days"
+    },
+    {
+      "description": "Keep Python declarations and uv lockfiles in the same update PR",
+      "matchManagers": ["pep621"],
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "Require isolated manual review for Terraform dependencies",
+      "matchManagers": ["terraform"],
+      "groupName": null,
+      "labels": ["dependencies", "manual-review", "high-risk"],
+      "prBodyNotes": [
+        "This Terraform dependency is high risk. Review the complete plan for replacement or deletion before merging; never treat this PR as approval to apply it."
+      ]
+    },
+    {
+      "description": "Require isolated manual review for core platform dependencies",
+      "matchPackageNames": [
+        "siderolabs/talos",
+        "kubernetes/kubernetes",
+        "cilium/cilium",
+        "argo-cd",
+        "gpu-operator"
+      ],
+      "groupName": null,
+      "labels": ["dependencies", "manual-review", "high-risk"],
+      "prBodyNotes": [
+        "This core platform dependency requires an explicit compatibility and rollout review. Do not merge it as an unattended latest-version update."
+      ]
+    },
+    {
+      "description": "Require isolated manual review for databases, storage, and networking",
+      "matchPackageNames": [
+        "/(^|\\/)(?:postgres(?:ql)?|valkey|redis|mariadb|mysql|mongodb)(?:$|[\\/-])/",
+        "/(?:^|\\/)(?:csi|nfs)(?:$|[\\/-])/",
+        "cert-manager",
+        "tailscale/tailscale",
+        "cloudflare/cloudflared"
+      ],
+      "groupName": null,
+      "labels": ["dependencies", "manual-review", "high-risk"],
+      "prBodyNotes": [
+        "This database, storage, or networking dependency requires manual review of persistence, migration, compatibility, and rollback impact."
+      ]
+    }
+  ]
+}

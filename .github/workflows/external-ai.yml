@@ -31,13 +31,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: services/external-ai/pyproject.toml
-      - run: pip install -e 'services/external-ai[dev]'
-      - run: ruff format --check services/external-ai
-      - run: ruff check services/external-ai
-      - run: mypy services/external-ai/src services/external-ai/tests
-      - run: pytest services/external-ai
+      - uses: astral-sh/setup-uv@v9
+        with:
+          version: "0.12.6"
+          enable-cache: true
+          cache-dependency-glob: services/external-ai/uv.lock
+      - run: uv sync --directory services/external-ai --locked --extra dev
+      - run: uv run --directory services/external-ai --locked --extra dev ruff format --check .
+      - run: uv run --directory services/external-ai --locked --extra dev ruff check .
+      - run: uv run --directory services/external-ai --locked --extra dev mypy src tests
+      - run: uv run --directory services/external-ai --locked --extra dev pytest
       - uses: azure/setup-kubectl@v4
       - run: kubectl kustomize kubernetes/system/external-ai >/tmp/external-ai.yaml
       - uses: docker/setup-buildx-action@v3

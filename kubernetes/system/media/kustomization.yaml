@@ -17,6 +17,13 @@ resources:
   - network-policy.yaml
 
 configMapGenerator:
+  - name: bazarr-config-sync
+    files:
+      - reconcile.sh=bazarr_config_sync.sh
+    options:
+      # The Deployment reference is intentionally stable; changing this script
+      # also requires touching the init-container manifest to trigger a rollout.
+      disableNameSuffixHash: true
   - name: maintainerr-storage-cleanup
     files:
       - cleanup.py=maintainerr_storage_cleanup.py

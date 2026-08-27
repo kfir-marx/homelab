@@ -84,20 +84,24 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: services/job-assistant/pyproject.toml
-      - name: Install
-        run: pip install -e 'services/job-assistant[dev]'
+      - uses: astral-sh/setup-uv@v9
+        with:
+          version: "0.12.6"
+          enable-cache: true
+          cache-dependency-glob: services/job-assistant/uv.lock
+      - name: Install locked dependencies
+        working-directory: services/job-assistant
+        run: uv sync --locked --extra dev
       - name: Ruff format
-        run: ruff format --check services/job-assistant
+        run: uv run --directory services/job-assistant --locked --extra dev ruff format --check .
       - name: Ruff lint
-        run: ruff check services/job-assistant
+        run: uv run --directory services/job-assistant --locked --extra dev ruff check .
       - name: Mypy
-        run: mypy services/job-assistant/src
+        run: uv run --directory services/job-assistant --locked --extra dev mypy src
       - name: Tests
         env:
           TEST_POSTGRES_URL: postgresql+psycopg://job_assistant_test:test-only-password@localhost:5432/job_assistant_test
-        run: pytest --cov=job_assistant --cov-report=term-missing services/job-assistant
+        run: uv run --directory services/job-assistant --locked --extra dev pytest --cov=job_assistant --cov-report=term-missing
 
   manifests:
     name: "Render manifests"

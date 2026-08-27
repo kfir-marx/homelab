@@ -200,6 +200,7 @@ export are unavailable even though the API on `largegpu` remains up.
 | Document | Focus |
 |---|---|
 | [Architecture](docs/architecture.md) | Hardware, topology, networking, storage, Terraform modules, CI/CD, and design rationale |
+| [Dependency updates](docs/dependency-updates.md) | Renovate safeguards, manual review, Python lockfiles, rollback, and GitHub setup |
 | [Secrets disaster recovery](docs/secrets-disaster-recovery.md) | SOPS + age setup, capture, rotation, validation, and bare-metal recovery |
 | [Kubernetes network policies](docs/network-policies.md) | Default-deny application isolation, allowed-flow matrix, exceptions, and rollout verification |
 | [Remote access](docs/remote-access.md) | Public Cloudflare routes, private Tailscale access, and security boundaries |

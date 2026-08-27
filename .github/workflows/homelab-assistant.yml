@@ -82,18 +82,22 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: services/homelab-assistant/pyproject.toml
-      - name: Install
-        run: pip install -e 'services/homelab-assistant[dev]'
+      - uses: astral-sh/setup-uv@v9
+        with:
+          version: "0.12.6"
+          enable-cache: true
+          cache-dependency-glob: services/homelab-assistant/uv.lock
+      - name: Install locked dependencies
+        working-directory: services/homelab-assistant
+        run: uv sync --locked --extra dev
       - name: Ruff format
-        run: ruff format --check services/homelab-assistant
+        run: uv run --directory services/homelab-assistant --locked --extra dev ruff format --check .
       - name: Ruff lint
-        run: ruff check services/homelab-assistant
+        run: uv run --directory services/homelab-assistant --locked --extra dev ruff check .
       - name: Mypy
-        run: mypy services/homelab-assistant/src services/homelab-assistant/tests
+        run: uv run --directory services/homelab-assistant --locked --extra dev mypy src tests
       - name: Tests
-        run: pytest services/homelab-assistant
+        run: uv run --directory services/homelab-assistant --locked --extra dev pytest
 
   manifests:
     name: "Render manifests"

@@ -24,7 +24,10 @@ spec:
       initContainers:
         - name: prepare-state
           image: busybox:1.37.0
-          command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/bazarr"]
+          command:
+            - sh
+            - -ec
+            - install -d -o 1000 -g 1000 -m 0770 /state/bazarr /state/bazarr/config
           securityContext:
             runAsUser: 0
             allowPrivilegeEscalation: false
@@ -32,6 +35,36 @@ spec:
               drop: [ALL]
               add: [CHOWN, FOWNER]
           volumeMounts:
+            - name: state
+              mountPath: /state
+        - name: reconcile-arr-integrations
+          image: mikefarah/yq:4.53.6
+          imagePullPolicy: IfNotPresent
+          command: [/bin/sh, /app/reconcile.sh]
+          env:
+            - name: MEDIA_STATE_ROOT
+              value: /state
+            - name: TMPDIR
+              value: /state/bazarr/config
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: config-sync
+              mountPath: /app
+              readOnly: true
             - name: state
               mountPath: /state
       containers:
@@ -65,6 +98,10 @@ spec:
             - name: data
               mountPath: /data
       volumes:
+        - name: config-sync
+          configMap:
+            name: bazarr-config-sync
+            defaultMode: 0555
         - name: state
           persistentVolumeClaim:
             claimName: media-state

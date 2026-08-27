@@ -8,11 +8,14 @@
 proxmox_api_url: "https://192.168.1.106:8006"
 
 # ── Talos ────────────────────────────────────────────────────────────────────
+# renovate: datasource=github-releases depName=siderolabs/talos versioning=semver
 talos_version: "v1.13.7"
 # Cilium 1.19 officially supports Kubernetes 1.31–1.34. Talos 1.13 supports
 # Kubernetes 1.31–1.36, so pin the newest release supported by both projects
 # instead of accepting Talos's Kubernetes 1.36 default.
+# renovate: datasource=github-releases depName=kubernetes/kubernetes extractVersion=^v(?<version>.*)$ versioning=semver
 kubernetes_version: "1.34.9"
+# renovate: datasource=github-releases depName=cilium/cilium extractVersion=^v(?<version>.*)$ versioning=semver
 cilium_version: "1.19.6"
 talos_image_datastore: "local"
 

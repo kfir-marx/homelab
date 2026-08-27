@@ -114,7 +114,7 @@ def configure_logging() -> None:
 
 def main() -> None:
     configure_logging()
-    settings = Settings()  # type: ignore[call-arg]
+    settings = Settings()
     run(settings)
 
 
