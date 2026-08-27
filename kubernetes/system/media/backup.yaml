@@ -31,7 +31,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: backup
-              image: alpine:3.23.3
+              image: alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
               imagePullPolicy: IfNotPresent
               env:
                 - name: MEDIA_BACKUP_PASSWORD
