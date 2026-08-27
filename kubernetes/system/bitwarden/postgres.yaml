@@ -59,7 +59,7 @@ spec:
               mountPath: /var/lib/postgresql/data
       containers:
         - name: postgres
-          image: docker.io/library/postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+          image: docker.io/library/postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
           imagePullPolicy: IfNotPresent
           env:
             - name: POSTGRES_USER

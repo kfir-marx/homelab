@@ -36,7 +36,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: backup
-              image: docker.io/library/postgres:17.6-bookworm
+              image: docker.io/library/postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
               command:
                 - sh
                 - -ec
