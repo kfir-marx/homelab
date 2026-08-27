@@ -113,9 +113,10 @@ out of Git and require an operator:
    described below. API keys and tracker credentials remain out of Git.
 5. Configure Bazarr's Sonarr, Radarr, Jellyfin, subtitle-provider, and language
    integrations as described below. Provider credentials remain out of Git.
-6. Configure Maintainerr and leave deletion actions disabled for at least one
-   complete candidate cycle. Apply the pin and cleanup policy below only after
-   reviewing its proposed collection.
+6. Confirm the controller-reconciled Maintainerr connections, then leave
+   deletion actions disabled for at least one complete candidate cycle. Apply
+   the pin and cleanup policy below only after reviewing its proposed
+   collection.
 7. In Jellyfin, enable NVIDIA NVENC and run one real lower-bitrate transcode.
    GPU discovery is already verified, but only playback exercises the complete
    FFmpeg path.
@@ -205,8 +206,9 @@ not silently break:
 
 1. Change the qBittorrent WebUI password, then update Sonarr, Radarr, and
    Whisparr.
-2. Rotate Sonarr and Radarr API keys, then update Prowlarr, Seerr, Bazarr, and
-   Maintainerr.
+2. Rotate Sonarr and Radarr API keys, then update Prowlarr, Seerr, and Bazarr.
+   The storage controller updates Maintainerr from the Arr config files on its
+   next hourly run.
 3. Rotate the Whisparr API key, update its Prowlarr application, and force an
    application sync.
 4. Rotate the Prowlarr API key after its applications have re-synced.
@@ -299,13 +301,25 @@ syncs.
 
 ## Maintainerr cleanup policy
 
-Configure Maintainerr integrations with the internal service URLs
-(`http://jellyfin:8096`, `http://seerr:5055`, `http://radarr:7878`,
-`http://sonarr:8989`, and `http://qbittorrent:8080`). There must be exactly one
-Radarr and one Sonarr connection. Enable qBittorrent download-data deletion
-after confirming hardlinks and the desired seed ratio/time limits; the storage
-controller deliberately uses Maintainerr actions so this cleanup remains
-coordinated with Arr, Seerr, and qBittorrent.
+The storage controller reconciles Maintainerr's Jellyfin, Seerr, Radarr, and
+Sonarr integrations before every run. It reads the existing API keys from the
+applications' retained state volume and enforces their internal service URLs,
+so no credential is duplicated in Git. Maintainerr must have at most one Radarr
+and one Sonarr connection; the controller creates the missing connections and
+repairs URL or key drift, but fails safely rather than deleting ambiguous extra
+connections.
+
+The reconciled Radarr and Sonarr root-folder data also populates Maintainerr's
+**Storage** page with total, used, and free space. Jellyfin supplies its library
+detail. Use **Compute library sizes** for the slower per-library scan; hardlinks
+mean those estimates can exceed unique filesystem usage.
+
+Configure Maintainerr's qBittorrent download client separately with
+`http://qbittorrent:8080`. Enable download-data deletion only after confirming
+hardlinks and the desired seed ratio/time limits; its password cannot be
+recovered from qBittorrent's stored hash. The storage controller deliberately
+uses Maintainerr actions so cleanup remains coordinated with Arr, Seerr, and
+qBittorrent.
 
 Maintainerr's native collection handler is batch-oriented and cannot stop when
 a free-space target is reached. The `maintainerr-storage-cleanup` CronJob runs

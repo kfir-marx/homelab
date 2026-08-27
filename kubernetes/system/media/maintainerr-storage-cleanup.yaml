@@ -61,6 +61,8 @@ spec:
                   value: http://maintainerr:6246
                 - name: MEDIA_PATH
                   value: /data
+                - name: MEDIA_STATE_ROOT
+                  value: /media-state
                 - name: STATE_PATH
                   value: /state/pending-no-reclaim.json
                 - name: TRIGGER_FREE_GB
@@ -98,6 +100,9 @@ spec:
                 - name: state
                   mountPath: /state
                   subPath: maintainerr-storage-cleanup
+                - name: state
+                  mountPath: /media-state
+                  readOnly: true
           volumes:
             - name: controller
               configMap:

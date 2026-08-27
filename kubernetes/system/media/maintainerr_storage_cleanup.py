@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from maintainerr_config_sync import reconcile_integrations
+
 
 GIB = 1024**3
 MIB = 1024**2
@@ -488,6 +490,15 @@ def main() -> int:
     if target <= trigger:
         raise RuntimeError("TARGET_FREE_GB must be greater than TRIGGER_FREE_GB")
 
+    maintainerr = JsonApi(os.getenv("MAINTAINERR_URL", "http://maintainerr:6246"))
+    changed_integrations = reconcile_integrations(
+        maintainerr, Path(os.getenv("MEDIA_STATE_ROOT", "/media-state"))
+    )
+    if changed_integrations:
+        log(f"Reconciled Maintainerr integrations: {', '.join(changed_integrations)}")
+    else:
+        log("Maintainerr integrations are configured")
+
     current_free = free_bytes(media_path)
     pending = load_pending(state_path)
     if pending:
@@ -515,7 +526,6 @@ def main() -> int:
         f"{format_gib(target)}"
     )
 
-    maintainerr = JsonApi(os.getenv("MAINTAINERR_URL", "http://maintainerr:6246"))
     libraries = maintainerr.request("/api/media-server/libraries")
     movie_libraries = [library for library in libraries if library.get("type") == "movie"]
     show_libraries = [library for library in libraries if library.get("type") == "show"]

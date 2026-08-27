@@ -4,6 +4,8 @@ import sys
 import unittest
 
 
+MODULE_DIRECTORY = pathlib.Path(__file__).parent
+sys.path.insert(0, str(MODULE_DIRECTORY))
 MODULE_PATH = pathlib.Path(__file__).with_name("maintainerr_storage_cleanup.py")
 SPEC = importlib.util.spec_from_file_location("maintainerr_storage_cleanup", MODULE_PATH)
 assert SPEC and SPEC.loader

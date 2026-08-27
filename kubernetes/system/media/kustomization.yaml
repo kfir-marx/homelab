@@ -20,6 +20,7 @@ configMapGenerator:
   - name: maintainerr-storage-cleanup
     files:
       - cleanup.py=maintainerr_storage_cleanup.py
+      - maintainerr_config_sync.py=maintainerr_config_sync.py
     options:
       disableNameSuffixHash: true
   - name: qbittorrent-settings
