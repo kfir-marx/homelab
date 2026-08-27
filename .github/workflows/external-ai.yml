@@ -28,10 +28,10 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.6"
@@ -42,10 +42,10 @@ jobs:
       - run: uv run --directory services/external-ai --locked --extra dev ruff check .
       - run: uv run --directory services/external-ai --locked --extra dev mypy src tests
       - run: uv run --directory services/external-ai --locked --extra dev pytest
-      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5
       - run: kubectl kustomize kubernetes/system/external-ai >/tmp/external-ai.yaml
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: services/external-ai
           push: false
@@ -59,13 +59,13 @@ jobs:
       packages: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: services/external-ai
           push: true
@@ -76,7 +76,7 @@ jobs:
           's|ghcr.io/kfir-marx/homelab-external-ai:sha-[a-f0-9]*|ghcr.io/kfir-marx/homelab-external-ai:sha-${{ github.sha }}|g;
           s|ghcr.io/kfir-marx/homelab-external-ai:sha-bootstrap|ghcr.io/kfir-marx/homelab-external-ai:sha-${{ github.sha }}|g'
           kubernetes/system/external-ai/workloads.yaml
-      - uses: peter-evans/create-pull-request@v7
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           branch: automation/external-ai-image
           delete-branch: true
