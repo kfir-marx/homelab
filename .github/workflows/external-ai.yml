@@ -45,7 +45,7 @@ jobs:
       - uses: azure/setup-kubectl@v4
       - run: kubectl kustomize kubernetes/system/external-ai >/tmp/external-ai.yaml
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: services/external-ai
           push: false
@@ -65,7 +65,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: services/external-ai
           push: true
