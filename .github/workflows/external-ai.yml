@@ -42,7 +42,7 @@ jobs:
       - run: uv run --directory services/external-ai --locked --extra dev ruff check .
       - run: uv run --directory services/external-ai --locked --extra dev mypy src tests
       - run: uv run --directory services/external-ai --locked --extra dev pytest
-      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5
       - run: kubectl kustomize kubernetes/system/external-ai >/tmp/external-ai.yaml
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
