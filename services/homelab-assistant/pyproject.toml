@@ -9,7 +9,7 @@ description = "Allowlisted Telegram interface for the private homelab LLM"
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.28,<1",
-  "pydantic>=2.10,<3",
+  "pydantic>=2.13.4,<3",
   "pydantic-settings>=2.7,<3",
   "psycopg[binary]>=3.2,<4",
   "SQLAlchemy>=2.0,<3",
