@@ -47,7 +47,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: postgres
-          image: docker.io/library/postgres:17.6-bookworm
+          image: docker.io/library/postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
           env:
             - name: POSTGRES_DB
               value: job_assistant

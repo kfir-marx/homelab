@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: postgres
-          image: docker.io/library/postgres:17.4-bookworm
+          image: docker.io/library/postgres:17.4-bookworm@sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad
           env:
             - name: POSTGRES_DB
               value: homelab_assistant
