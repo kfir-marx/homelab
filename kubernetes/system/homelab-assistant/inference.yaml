@@ -47,7 +47,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: vllm
-          image: docker.io/vllm/vllm-openai:v0.26.0
+          image: docker.io/vllm/vllm-openai:v0.26.0@sha256:ffb2d59b1c059a5bd8d781320c9f5189de8293693b7d95da54befddaa54abf52
           imagePullPolicy: IfNotPresent
           args:
             - --model

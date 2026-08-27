@@ -25,7 +25,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-state
-          image: busybox:1.37.0
+          image: busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
           command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/maintainerr"]
           securityContext:
             runAsUser: 0
@@ -38,7 +38,7 @@ spec:
               mountPath: /state
       containers:
         - name: maintainerr
-          image: ghcr.io/maintainerr/maintainerr:3.21.1
+          image: ghcr.io/maintainerr/maintainerr:3.21.1@sha256:811a580fdf479e8582d3c97047b1aa8930fc5523f63143498020864ad6a7cd80
           imagePullPolicy: IfNotPresent
           env:
             - name: TZ

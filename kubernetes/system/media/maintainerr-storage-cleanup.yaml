@@ -30,7 +30,7 @@ spec:
               type: RuntimeDefault
           initContainers:
             - name: prepare-state
-              image: busybox:1.37.0
+              image: busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
               command:
                 - sh
                 - -ec
@@ -46,7 +46,7 @@ spec:
                   mountPath: /state
           containers:
             - name: controller
-              image: python:3.13.7-alpine3.22
+              image: python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844
               imagePullPolicy: IfNotPresent
               command: [python3, /app/cleanup.py]
               env:

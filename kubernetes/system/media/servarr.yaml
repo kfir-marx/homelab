@@ -23,7 +23,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-state
-          image: busybox:1.37.0
+          image: busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
           command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/sonarr"]
           securityContext:
             runAsUser: 0
@@ -36,7 +36,7 @@ spec:
               mountPath: /state
       containers:
         - name: sonarr
-          image: lscr.io/linuxserver/sonarr:4.0.19.2979-ls320
+          image: lscr.io/linuxserver/sonarr:4.0.19.2979-ls320@sha256:24acea2956a0ccb11f103877d9f4f8576600fb34bff34820ed749c2256dab89f
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -111,7 +111,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-state
-          image: busybox:1.37.0
+          image: busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
           command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/radarr"]
           securityContext:
             runAsUser: 0
@@ -124,7 +124,7 @@ spec:
               mountPath: /state
       containers:
         - name: radarr
-          image: lscr.io/linuxserver/radarr:6.3.0.10514-ls313
+          image: lscr.io/linuxserver/radarr:6.3.0.10514-ls313@sha256:a45b5ab0f850f39edb4cc9c95bbd967b52ddc3d4574a4dfb45561177db6c88f4
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -199,7 +199,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-state
-          image: busybox:1.37.0
+          image: busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
           command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/whisparr"]
           securityContext:
             runAsUser: 0
@@ -212,7 +212,7 @@ spec:
               mountPath: /state
       containers:
         - name: whisparr
-          image: ghcr.io/thespad/whisparr:v3.3.8-release.1097-spad46
+          image: ghcr.io/thespad/whisparr:v3.3.8-release.1097-spad46@sha256:085e11bd85dd5f6d7933d1feb1047f1e23a80b5c5c1749f07cf7725747b46d0c
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -287,7 +287,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-state
-          image: busybox:1.37.0
+          image: busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
           command: [sh, -ec, "install -d -o 1000 -g 1000 -m 0770 /state/prowlarr"]
           securityContext:
             runAsUser: 0
@@ -300,7 +300,7 @@ spec:
               mountPath: /state
       containers:
         - name: prowlarr
-          image: lscr.io/linuxserver/prowlarr:2.5.2.5491-ls156
+          image: lscr.io/linuxserver/prowlarr:2.5.2.5491-ls156@sha256:1295cff29d10b486c0d8324d1559a552140a5932bf8b3d87e398654414f63f92
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -368,7 +368,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: flaresolverr
-          image: ghcr.io/flaresolverr/flaresolverr:v3.5.0
+          image: ghcr.io/flaresolverr/flaresolverr:v3.5.0@sha256:139dfee1c6f89249c8d665d1333a42e8ec74ec0a86bc6bb1c8461e10d3a66a47
           imagePullPolicy: IfNotPresent
           env:
             - name: LOG_LEVEL

@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-data-directories
-          image: busybox:1.37.0
+          image: busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
           imagePullPolicy: IfNotPresent
           command:
             - sh
@@ -38,7 +38,7 @@ spec:
               mountPath: /data
       containers:
         - name: adguard-home
-          image: adguard/adguardhome:v0.107.76
+          image: adguard/adguardhome:v0.107.76@sha256:7157eb1dc3b26c7af1d6898759a7b3f7d0fa09891fbd2d3caa6abc1057a9179b
           imagePullPolicy: IfNotPresent
           ports:
             - name: dns-udp
