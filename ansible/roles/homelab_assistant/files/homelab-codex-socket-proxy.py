@@ -69,10 +69,10 @@ def handle_client(
             client.settimeout(None)
             upstream.settimeout(None)
             relay(client, upstream)
-    # fmt: off
-    except (OSError, ValueError):
+    except OSError:
         print("Codex socket proxy connection failed", file=sys.stderr)
-    # fmt: on
+    except ValueError:
+        print("Codex socket proxy connection failed", file=sys.stderr)
     finally:
         client.close()
 
