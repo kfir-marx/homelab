@@ -26,7 +26,9 @@ def authorized_handshake(request: bytes, token: str) -> bytes:
     lines = header.split(b"\r\n")
     if not lines or not lines[0].startswith(b"GET "):
         raise ValueError("invalid WebSocket request line")
-    filtered = [line for line in lines if not line.lower().startswith(b"authorization:")]
+    filtered = [
+        line for line in lines if not line.lower().startswith(b"authorization:")
+    ]
     filtered.append(b"Authorization: Bearer " + token.encode("ascii"))
     return b"\r\n".join(filtered) + HEADER_END + remainder
 
@@ -60,7 +62,9 @@ def handle_client(
     try:
         client.settimeout(10)
         request = authorized_handshake(read_handshake(client), token)
-        with socket.create_connection((upstream_host, upstream_port), timeout=10) as upstream:
+        with socket.create_connection(
+            (upstream_host, upstream_port), timeout=10
+        ) as upstream:
             upstream.sendall(request)
             client.settimeout(None)
             upstream.settimeout(None)
