@@ -15,6 +15,18 @@ class FakeRpc:
         self.calls.append((method, params))
         if method == "thread/read":
             return {"thread": {"id": "thr-1", "status": {"type": "notLoaded"}}}
+        if method == "thread/list":
+            return {
+                "data": [
+                    {
+                        "id": "thr-1",
+                        "name": "Live-compatible thread",
+                        "source": "appServer",
+                        "status": {"type": "idle"},
+                    }
+                ],
+                "nextCursor": "cursor-2",
+            }
         if method == "thread/start":
             return {"thread": {"id": "thr-new", "status": {"type": "idle"}}}
         if method == "thread/resume":
@@ -87,6 +99,34 @@ def test_thread_start_and_resume_use_current_sandbox_mode_spelling() -> None:
     resume = next(params for method, params in rpc.calls if method == "thread/resume")
     assert start is not None and start["sandbox"] == "danger-full-access"
     assert resume is not None and resume["sandbox"] == "danger-full-access"
+
+
+def test_thread_list_uses_current_schema_and_parses_live_response_shape() -> None:
+    rpc = FakeRpc()
+    codex = CodexAppServer(rpc, "/home/kfir/repos/homelab")
+
+    page = codex.list_threads(limit=8)
+
+    assert page.threads[0]["id"] == "thr-1"
+    assert page.next_cursor == "cursor-2"
+    params = next(params for method, params in rpc.calls if method == "thread/list")
+    assert params == {
+        "limit": 8,
+        "sortKey": "updated_at",
+        "sortDirection": "desc",
+        "sourceKinds": ["cli", "vscode", "appServer"],
+        "cwd": "/home/kfir/repos/homelab",
+    }
+
+
+def test_thread_creation_parses_live_response_and_uses_name_set() -> None:
+    rpc = FakeRpc()
+    codex = CodexAppServer(rpc, "/home/kfir/repos/homelab")
+
+    thread = codex.start_thread("test")
+
+    assert thread == {"id": "thr-new", "status": {"type": "idle"}, "name": "test"}
+    assert ("thread/name/set", {"threadId": "thr-new", "name": "test"}) in rpc.calls
 
 
 def test_output_redaction_removes_secret_assignments_and_private_keys() -> None:

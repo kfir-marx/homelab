@@ -60,6 +60,10 @@ class UnixSocketJsonRpc:
             try:
                 connection = unix_connect(self.socket_path, uri="ws://localhost/")
             except OSError as exc:
+                LOG.warning(
+                    "Codex App Server socket connection failed exception=%s",
+                    type(exc).__name__[:80],
+                )
                 raise AppServerError("Codex App Server socket is unavailable") from exc
             self._connection = connection
             threading.Thread(target=self._reader, name="codex-app-server", daemon=True).start()
@@ -101,8 +105,10 @@ class UnixSocketJsonRpc:
                         self._notification_sequence += 1
                         self._notifications.append((self._notification_sequence, message))
                         self._notification_condition.notify_all()
-        except Exception:  # connection errors are surfaced to pending callers without details
-            LOG.warning("Codex App Server socket disconnected")
+        except Exception as exc:  # Never log frame content or token-bearing transport details.
+            LOG.warning(
+                "Codex App Server socket disconnected exception=%s", type(exc).__name__[:80]
+            )
         finally:
             if self._connection is connection:
                 self._connection = None
@@ -147,9 +153,16 @@ class UnixSocketJsonRpc:
         try:
             self._send(message)
             if not event.wait(self.request_timeout):
+                LOG.warning("Codex App Server RPC timed out method=%s", method)
                 raise AppServerError(f"Codex App Server request timed out: {method}")
             if "error" in response:
                 error = response.get("error")
+                code = error.get("code") if isinstance(error, dict) else None
+                LOG.warning(
+                    "Codex App Server RPC rejected method=%s code=%s",
+                    method,
+                    code if isinstance(code, int) else "unknown",
+                )
                 detail = error.get("message") if isinstance(error, dict) else "request failed"
                 raise AppServerError(f"Codex App Server rejected {method}: {detail}")
             result = response.get("result", {})

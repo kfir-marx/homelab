@@ -165,6 +165,11 @@ The actuator lock, App Server thread locks, callback consumption, idempotent
 already-in-mode behavior, graceful-only shutdown, and unexpected-state refusal
 remain mandatory.
 
+Telegram callback queries are acknowledged before a confirmed transition starts.
+Acknowledgement, audit persistence, progress editing, and final-message delivery are
+secondary reporting steps: each is attempted without retrying or reclassifying an
+already-completed infrastructure transition.
+
 ## Secrets and local prerequisites
 
 As `kfir`, verify the existing Codex installation without displaying auth:

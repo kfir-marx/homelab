@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import httpx
 
@@ -89,6 +89,72 @@ def build_bot(settings: Settings) -> AssistantBot:
     )
 
 
+def _safe_exception_type(exc: Exception) -> str:
+    """Return diagnostic detail that cannot contain a token-bearing request URL."""
+    return type(exc).__name__[:80]
+
+
+def _update_chat_id(update: dict[str, Any], default_chat_id: int) -> int:
+    message = update.get("message")
+    callback = update.get("callback_query")
+    chat: object = None
+    if isinstance(message, dict):
+        chat = message.get("chat")
+    elif isinstance(callback, dict):
+        callback_message = callback.get("message")
+        if isinstance(callback_message, dict):
+            chat = callback_message.get("chat")
+    return (
+        int(chat["id"])
+        if isinstance(chat, dict) and isinstance(chat.get("id"), int)
+        else default_chat_id
+    )
+
+
+def handle_update(
+    telegram: TelegramClient,
+    bot: AssistantBot,
+    update: dict[str, Any],
+    default_chat_id: int,
+) -> None:
+    """Process one update without letting Telegram delivery change its outcome."""
+    callback = update.get("callback_query")
+    chat_id = _update_chat_id(update, default_chat_id)
+
+    # Telegram callback queries expire quickly. Acknowledge before any guarded operation,
+    # and keep acknowledgement failure independent from the exactly-once action.
+    if isinstance(callback, dict) and isinstance(callback.get("id"), str):
+        try:
+            telegram.answer_callback(str(callback["id"]))
+        except Exception as exc:  # Telegram failures must not gate or retry an operation.
+            LOG.warning(
+                "Telegram callback acknowledgement failed exception=%s",
+                _safe_exception_type(exc),
+            )
+
+    progress = TelegramProgress(telegram, chat_id)
+    try:
+        replies = bot.process(update, progress)
+    except Exception as exc:  # Keep token-bearing exception strings out of logs.
+        LOG.warning("Telegram update processing failed exception=%s", _safe_exception_type(exc))
+        try:
+            telegram.send_message(chat_id, "The Telegram bridge could not complete the request.")
+        except Exception as delivery_exc:
+            LOG.warning(
+                "Telegram processing-error delivery failed exception=%s",
+                _safe_exception_type(delivery_exc),
+            )
+        return
+
+    # A completed infrastructure action must never be retried or reclassified because
+    # Telegram rejected its final message. Make one delivery attempt per reply.
+    for reply in replies:
+        try:
+            telegram.send_message(reply.chat_id, reply.text, reply.buttons)
+        except Exception as exc:
+            LOG.warning("Telegram reply delivery failed exception=%s", _safe_exception_type(exc))
+
+
 def run(settings: Settings) -> None:
     telegram = TelegramClient(settings.telegram_token.get_secret_value())
     bot = build_bot(settings)
@@ -98,40 +164,6 @@ def run(settings: Settings) -> None:
     active: set[Future[None]] = set()
     offset: int | None = None
     identity_validated = False
-
-    def handle(update: dict[str, object]) -> None:
-        message = update.get("message")
-        callback = update.get("callback_query")
-        chat: object = None
-        if isinstance(message, dict):
-            chat = message.get("chat")
-        elif isinstance(callback, dict):
-            callback_message = callback.get("message")
-            if isinstance(callback_message, dict):
-                chat = callback_message.get("chat")
-        chat_id = (
-            int(chat["id"])
-            if isinstance(chat, dict) and isinstance(chat.get("id"), int)
-            else settings.telegram_allowed_chat_id
-        )
-        progress = TelegramProgress(telegram, chat_id)
-        try:
-            replies = bot.process(update, progress)
-            if replies and isinstance(callback, dict) and isinstance(callback.get("id"), str):
-                telegram.answer_callback(str(callback["id"]))
-            for reply in replies:
-                telegram.send_message(reply.chat_id, reply.text, reply.buttons)
-        except httpx.HTTPError, ValueError:
-            # Telegram embeds the bot token in request URLs. Never log exception strings.
-            LOG.warning("Telegram outbound delivery failed")
-        except Exception:  # keep token-bearing transport exceptions out of logs
-            LOG.warning("Telegram update worker failed")
-            try:
-                telegram.send_message(
-                    chat_id, "The Telegram bridge could not complete the request."
-                )
-            except httpx.HTTPError, ValueError:
-                LOG.warning("Telegram error reply delivery failed")
 
     while True:
         try:
@@ -145,7 +177,15 @@ def run(settings: Settings) -> None:
                 update_id = update.get("update_id")
                 if isinstance(update_id, int):
                     offset = update_id + 1
-                active.add(executor.submit(handle, update))
+                active.add(
+                    executor.submit(
+                        handle_update,
+                        telegram,
+                        bot,
+                        update,
+                        settings.telegram_allowed_chat_id,
+                    )
+                )
         except TelegramIdentityConfigurationError:
             LOG.error("Telegram identity configuration is invalid; refusing to poll")
             raise

@@ -235,6 +235,30 @@ def test_ops_routes_only_to_deterministic_switching_with_confirmation(tmp_path: 
     assert not any(call[0] == "run_text" for call in fake.calls)
 
 
+def test_completed_switch_is_reported_when_final_audit_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    switcher = FakeSwitcher()
+    bot, _ = make_bot(tmp_path, switcher)
+    unlock(bot)
+    gaming = bot.process(update("/ops gaming"))[0]
+    original_audit = bot.state.audit
+
+    def fail_completed_audit(
+        user_id: int, operation: str, outcome: str, thread_id: str | None = None
+    ) -> None:
+        if outcome == "completed":
+            raise OSError("simulated audit write failure")
+        original_audit(user_id, operation, outcome, thread_id)
+
+    monkeypatch.setattr(bot.state, "audit", fail_completed_audit)
+
+    replies = bot.process(callback(gaming.buttons[0][1]))
+
+    assert [reply.text for reply in replies] == ["completed gaming"]
+    assert switcher.modes == ["gaming"]
+
+
 def test_status_invokes_codex_status_adapter_not_prompt(tmp_path: Path) -> None:
     bot, fake = make_bot(tmp_path)
     bot.state.select_thread(123, "thr-vscode")

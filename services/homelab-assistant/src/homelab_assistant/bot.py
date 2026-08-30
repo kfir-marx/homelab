@@ -521,7 +521,14 @@ class AssistantBot:
         self.state.audit(user_id, f"ops-{mode}", "started")
         result = self.switcher.switch(mode)
         outcome = "completed" if result.ok else "failed-safe"
-        self.state.audit(user_id, f"ops-{mode}", outcome)
+        try:
+            self.state.audit(user_id, f"ops-{mode}", outcome)
+        except Exception as exc:  # Audit persistence cannot change the completed action result.
+            LOG.warning(
+                "deterministic %s transition audit failed exception=%s",
+                mode,
+                type(exc).__name__[:80],
+            )
         LOG.info("deterministic %s transition %s", mode, outcome)
         return Reply(chat_id, result.detail)
 
