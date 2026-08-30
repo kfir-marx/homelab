@@ -7,6 +7,7 @@ RequiresMountsFor={{ homelab_assistant_data_directory }}
 
 [Service]
 Type=simple
+Delegate=yes
 Restart=on-failure
 RestartSec=5s
 ExecStartPre=-/usr/bin/podman rm --force homelab-assistant
@@ -18,8 +19,8 @@ PrivateTmp=true
 ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictSUIDSGID=true
+ProtectControlGroups=false
+# RestrictSUIDSGID blocks openat2, which Podman's OCI runtime requires.
 LockPersonality=true
 
 [Install]
