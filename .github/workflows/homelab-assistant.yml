@@ -77,7 +77,9 @@ jobs:
         run: |
           release=false
           changed_file="${RUNNER_TEMP}/homelab-assistant-release-files.txt"
-          if [[ "${EVENT_NAME}" == "push" ]]; then
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            release=true
+          elif [[ "${EVENT_NAME}" == "push" ]]; then
             if [[ "${BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
               release=true
             else
@@ -109,15 +111,30 @@ jobs:
         working-directory: services/homelab-assistant
         run: uv sync --locked --extra dev
       - name: Ruff format
-        run: >-
+        run: |
           uv run --directory services/homelab-assistant --locked --extra dev ruff format --check .
-          ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator
-          ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator-dispatch
+          uv run --directory services/homelab-assistant --locked --extra dev ruff format \
+            --check --target-version py313 \
+            ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator \
+            ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator-dispatch
       - name: Ruff lint
-        run: >-
+        run: |
           uv run --directory services/homelab-assistant --locked --extra dev ruff check .
-          ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator
-          ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator-dispatch
+          uv run --directory services/homelab-assistant --locked --extra dev ruff check \
+            --target-version py313 \
+            ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator \
+            ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator-dispatch
+      - name: Check Proxmox Python compatibility
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          root = Path("ansible/roles/homelab_vm_actuator/files")
+          for name in ("homelab-vm-actuator", "homelab-vm-actuator-dispatch"):
+              path = root / name
+              ast.parse(path.read_text(), filename=str(path), feature_version=(3, 13))
+          PY
       - name: Mypy
         run: uv run --directory services/homelab-assistant --locked --extra dev mypy src tests
       - name: Tests

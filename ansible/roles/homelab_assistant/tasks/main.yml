@@ -149,10 +149,13 @@
   register: homelab_assistant_image_present
   changed_when: false
   failed_when: homelab_assistant_image_present.rc not in [0, 1]
+  when: not ansible_check_mode
 
 - name: Pull the immutable assistant image
   ansible.builtin.command: "/usr/bin/podman pull {{ homelab_assistant_image }}"
-  when: homelab_assistant_image_present.rc == 1
+  when:
+    - not ansible_check_mode
+    - homelab_assistant_image_present.rc == 1
   changed_when: true
 
 - name: Install the Codex App Server systemd unit
@@ -184,6 +187,7 @@
     enabled: true
     state: started
     daemon_reload: true
+  when: not ansible_check_mode
 
 - name: Enable and start the Telegram bridge
   ansible.builtin.systemd_service:
@@ -191,3 +195,4 @@
     enabled: true
     state: started
     daemon_reload: true
+  when: not ansible_check_mode

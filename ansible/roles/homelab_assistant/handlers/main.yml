@@ -2,13 +2,16 @@
 - name: Reload systemd
   ansible.builtin.systemd_service:
     daemon_reload: true
+  when: not ansible_check_mode
 
 - name: Restart homelab Codex app server
   ansible.builtin.systemd_service:
     name: homelab-codex-app-server.service
     state: restarted
+  when: not ansible_check_mode
 
 - name: Restart homelab assistant
   ansible.builtin.systemd_service:
     name: homelab-assistant.service
     state: restarted
+  when: not ansible_check_mode

@@ -4,10 +4,16 @@
     that:
       - inventory_hostname == "largegpu"
       - homelab_vm_actuator_management_source is match('^[0-9.]+$')
-      - homelab_vm_actuator_authorized_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')
+      - "homelab_vm_actuator_authorized_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')"
     fail_msg: >-
       The VM actuator requires largegpu, an explicit management source, and a
       separately generated Ed25519 public key supplied out of band.
+
+- name: Install the fixed-command privilege boundary
+  ansible.builtin.apt:
+    name: sudo
+    state: present
+    update_cache: false
 
 - name: Create the unprivileged actuator SSH identity
   ansible.builtin.user:
