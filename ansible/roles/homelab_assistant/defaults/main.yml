@@ -1,0 +1,23 @@
+---
+homelab_assistant_enabled: false
+homelab_assistant_user: homelab-assistant
+homelab_assistant_uid: 10001
+homelab_assistant_image: ""
+homelab_assistant_data_directory: /mnt/storage2-bulk/homelab-assistant/sessions
+homelab_assistant_workstation_user: kfir
+homelab_assistant_workstation_home: /home/kfir
+homelab_assistant_codex_binary: /home/kfir/.local/bin/codex
+homelab_assistant_codex_cwd: /home/kfir/repos/homelab
+homelab_assistant_codex_socket_directory: /run/homelab-codex
+homelab_assistant_codex_socket_path: /run/homelab-codex/app-server.sock
+homelab_assistant_administrator_lease_seconds: 900
+homelab_assistant_callback_ttl_seconds: 120
+homelab_assistant_kubernetes_api_url: https://192.168.1.211:6443
+homelab_assistant_actuator_host: 192.168.1.107
+homelab_assistant_telegram_token: ""
+homelab_assistant_telegram_allowed_user_id: ""
+homelab_assistant_telegram_allowed_chat_id: ""
+homelab_assistant_kubernetes_switch_token: ""
+homelab_assistant_kubernetes_ca_source: ""
+homelab_assistant_actuator_identity_source: ""
+homelab_assistant_actuator_known_hosts_source: ""

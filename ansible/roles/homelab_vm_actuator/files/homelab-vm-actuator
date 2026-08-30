@@ -1,0 +1,124 @@
+#!/usr/bin/python3
+"""Root-side fixed VM mutex actuator for the homelab assistant."""
+
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import subprocess
+import sys
+import syslog
+
+QM = "/usr/sbin/qm"
+VM_KUBERNETES = 402
+VM_GAMING = 502
+SHUTDOWN_TIMEOUT = 600
+LOCK_PATH = "/run/lock/homelab-vm-actuator.lock"
+
+
+class ActuatorError(RuntimeError):
+    pass
+
+
+def run_qm(arguments: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - arguments are validated fixed constants
+        [QM, *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def vm_state(vmid: int) -> str:
+    if vmid not in {VM_KUBERNETES, VM_GAMING}:
+        raise ActuatorError("unconfigured VM")
+    result = run_qm(["status", str(vmid)])
+    if result.returncode != 0:
+        raise ActuatorError("unable to query configured VM")
+    line = result.stdout.strip()
+    if line == "status: running":
+        return "running"
+    if line == "status: stopped":
+        return "stopped"
+    raise ActuatorError("configured VM has unknown state")
+
+
+def state() -> dict[str, object]:
+    kubernetes, gaming = vm_state(VM_KUBERNETES), vm_state(VM_GAMING)
+    if kubernetes == gaming == "running":
+        raise ActuatorError("unsafe state: mutually exclusive VMs are both running")
+    return {"ok": True, "vms": {"402": kubernetes, "502": gaming}}
+
+
+def switch(source: int, destination: int) -> dict[str, object]:
+    current = state()
+    vm_states = current["vms"]
+    assert isinstance(vm_states, dict)
+    source_state = vm_states[str(source)]
+    destination_state = vm_states[str(destination)]
+    if source_state == "stopped" and destination_state == "running":
+        return {**current, "changed": False}
+    if destination_state != "stopped":
+        raise ActuatorError("destination is not safely stopped")
+    if source_state == "running":
+        shutdown = run_qm(
+            [
+                "shutdown",
+                str(source),
+                "--timeout",
+                str(SHUTDOWN_TIMEOUT),
+            ],
+            SHUTDOWN_TIMEOUT + 5,
+        )
+        if shutdown.returncode != 0 and vm_state(source) != "stopped":
+            raise ActuatorError("graceful shutdown failed; destination remains stopped")
+    if vm_state(source) != "stopped":
+        raise ActuatorError("source is not stopped; refusing destination start")
+    started = run_qm(["start", str(destination)], timeout=60)
+    if started.returncode != 0:
+        raise ActuatorError("destination start failed")
+    final = state()
+    final_states = final["vms"]
+    assert isinstance(final_states, dict)
+    if final_states[str(source)] != "stopped" or final_states[str(destination)] != "running":
+        raise ActuatorError("final VM state verification failed")
+    return {**final, "changed": True}
+
+
+def execute(operation: str) -> dict[str, object]:
+    if operation == "status":
+        return state()
+    if operation == "switch-to-gaming":
+        return switch(VM_KUBERNETES, VM_GAMING)
+    if operation == "switch-to-kubernetes":
+        return switch(VM_GAMING, VM_KUBERNETES)
+    raise ActuatorError("unsupported operation")
+
+
+def main() -> None:
+    operation = sys.argv[1] if len(sys.argv) == 2 else ""
+    if operation not in {"status", "switch-to-gaming", "switch-to-kubernetes"}:
+        print(json.dumps({"ok": False, "error": "unsupported operation"}))
+        raise SystemExit(2)
+    lock_fd = os.open(LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(json.dumps({"ok": False, "error": "operation already in progress"}))
+        raise SystemExit(3) from None
+    try:
+        result = execute(operation)
+        syslog.syslog(syslog.LOG_NOTICE, f"homelab-vm-actuator operation={operation} outcome=ok")
+        print(json.dumps(result, sort_keys=True))
+    except ActuatorError, subprocess.SubprocessError:
+        syslog.syslog(syslog.LOG_ERR, f"homelab-vm-actuator operation={operation} outcome=failed")
+        print(json.dumps({"ok": False, "error": "fixed operation failed safely"}))
+        raise SystemExit(1) from None
+    finally:
+        os.close(lock_fd)
+
+
+if __name__ == "__main__":
+    main()

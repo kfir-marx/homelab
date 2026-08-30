@@ -1,45 +1,39 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: homelab-assistant
+  name: homelab-assistant-switcher
   namespace: homelab-assistant
-  labels:
-    app: homelab-assistant
-    component: telegram
+automountServiceAccountToken: false
 ---
-# Cluster-wide diagnostic access. The gateway exposes only bounded GET/list and
-# pod-log tools to the model; RBAC independently prevents every mutating verb.
+# Kubernetes RBAC cannot restrict node patch or pod eviction by gpu-2's object
+# name. The deterministic client rejects every node name except gpu-2 before
+# making requests; this identity is never registered as an LLM tool.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: homelab-assistant-cluster-reader
+  name: homelab-assistant-switcher
 rules:
-  - apiGroups: ["*"]
-    resources: ["*"]
-    verbs: [get, list, watch]
-  - nonResourceURLs:
-      - /api
-      - /api/*
-      - /apis
-      - /apis/*
-      - /healthz
-      - /healthz/*
-      - /livez
-      - /livez/*
-      - /readyz
-      - /readyz/*
-      - /version
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, patch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/eviction]
+    verbs: [create]
+  - nonResourceURLs: [/readyz]
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: homelab-assistant-cluster-reader
+  name: homelab-assistant-switcher
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: homelab-assistant-cluster-reader
+  name: homelab-assistant-switcher
 subjects:
   - kind: ServiceAccount
-    name: homelab-assistant
+    name: homelab-assistant-switcher
     namespace: homelab-assistant

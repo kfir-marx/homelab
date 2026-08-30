@@ -48,6 +48,9 @@ flowchart TB
         Small["smallgpu · Proxmox VE 9<br/>RTX 2060 · 10 TB bulk NFS"]
         Large["largegpu · Proxmox VE 9<br/>RTX 3080 · Windows/Talos mutex"]
         Ubuntu["Ubuntu workstation<br/>GTX 1060 desktop · 800 GB critical NFS"]
+        Assistant["Private Telegram client<br/>thread selection · deterministic ops"]
+        Codex["Codex App Server<br/>local Unix socket · workstation identity"]
+        Actuator["Fixed VM actuator<br/>402/502 mutex"]
     end
 
     subgraph Cluster["Talos Kubernetes"]
@@ -65,6 +68,9 @@ flowchart TB
     Ansible --> Small
     Ansible --> Large
     Ansible --> Ubuntu
+    Ubuntu --> Assistant --> Codex
+    Assistant -. fixed operations .-> Actuator --> Large
+    Codex -. authorized tasks .-> Platform
     IaC --> CP
     IaC --> GPU2
     IaC --> GPU3
@@ -95,7 +101,7 @@ makes failures easier to reason about.
 | Capability | Implementation | Why it is here |
 |---|---|---|
 | Private photo platform | Immich with PostgreSQL and Redis | A real stateful workload whose irreplaceable data must stay on permanent hardware |
-| Private AI assistants | Shared Telegram gateway, local vLLM, persistent sessions, job-assistant, and external-ai | Keeps ordinary chat local, routes job workflows safely, and centralizes confirmed Codex execution |
+| Private AI assistants | Workstation Telegram client for the existing local Codex environment, plus job-assistant and external-ai | Reuses Codex threads, tools, skills, and configuration while keeping deterministic VM switching outside the model |
 | Home streaming | Jellyfin, Seerr, Servarr, Bazarr, qBittorrent, and Maintainerr | GPU-accelerated streaming with automated subtitles, recoverable bulk media, and policy-driven retention |
 | Observability | kube-prometheus-stack, Grafana, Alertmanager, and NVIDIA DCGM metrics | Cluster, workload, and GPU visibility with explicit retention limits |
 | Private DNS | AdGuard Home | Split DNS for private services and optional network-wide filtering |
@@ -209,7 +215,7 @@ export are unavailable even though the API on `largegpu` remains up.
 | [Monitoring runbook](docs/monitoring-runbook.md) | Prometheus/Grafana deployment, storage, access, and verification |
 | [Job assistant architecture](docs/job-assistant-architecture.md) | Trust boundaries, queues, state machines, deduplication, and delivery safety |
 | [Job assistant runbook](docs/job-assistant-runbook.md) | Private inputs, broker migration, secrets, deployment, restore, and troubleshooting |
-| [Homelab assistant runbook](docs/homelab-assistant-runbook.md) | GPU LLM, Telegram security boundary, secrets, rollout, and incident response |
+| [Homelab assistant runbook](docs/homelab-assistant-runbook.md) | Workstation Codex App Server, Telegram thread UX, Unix-socket boundary, deterministic VM switching, cutover, and rollback |
 | [External AI runbook](docs/external-ai-runbook.md) | Durable broker, requester scopes, Codex authentication, rollout, and recovery |
 | [GPU Operator runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, rollout, CUDA validation, and metrics |
 | [Jellyfin media stack runbook](docs/media-stack-runbook.md) | Backup restoration, storage, GPU transcoding, credential rotation, and cleanup policy |

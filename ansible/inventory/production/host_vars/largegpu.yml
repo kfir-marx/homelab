@@ -129,6 +129,11 @@ proxmox_windows_template_refresh_conflicting_vmids:
   - 402
 proxmox_windows_template_refresh_restart_if_previously_running: true
 
+# The independently generated public key is supplied through the controller
+# environment; only ubuntu-workstation's management IP may use it.
+homelab_vm_actuator_enabled: true
+homelab_vm_actuator_management_source: 192.168.1.105
+
 # Planned NUT configuration: add this host to nut_servers only after its UPS
 # arrives, connect the USB data cable, and replace both empty values with the
 # four-digit lowercase IDs reported by `lsusb`.

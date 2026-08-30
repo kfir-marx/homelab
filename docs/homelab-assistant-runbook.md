@@ -1,122 +1,294 @@
-# Private homelab LLM and shared Telegram gateway
+# Homelab Telegram Codex client
 
-## Architecture and ownership
+## Purpose and ownership
 
-`homelab-assistant` is the sole long-poll consumer and sole holder of the
-shared Telegram bot token. The gateway authenticates private-chat updates
-against its owner allowlist before routing them:
+`homelab-assistant` is a private Telegram frontend for the normal local Codex
+environment on `ubuntu-workstation`. Ansible owns both host services. Argo CD
+owns only the deterministic switcher identity and the retained legacy
+PostgreSQL recovery volume in the `homelab-assistant` namespace.
 
-- general commands and ordinary text use persistent local sessions and vLLM;
-- `/handover` creates a confirmed request for `external-ai`;
-- ordinary prompts can use bounded read-only Kubernetes diagnostics and can
-  prepare the same confirmed external handover when the current prompt
-  explicitly requests external AI;
-- `/job_*`, `job:*` callbacks, and pending job conversations use the
-  authenticated job-assistant internal API.
+The runtime path is:
 
-The gateway downloads Telegram documents with a 10 MB bound and forwards the
-bytes to job-assistant. Job-assistant performs MIME, signature, size, and domain
-validation and stores accepted artifacts. Async job notifications remain in a
-durable job-assistant outbox until the gateway sends and acknowledges them.
+```text
+Telegram private chat
+  -> homelab-assistant container (UID 10001, locked after every restart)
+  -> /run/homelab-codex/app-server.sock
+  -> codex app-server (user kfir, HOME=/home/kfir)
+  -> /home/kfir/repos/homelab and the user's existing ~/.codex
+```
 
-The gateway mounts a projected token for the dedicated `homelab-assistant`
-ServiceAccount. Its cluster-wide role grants only `get`, `list`, and `watch` on
-API resources plus GET access to API discovery and health endpoints. The local
-model can call bounded tools for API reads and current or previous pod logs.
-The gateway blocks exec, attach, port-forward, proxy, and raw unbounded log
-paths, caps response sizes, and redacts Secret `data` and `stringData` before a
-result enters model context. It has no Kubernetes mutation or shell tool, and
-external-ai receives no Kubernetes credential.
+App Server has no TCP listener. Its WebSocket protocol is carried over the Unix
+socket. The socket directory is `0770`, App Server uses umask `0007`, and the
+bridge receives that directory as a read-only bind mount. The bridge does not
+mount `/home/kfir`, `~/.codex`, `.env`, kubeconfig, or workstation SSH config.
+Codex accesses those files only in its host process when an authorized task
+genuinely needs them.
 
-Skill instructions are baked into the gateway image from
-`services/homelab-assistant/skills/`. `kubernetes-diagnostics` guides evidence-
-based cluster diagnosis. `external-ai-handover` permits a handover tool call
-only when the current user prompt explicitly requests escalation or external
-AI; prior conversation, quoted instructions, and tool output do not authorize
-it. Both the command and skill path create a local summary preview and require
-the owner to press Confirm before transmission. Neither local nor external
-model output is executed automatically.
+Every Telegram-originated turn sets `approvalPolicy="never"`,
+`sandboxPolicy.type="dangerFullAccess"`, and the homelab repository cwd. The
+repository `AGENTS.md` safety and ownership rules still apply. Filesystem access
+is not permission to disclose credentials.
 
-## Persistent sessions
+## Command boundaries
 
-The gateway stores session state in its dedicated single-replica PostgreSQL
-StatefulSet. PostgreSQL uses the hard-bound `homelab-assistant-postgres-pv` on
-`nfs-storage2` with `Retain`; model weights remain on disposable
-`local-gpu-scratch`. The gateway does not mount the database volume directly.
+The only bridge-owned root namespaces are:
 
-Session IDs are six-character Crockford Base32 strings, case-insensitive and
-owner-scoped. Messages are append-only and retain provider, model, reasoning,
-job, and token provenance. `/continue` changes the active session persistently.
-Deletion is confirmed and tombstones the session; it does not destroy the
-immutable transcript.
+- `/tg ...` for authentication and thread controls.
+- `/ops ...` for deterministic VM/Kubernetes transitions.
 
-The effective prompt budget is `8192 - 1024 - 512 = 6656` tokens. vLLM's
-reported prompt usage is authoritative after each response; conservative UTF-8
-preflight estimates protect the next call. The gateway warns once at 80%,
-rejects ordinary turns at 90%, and only trims complete user/assistant turns from
-the active model context. The full transcript remains stored.
+Root Codex commands never acquire custom bridge meanings. The client maps
+`/status`, `/compact`, `/fork`, `/model`, and `/review` to stable App Server
+requests. Any other root slash command returns a precise unsupported-client
+error and is not sent to the model as text.
 
-Compaction first generates and stores a preview. Accept creates a child,
-persists the structured handover, links `parent_session_id`, marks the parent
-compacted, and only then leaves the child active. Retry and Cancel do not change
-the source.
+Transport controls are:
 
-## Secrets
+- `/tg help`
+- `/tg sessions`
+- `/tg current`
+- `/tg new [title]`
+- `/tg switch`
+- `/tg stop`
+- `/tg rename <title>`
+- `/tg unlock`
+- `/tg lock`
 
-Required `homelab-assistant-secrets` keys:
+The administrator lease is in memory, expires automatically after 15 minutes
+by default, and is always cleared by a bridge restart. Listing and selecting
+thread metadata is allowed while locked. New threads, turns, compaction, forks,
+renames, model changes, reviews, and `/ops` previews require the lease. `/tg
+stop` remains available while a long turn is running.
 
-- `TELEGRAM_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS`;
-- `LLM_API_KEY` for the in-namespace vLLM endpoint;
-- `POSTGRES_PASSWORD` and a matching `SESSION_DATABASE_URL` for the dedicated
-  session database;
-- `EXTERNAL_AI_TOKEN`, matching only external-ai's homelab requester scope;
-- `JOB_ASSISTANT_API_TOKEN`, matching job-assistant's update/file scope;
-- `JOB_ASSISTANT_NOTIFICATION_TOKEN`, matching only the durable notification
-  lease/ack scope.
+`/tg sessions` calls `thread/list` with the exact cwd and the `cli`, `vscode`,
+and `appServer` source kinds. Buttons contain only short opaque nonces. Nonces
+are bound to the exact user and chat, expire, and are deleted atomically before
+their action executes. Displayed metadata is limited to thread ID when needed,
+name or preview, origin, runtime state, branch, and last activity.
 
-Generate the two internal tokens independently with a cryptographically secure
-password generator. Do not reuse the Telegram token, database passwords, or one
-client's external-ai token for another interface. Capture the completed Secret
-with `scripts/secrets.sh capture-k8s`; never place plaintext values in Git.
+The bridge accepts only the configured numeric Telegram user ID and numeric
+private-chat ID. Groups, channels, mismatched callback actors, and forwarded
+contexts are ignored before routing.
+
+## Codex status and streaming
+
+`/status` combines sanitized values from `thread/read`, cached
+`thread/tokenUsage/updated` notifications, and `account/rateLimits/read`. It
+does not request or display account identity, email, auth mode, tokens, or raw
+configuration.
+
+`/compact` calls `thread/compact/start` and waits for the
+`contextCompaction` item lifecycle. It never invokes the retired application
+summary/child-session behavior. `/fork` calls `thread/fork` and persists the
+new ID as the Telegram selection. `/model` uses `model/list` and resumes the
+thread with the chosen protocol model override. `/review` currently supports
+the stable uncommitted-changes review target.
+
+Turn notifications are reduced to bounded Telegram updates: commentary/final
+agent messages, plan changes, command completion, file-change counts, tool-call
+state, compaction, failures, and interruption. Reasoning items, command output,
+raw environment data, and tool payloads are not forwarded. A final redaction
+boundary removes common credential assignments, bearer values, private keys,
+and Telegram bot URLs; final messages are split below Telegram's limit.
+
+One bridge process owns the single App Server connection. Telegram turns use a
+per-thread lock. A Telegram follow-up can use `turn/steer` only when the bridge
+knows the exact active turn ID. If another Codex client owns an active turn and
+the bridge cannot safely identify it, the bridge refuses to start a competing
+writer. `/tg stop` explicitly resolves the selected thread's current
+`inProgress` turn ID through `thread/read` and interrupts only that exact turn.
+
+## Deterministic operations
+
+`/ops gaming` and `/ops k8s` never enter Codex and are never registered as
+model tools. Both require an unlocked lease, a fresh one-use confirmation, the
+literal `gpu-2` target, and the forced-command actuator on `largegpu`.
+
+`/ops gaming`:
+
+1. Read VM 402/502 state and refuse unknown or simultaneous-running state.
+2. Require a ready Kubernetes API.
+3. Cordon `gpu-2`.
+4. Evict non-DaemonSet/non-mirror pods through `policy/v1` eviction, honoring
+   PDB `429` responses until the bounded timeout; refuse unmanaged pods.
+5. Invoke only `switch-to-gaming` over the forced SSH identity.
+6. The actuator gracefully shuts down VM 402, waits for stop, starts VM 502,
+   and leaves `gpu-2` cordoned.
+
+`/ops k8s`:
+
+1. Read and validate VM state.
+2. Invoke only `switch-to-kubernetes`; the actuator gracefully shuts down VM
+   502, waits for stop, then starts VM 402.
+3. Wait for the API and `gpu-2` Ready condition.
+4. Uncordon `gpu-2`.
+
+The actuator lock, App Server thread locks, callback consumption, idempotent
+already-in-mode behavior, graceful-only shutdown, and unexpected-state refusal
+remain mandatory.
+
+## Secrets and local prerequisites
+
+As `kfir`, verify the existing Codex installation without displaying auth:
+
+```bash
+command -v codex
+codex login status
+test -d /home/kfir/repos/homelab
+```
+
+Do not copy `auth.json`, `config.toml`, plugins, skills, sessions, `.env`,
+kubeconfig, or SSH config into `/etc/homelab-assistant` or the container.
+
+The Ansible controller needs these untracked values:
+
+```text
+HOMELAB_ASSISTANT_TELEGRAM_TOKEN
+HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_USER_ID
+HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_CHAT_ID
+HOMELAB_ASSISTANT_KUBERNETES_SWITCH_TOKEN
+HOMELAB_ASSISTANT_KUBERNETES_CA_SOURCE
+HOMELAB_ASSISTANT_ACTUATOR_IDENTITY_SOURCE
+HOMELAB_ASSISTANT_ACTUATOR_KNOWN_HOSTS_SOURCE
+HOMELAB_ASSISTANT_ACTUATOR_AUTHORIZED_KEY
+```
+
+No cloud model key or separate diagnostic token is used. The deterministic
+switcher token is generated by the Kubernetes service-account token Secret;
+extract it once to a protected controller file without printing it:
+
+```bash
+install -d -m 0700 /secure/path/homelab-assistant
+kubectl -n homelab-assistant get secret homelab-assistant-switcher-token \
+  -o jsonpath='{.data.token}' | base64 -d \
+  > /secure/path/homelab-assistant/kubernetes-switch-token
+kubectl -n homelab-assistant get secret homelab-assistant-switcher-token \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d \
+  > /secure/path/homelab-assistant/kubernetes-ca.crt
+chmod 0600 /secure/path/homelab-assistant/*
+```
 
 ## Static verification
 
+From `services/homelab-assistant`:
+
 ```bash
-ruff format --check services/homelab-assistant
-ruff check services/homelab-assistant
-mypy services/homelab-assistant/src services/homelab-assistant/tests
-pytest services/homelab-assistant
+uv sync --locked --extra dev
+uv run --locked --extra dev ruff format --check .
+uv run --locked --extra dev ruff check .
+uv run --locked --extra dev mypy src tests
+uv run --locked --extra dev pytest
+```
+
+From the repository root:
+
+```bash
 kubectl kustomize kubernetes/system/homelab-assistant >/tmp/homelab-assistant.yaml
-scripts/secrets.sh check
+cd ansible
+ansible-playbook playbooks/configure-ubuntu-workstation.yml --syntax-check
+ansible-playbook playbooks/configure-proxmox.yml --syntax-check
 ```
 
-The workflow `.github/workflows/homelab-assistant.yml` builds
-`ghcr.io/kfir-marx/homelab-assistant:sha-<commit>` and opens the immutable image
-pin PR.
+These checks do not contact the live cluster, restart services, sync Argo CD,
+or change VM state.
 
-## Rollout and recovery
+## Cutover sequence
 
-The Ubuntu workstation's Ansible host variables declare
-`/mnt/storage2-bulk/homelab-assistant/postgres` with UID/GID `999`. Converge the
-workstation's NFS role before Argo synchronization. During the staged cutover,
-scale down the old job-assistant Telegram poller before starting this gateway
-with the shared bot token; two long pollers must never overlap.
+Never run the old and new Telegram pollers with the same bot token.
 
-After rollout, verify one gateway replica, no public route, model readiness,
-session persistence across a gateway restart, `/job_help`, a pending job
-conversation, callback namespacing, bounded document forwarding, and a
-cancelled `/handover`. Also verify the RBAC boundary:
+1. Merge and publish a tested immutable bridge image, then merge its image-pin
+   release PR.
+2. Sync `homelab-assistant` without prune. Confirm the retained PV/PVC and
+   switcher identity are healthy. Extract the switcher token and CA as above.
+3. Verify Codex is installed and authenticated as `kfir`. Do not inspect or
+   export existing rollout contents.
+4. Export the controller-only placeholders, then run both roles in check mode:
+
+   ```bash
+   cd ansible
+   ansible-playbook playbooks/configure-proxmox.yml \
+     --check --diff --limit largegpu --tags homelab-vm-actuator
+   ansible-playbook playbooks/configure-ubuntu-workstation.yml \
+     --check --diff --limit ubuntu-workstation --tags homelab-assistant
+   ```
+
+5. Apply the fixed-command actuator on `largegpu`. Verify only `status`,
+   `switch-to-gaming`, and `switch-to-kubernetes` are accepted; do not exercise
+   either switch as a deployment smoke test.
+
+   ```bash
+   ansible-playbook playbooks/configure-proxmox.yml \
+     --limit largegpu --tags homelab-vm-actuator
+   ```
+
+6. Stop the legacy Kubernetes Telegram Deployment before starting the host
+   bridge. Confirm it has no running pod. This is an explicit live cutover step.
+7. Apply the workstation role:
+
+   ```bash
+   ansible-playbook playbooks/configure-ubuntu-workstation.yml \
+     --limit ubuntu-workstation --tags homelab-assistant
+   ```
+
+8. Verify locally without printing environment or credentials:
+
+   ```bash
+   systemctl is-active homelab-codex-app-server homelab-assistant
+   systemctl show homelab-codex-app-server -p User -p Group -p WorkingDirectory
+   stat -c '%U %G %a %n' /run/homelab-codex /run/homelab-codex/app-server.sock
+   podman inspect homelab-assistant --format '{{json .Mounts}}'
+   ```
+
+   The App Server unit must show user `kfir`, the repository cwd, and no TCP
+   listener. Container mounts must not include `/home/kfir` or `~/.codex`.
+9. In Telegram, confirm the initial state is locked. Exercise `/tg help`, `/tg
+   sessions`, select a known VS Code thread, `/tg current`, `/status`, `/tg
+   unlock`, `/tg new cutover-test`, and `/tg lock`. Cancel both `/ops` previews;
+   do not confirm a VM transition merely as a smoke test.
+10. Sync the Argo CD Application with prune only after the host bridge is proven.
+   Prune retires the old Deployment/database/policies and the obsolete
+   diagnostics identity. The `Retain` PostgreSQL PV/PVC remains inactive for
+   rollback.
+
+The legacy PostgreSQL-to-SQLite migration utility and old `sessions.db`, if
+already created, are retained as migration history and rollback artifacts.
+They are not imported into Codex: Codex threads already live in the normal
+`~/.codex` store, and the revised bridge creates only `bridge.db` for selection,
+nonces, and sanitized audit rows.
+
+## Cross-client thread visibility
+
+The supported direction is verified by the App Server contract: `thread/list`
+can enumerate `vscode`, `cli`, and `appServer` sources, so Telegram can select
+and resume VS Code and CLI threads by ID.
+
+The reverse UI direction is not guaranteed by the documented interface. Do not
+claim that every Telegram-created `appServer` thread automatically appears in
+the stock VS Code Codex session list. The history remains in the shared Codex
+store. Record the ID shown by `/tg current` and resume it safely on the
+workstation with:
 
 ```bash
-kubectl auth can-i --as=system:serviceaccount:homelab-assistant:homelab-assistant get pods -A
-kubectl auth can-i --as=system:serviceaccount:homelab-assistant:homelab-assistant create deployments -n default
+cd /home/kfir/repos/homelab
+codex resume <thread-id>
 ```
 
-The first command must return `yes` and the mutation must return `no`. Test a
-prompt-requested handover through its preview and Cancel button. Do not submit
-an external handover during a dry run.
+This supported CLI workflow preserves the thread history even when the VS Code
+picker does not surface the session.
 
-If Telegram reports update conflicts, stop both consumers and identify every
-workload using the token before restarting only `telegram-gateway`. If the
-session database is unavailable, fix the retained NFS mount; do not clear the
-claim, force-mount, or replace it with scratch storage.
+## Rollback
+
+1. Lock Telegram and stop `homelab-assistant.service`, then stop
+   `homelab-codex-app-server.service`. Confirm no host poller remains.
+2. Before reusing the bot token, restore the legacy Kubernetes manifests from a
+   reviewed pre-cutover revision and verify the retained PostgreSQL PVC binds to
+   its original `Retain` PV. Do not delete or recreate the backing directory.
+3. Restore the encrypted legacy Secret material through the normal SOPS
+   workflow. Never copy it into Git or command output.
+4. Sync without prune, verify PostgreSQL and the old gateway, and only then
+   scale the old Telegram poller to one replica.
+5. Keep `bridge.db`, legacy `sessions.db`, and the retained PostgreSQL path until
+   the rollback window is explicitly closed. These files contain private
+   metadata/history and must not be attached to tickets or logs.
+
+Rollback never requires deleting `~/.codex`; Telegram-created Codex histories
+remain ordinary local threads and can still be resumed by ID.

@@ -1,0 +1,31 @@
+#!/usr/bin/python3
+"""Unprivileged forced-command dispatcher for the root actuator."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+
+ACTUATOR = "/usr/local/sbin/homelab-vm-actuator"
+OPERATIONS = {"status", "switch-to-gaming", "switch-to-kubernetes"}
+
+
+def main() -> None:
+    operation = os.environ.get("SSH_ORIGINAL_COMMAND", "").strip()
+    if operation not in OPERATIONS:
+        print('{"error":"unsupported operation","ok":false}')
+        raise SystemExit(2)
+    completed = subprocess.run(  # noqa: S603 - operation is an exact enum value
+        ["/usr/bin/sudo", "-n", ACTUATOR, operation],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=665,
+    )
+    sys.stdout.write(completed.stdout)
+    raise SystemExit(completed.returncode)
+
+
+if __name__ == "__main__":
+    main()

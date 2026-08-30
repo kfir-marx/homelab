@@ -4,9 +4,5 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - rbac.yaml
-  - storage.yaml
-  - postgres.yaml
-  - inference.yaml
-  - telegram.yaml
-  - network-policy.yaml
-  - model-download-cdn-network-policy.yaml
+  - credentials.yaml
+  - retained-storage.yaml

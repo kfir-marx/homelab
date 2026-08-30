@@ -1,0 +1,26 @@
+[Unit]
+Description=Private Telegram client for local Codex App Server
+After=network-online.target homelab-codex-app-server.service
+Wants=network-online.target
+Requires=homelab-codex-app-server.service
+RequiresMountsFor={{ homelab_assistant_data_directory }}
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5s
+ExecStartPre=-/usr/bin/podman rm --force homelab-assistant
+ExecStart=/usr/bin/podman run --name homelab-assistant --rm --read-only --user {{ homelab_assistant_uid }}:{{ homelab_assistant_uid }} --cap-drop ALL --security-opt no-new-privileges --network host --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m --env-file /etc/homelab-assistant/secrets.env --env-file /etc/homelab-assistant/runtime.env --volume {{ homelab_assistant_data_directory }}:/var/lib/homelab-assistant:rw --volume /etc/homelab-assistant/credentials:/run/secrets/homelab-assistant:ro --volume {{ homelab_assistant_codex_socket_directory }}:/run/codex-app-server:ro {{ homelab_assistant_image }}
+ExecStop=/usr/bin/podman stop --time 30 homelab-assistant
+TimeoutStopSec=45
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,23 +1,33 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import SecretStr, ValidationError
 
 from homelab_assistant.config import Settings
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ("6638039140", frozenset({6638039140})),
-        ("6638039140,123", frozenset({6638039140, 123})),
-        ("[6638039140, 123]", frozenset({6638039140, 123})),
-    ],
-)
-def test_telegram_user_ids_are_parsed_from_environment(
-    monkeypatch: pytest.MonkeyPatch, value: str, expected: frozenset[int]
-) -> None:
-    monkeypatch.setenv("HOMELAB_ASSISTANT_TELEGRAM_TOKEN", "unit-test-placeholder")
-    monkeypatch.setenv("HOMELAB_ASSISTANT_LLM_API_KEY", "unit-test-placeholder")
-    monkeypatch.setenv("HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS", value)
+def test_settings_require_exact_numeric_user_and_chat_ids() -> None:
+    configured = Settings(
+        telegram_token=SecretStr("placeholder"),
+        telegram_allowed_user_id=123,
+        telegram_allowed_chat_id=456,
+    )
+    assert configured.telegram_allowed_user_id == 123
+    assert configured.telegram_allowed_chat_id == 456
 
-    assert Settings().telegram_allowed_user_ids == expected
+    with pytest.raises(ValidationError):
+        Settings(
+            telegram_token=SecretStr("placeholder"),
+            telegram_allowed_user_id=0,
+            telegram_allowed_chat_id=456,
+        )
+
+
+def test_switch_node_is_literal_gpu_2() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            telegram_token=SecretStr("placeholder"),
+            telegram_allowed_user_id=123,
+            telegram_allowed_chat_id=456,
+            kubernetes_node_name="another-node",
+        )

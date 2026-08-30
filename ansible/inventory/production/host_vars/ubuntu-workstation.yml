@@ -29,6 +29,12 @@ nfs_server_directories:
     owner: "999"
     group: "999"
     mode: "0700"
+  # Bridge state and legacy sessions.db remain local rollback artifacts.
+  - path: /mnt/storage2-bulk/homelab-assistant/sessions
+    mount_point: /mnt/storage2-bulk
+    owner: "10001"
+    group: "10001"
+    mode: "0700"
   - path: /mnt/storage2-bulk/external-ai/postgres
     mount_point: /mnt/storage2-bulk
     owner: "999"
@@ -43,3 +49,6 @@ nfs_server_exports:
   - path: /mnt/storage2-bulk
     client: 192.168.1.0/24
     options: rw,sync,no_subtree_check,no_root_squash,fsid=10
+
+homelab_assistant_enabled: true
+homelab_assistant_image: ghcr.io/kfir-marx/homelab-assistant:sha-843283431b922513037086f8e9a1f9ef44f09531

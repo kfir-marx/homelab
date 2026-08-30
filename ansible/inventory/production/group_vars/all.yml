@@ -20,3 +20,14 @@ proxmox_reboot_approved: false
 # NUT listens on localhost only, but its monitor protocol still requires a
 # credential. Export this alongside PROXMOX_SSH_PASSWORD; never commit it.
 nut_monitor_password: "{{ lookup('ansible.builtin.env', 'NUT_MONITOR_PASSWORD') }}"
+
+# Homelab-assistant secrets stay in the controller environment or named local
+# files and are written with no_log to narrowly scoped runtime files.
+homelab_assistant_telegram_token: "{{ lookup('ansible.builtin.env', 'HOMELAB_ASSISTANT_TELEGRAM_TOKEN') }}"
+homelab_assistant_telegram_allowed_user_id: "{{ lookup('ansible.builtin.env', 'HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_USER_ID') }}"
+homelab_assistant_telegram_allowed_chat_id: "{{ lookup('ansible.builtin.env', 'HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_CHAT_ID') }}"
+homelab_assistant_kubernetes_switch_token: "{{ lookup('ansible.builtin.env', 'HOMELAB_ASSISTANT_KUBERNETES_SWITCH_TOKEN') }}"
+homelab_assistant_kubernetes_ca_source: "{{ lookup('ansible.builtin.env', 'HOMELAB_ASSISTANT_KUBERNETES_CA_SOURCE') }}"
+homelab_assistant_actuator_identity_source: "{{ lookup('ansible.builtin.env', 'HOMELAB_ASSISTANT_ACTUATOR_IDENTITY_SOURCE') }}"
+homelab_assistant_actuator_known_hosts_source: "{{ lookup('ansible.builtin.env', 'HOMELAB_ASSISTANT_ACTUATOR_KNOWN_HOSTS_SOURCE') }}"
+homelab_vm_actuator_authorized_key: "{{ lookup('ansible.builtin.env', 'HOMELAB_ASSISTANT_ACTUATOR_AUTHORIZED_KEY') }}"

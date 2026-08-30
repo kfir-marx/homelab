@@ -1,20 +1,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import Any
+import subprocess
+from typing import Any, Literal
 
 import httpx
-
-from .tools import AssistantTools, HandoffRequest
-
-
-@dataclass(frozen=True)
-class Completion:
-    content: str
-    prompt_tokens: int
-    completion_tokens: int
-    handoff: HandoffRequest | None = None
 
 
 class TelegramClient:
@@ -39,8 +29,9 @@ class TelegramClient:
 
     def send_message(
         self, chat_id: int, text: str, buttons: tuple[tuple[str, str], ...] = ()
-    ) -> None:
+    ) -> int | None:
         chunks = _telegram_chunks(text)
+        last_message_id: int | None = None
         for index, chunk in enumerate(chunks):
             body: dict[str, Any] = {
                 "chat_id": chat_id,
@@ -53,248 +44,91 @@ class TelegramClient:
                         [{"text": label, "callback_data": data}] for label, data in buttons
                     ]
                 }
-            response = self._client.post(
-                "/sendMessage",
-                json=body,
-            )
+            response = self._client.post("/sendMessage", json=body)
             response.raise_for_status()
+            message_id = response.json().get("result", {}).get("message_id")
+            if isinstance(message_id, int):
+                last_message_id = message_id
+        return last_message_id
 
-    def download_document(self, file_id: str, maximum: int) -> bytes:
-        metadata = self._client.get("/getFile", params={"file_id": file_id})
-        metadata.raise_for_status()
-        file_path = str(metadata.json()["result"]["file_path"])
-        content = bytearray()
-        with httpx.stream(
-            "GET",
-            f"https://api.telegram.org/file/bot{self._token}/{file_path}",
-            timeout=self._client.timeout,
-        ) as response:
-            response.raise_for_status()
-            for chunk in response.iter_bytes():
-                if len(content) + len(chunk) > maximum:
-                    raise ValueError("Telegram document exceeds maximum size")
-                content.extend(chunk)
-        return bytes(content)
-
-
-class LlmClient:
-    def __init__(
-        self,
-        base_url: str,
-        api_key: str,
-        model: str,
-        timeout: float,
-        tools: AssistantTools | None = None,
-        maximum_tool_rounds: int = 6,
-        maximum_tool_context_chars: int = 6_000,
-    ) -> None:
-        self.model = model
-        self.tools = tools
-        self.maximum_tool_rounds = maximum_tool_rounds
-        self.maximum_tool_context_chars = maximum_tool_context_chars
-        self._client = httpx.Client(
-            base_url=base_url.rstrip("/"),
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=timeout,
-        )
-
-    def complete(self, messages: list[dict[str, str]], max_tokens: int) -> Completion:
-        return self._request_completion(messages, max_tokens)
-
-    def complete_with_tools(
-        self,
-        messages: list[dict[str, str]],
-        max_tokens: int,
-        current_user_text: str,
-    ) -> Completion:
-        if not self.tools:
-            return self.complete(messages, max_tokens)
-        working: list[dict[str, Any]] = [dict(item) for item in messages]
-        handoff: HandoffRequest | None = None
-        completion_tokens = 0
-        tool_context_chars = 0
-        for _ in range(self.maximum_tool_rounds):
-            payload = self._payload(working, max_tokens)
-            payload["tools"] = self.tools.definitions
-            payload["tool_choice"] = "auto"
-            response = self._client.post("/chat/completions", json=payload)
-            response.raise_for_status()
-            message, usage = self._response_message(response)
-            completion_tokens += int(usage.get("completion_tokens", 0))
-            calls = message.get("tool_calls")
-            if not isinstance(calls, list) or not calls:
-                content = message.get("content")
-                if not isinstance(content, str) or not content.strip():
-                    raise ValueError("LLM returned an empty response")
-                return Completion(
-                    content.strip(),
-                    int(usage.get("prompt_tokens", 0)),
-                    completion_tokens,
-                    handoff,
-                )
-            working.append(
-                {
-                    "role": "assistant",
-                    "content": message.get("content"),
-                    "tool_calls": calls,
-                }
-            )
-            for call in calls:
-                if not isinstance(call, dict):
-                    raise ValueError("LLM returned an invalid tool call")
-                function = call.get("function")
-                if not isinstance(function, dict):
-                    raise ValueError("LLM returned an invalid tool function")
-                try:
-                    arguments = json.loads(str(function.get("arguments", "{}")))
-                except json.JSONDecodeError as exc:
-                    raise ValueError("LLM returned invalid tool arguments") from exc
-                if not isinstance(arguments, dict):
-                    raise ValueError("LLM tool arguments must be an object")
-                result = self.tools.execute(
-                    str(function.get("name", "")), arguments, current_user_text
-                )
-                if result.handoff:
-                    handoff = result.handoff
-                available = max(0, self.maximum_tool_context_chars - tool_context_chars)
-                result_content = result.content[:available]
-                if len(result.content) > available:
-                    result_content += "\n[aggregate tool context budget exhausted]"
-                tool_context_chars += len(result_content)
-                working.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": str(call.get("id", "")),
-                        "name": str(function.get("name", "")),
-                        "content": result_content,
-                    }
-                )
-        raise ValueError("LLM exceeded the tool-call round limit")
-
-    def _request_completion(self, messages: list[dict[str, str]], max_tokens: int) -> Completion:
+    def edit_message(self, chat_id: int, message_id: int, text: str) -> None:
         response = self._client.post(
-            "/chat/completions", json=self._payload([dict(item) for item in messages], max_tokens)
-        )
-        response.raise_for_status()
-        message, usage = self._response_message(response)
-        content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError("LLM returned an empty response")
-        return Completion(
-            content.strip(),
-            int(usage.get("prompt_tokens", 0)),
-            int(usage.get("completion_tokens", 0)),
-        )
-
-    def _payload(self, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
-        return {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": 0.4,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-
-    @staticmethod
-    def _response_message(response: httpx.Response) -> tuple[dict[str, Any], dict[str, Any]]:
-        payload = response.json()
-        try:
-            message = payload["choices"][0]["message"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError("LLM returned an invalid chat-completion response") from exc
-        if not isinstance(message, dict):
-            raise ValueError("LLM returned an invalid chat-completion message")
-        usage = payload.get("usage", {})
-        return message, usage if isinstance(usage, dict) else {}
-
-    def ready(self) -> bool:
-        try:
-            response = self._client.get("/models", timeout=10.0)
-            response.raise_for_status()
-            return True
-        except httpx.HTTPError:
-            return False
-
-
-class ExternalAiClient:
-    def __init__(self, base_url: str, token: str, timeout: float = 20.0) -> None:
-        self._client = httpx.Client(
-            base_url=base_url.rstrip("/"),
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=timeout,
-        )
-
-    def submit(
-        self, prompt: str, model: str, reasoning: str, idempotency_key: str
-    ) -> dict[str, Any]:
-        response = self._client.post(
-            "/v1/jobs",
+            "/editMessageText",
             json={
-                "requester": "homelab-assistant",
-                "idempotency_key": idempotency_key,
-                "prompt": prompt,
-                "model": model,
-                "reasoning_effort": reasoning,
-                "correlation": {"source": "telegram-handover"},
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text[:4000],
+                "disable_web_page_preview": True,
             },
         )
+        if response.status_code == 400 and "message is not modified" in response.text:
+            return
         response.raise_for_status()
-        return dict(response.json())
 
-    def get(self, job_id: str) -> dict[str, Any]:
-        response = self._client.get(f"/v1/jobs/{job_id}")
+    def answer_callback(self, callback_query_id: str) -> None:
+        response = self._client.post(
+            "/answerCallbackQuery", json={"callback_query_id": callback_query_id}
+        )
         response.raise_for_status()
-        return dict(response.json())
 
 
-class JobAssistantClient:
+ActuatorOperation = Literal["status", "switch-to-gaming", "switch-to-kubernetes"]
+
+
+class SshActuatorClient:
+    """Invoke the forced-command actuator with a fixed, non-shell SSH vector."""
+
     def __init__(
-        self, base_url: str, token: str, notification_token: str, timeout: float = 40.0
+        self,
+        host: str,
+        user: str,
+        identity_file: str,
+        known_hosts_file: str,
+        timeout: int,
     ) -> None:
-        self._client = httpx.Client(
-            base_url=base_url.rstrip("/"),
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=timeout,
-        )
-        self._notification_client = httpx.Client(
-            base_url=base_url.rstrip("/"),
-            headers={"Authorization": f"Bearer {notification_token}"},
-            timeout=timeout,
-        )
+        self._destination = f"{user}@{host}"
+        self._identity_file = identity_file
+        self._known_hosts_file = known_hosts_file
+        self._timeout = timeout
 
-    def has_pending(self, user_id: int, chat_id: int) -> bool:
-        response = self._client.get(
-            "/internal/telegram/pending", params={"user_id": user_id, "chat_id": chat_id}
-        )
-        response.raise_for_status()
-        return bool(response.json().get("pending"))
-
-    def route(self, update: dict[str, Any]) -> list[dict[str, Any]]:
-        message = update.get("message")
-        raw = message.pop("_file_bytes", None) if isinstance(message, dict) else None
-        if isinstance(raw, bytes):
-            response = self._client.post(
-                "/internal/telegram/document",
-                data={"update_json": json.dumps(update)},
-                files={"content": ("telegram-upload", raw, "application/octet-stream")},
+    def execute(self, operation: ActuatorOperation) -> dict[str, Any]:
+        if operation not in {"status", "switch-to-gaming", "switch-to-kubernetes"}:
+            raise ValueError("unsupported actuator operation")
+        command = [
+            "/usr/bin/ssh",
+            "-T",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            f"UserKnownHostsFile={self._known_hosts_file}",
+            "-i",
+            self._identity_file,
+            self._destination,
+            operation,
+        ]
+        try:
+            completed = subprocess.run(  # noqa: S603 - fixed or declarative arguments only
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self._timeout,
             )
-        else:
-            response = self._client.post("/internal/telegram/update", json=update)
-        response.raise_for_status()
-        result = response.json().get("replies", [])
-        return list(result) if isinstance(result, list) else []
-
-    def notifications(self) -> list[dict[str, Any]]:
-        response = self._notification_client.get("/internal/telegram/notifications")
-        response.raise_for_status()
-        result = response.json().get("notifications", [])
-        return list(result) if isinstance(result, list) else []
-
-    def acknowledge(self, event_id: str) -> None:
-        response = self._notification_client.post(
-            f"/internal/telegram/notifications/{event_id}/ack"
-        )
-        response.raise_for_status()
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("actuator fixed operation timed out") from exc
+        if completed.returncode != 0:
+            raise RuntimeError("actuator rejected or failed the fixed operation")
+        try:
+            payload = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise ValueError("actuator returned invalid structured state") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("actuator returned invalid structured state")
+        return payload
 
 
 def _telegram_chunks(text: str, maximum: int = 4000) -> list[str]:

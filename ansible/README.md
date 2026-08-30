@@ -10,8 +10,8 @@ Network UPS Tools (NUT).
 
 The former `gpunvdgtx1060` node is no longer a Proxmox host. The separate
 `configure-ubuntu-workstation.yml` play configures its replacement Ubuntu
-installation locally as an NFS-only homelab host. It mounts and exports the
-existing critical filesystem, removes the retired libvirt packages and VFIO
+installation locally as the permanent NFS and Telegram-Codex host. It mounts
+and exports the existing critical filesystem, removes the retired libvirt packages and VFIO
 boot configuration, and returns the GTX 1060 and HDMI output to Ubuntu after
 an explicit reboot.
 
@@ -56,6 +56,16 @@ compatible with Ansible's password-prompt detection, so the workstation
 inventory explicitly uses the already-installed, compatible
 `/usr/bin/sudo.ws` executable for Ansible become operations. This does not
 change the system-wide `sudo` alternative.
+
+The `homelab_assistant` role runs Codex App Server as the normal workstation
+user and exposes it only through a group-protected Unix socket. A read-only
+Podman bridge under UID 10001 receives the socket, its small critical-storage
+state directory, and only the deterministic switch credentials; it never
+receives the workstation home or Codex authentication. Credentials come from
+controller environment variables and named local files. The
+`homelab_vm_actuator` role on `largegpu` installs a management-IP-restricted,
+forced-command SSH identity that can run only status and the two fixed 402/502
+transitions. See the focused runbook before either first rollout.
 
 This play is safe to run while the workstation still uses DHCP. It mounts
 `UUID=07445d19-37d4-4353-af1a-9511fb9c74e9` at
@@ -126,6 +136,8 @@ ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nfs
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags storage
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags backup
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags windows-template-refresh
+ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags homelab-vm-actuator
+ansible-playbook playbooks/configure-ubuntu-workstation.yml --tags homelab-assistant
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nut
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags vfio
 ansible-playbook playbooks/verify-proxmox.yml --limit nfs_servers --tags nfs
@@ -136,7 +148,8 @@ ansible-playbook playbooks/verify-proxmox.yml --limit nut_servers --tags nut
 ```
 
 Available configuration tags are `repositories`, `packages`, `nfs`, `storage`,
-`backup`, `windows-template-refresh`, `nut`, and `vfio`. Common preflight checks
+`backup`, `windows-template-refresh`, `homelab-vm-actuator`, `homelab-assistant`,
+`nut`, and `vfio`. Common preflight checks
 (hostname, Proxmox major version, and quorate cluster membership) always run.
 Filesystem checks run only with NFS or directory-storage work, while PCI/IOMMU
 and running-VM conflict checks run only with VFIO work. A repository-, package-,

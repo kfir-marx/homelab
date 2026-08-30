@@ -97,6 +97,17 @@ class ExternalJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AuditEvent(Base):
+    __tablename__ = "assistant_audit_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
+    operation: Mapped[str] = mapped_column(String(40), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False)
+    detail: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 @dataclass(frozen=True)
 class SessionRecord:
     id: str
@@ -435,9 +446,18 @@ class SessionStore:
             ).rowcount
         return bool(changed)
 
-    def pending(self, owner_id: int) -> tuple[str, dict[str, Any]] | None:
-        with self.factory() as session:
+    def pending(
+        self, owner_id: int, maximum_age_seconds: int | None = None
+    ) -> tuple[str, dict[str, Any]] | None:
+        with self.factory.begin() as session:
             stored = session.get(PendingAction, owner_id)
+            if stored and maximum_age_seconds is not None:
+                created_at = stored.created_at
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=UTC)
+                if (datetime.now(UTC) - created_at).total_seconds() > maximum_age_seconds:
+                    session.delete(stored)
+                    return None
             return (stored.kind, dict(stored.payload)) if stored else None
 
     def set_pending(self, owner_id: int, kind: str, payload: dict[str, Any]) -> None:
@@ -497,3 +517,16 @@ class SessionStore:
             stored = session.get(ExternalJob, public_id)
             if stored:
                 stored.status = status
+
+    def audit(self, owner_id: int, operation: str, outcome: str, detail: str) -> None:
+        with self.factory.begin() as session:
+            session.add(
+                AuditEvent(
+                    id=str(uuid.uuid4()),
+                    owner_id=owner_id,
+                    operation=operation[:40],
+                    outcome=outcome[:20],
+                    detail=" ".join(detail.split())[:500],
+                    created_at=datetime.now(UTC),
+                )
+            )

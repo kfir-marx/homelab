@@ -1,0 +1,61 @@
+---
+- name: Validate homelab VM actuator configuration
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == "largegpu"
+      - homelab_vm_actuator_management_source is match('^[0-9.]+$')
+      - homelab_vm_actuator_authorized_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')
+    fail_msg: >-
+      The VM actuator requires largegpu, an explicit management source, and a
+      separately generated Ed25519 public key supplied out of band.
+
+- name: Create the unprivileged actuator SSH identity
+  ansible.builtin.user:
+    name: "{{ homelab_vm_actuator_user }}"
+    comment: Fixed-command homelab VM actuator
+    create_home: true
+    home: /var/lib/homelab-vm-actuator
+    shell: /bin/sh
+    system: true
+
+- name: Install root-owned fixed actuator programs
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/sbin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - homelab-vm-actuator
+    - homelab-vm-actuator-dispatch
+
+- name: Restrict actuator privilege to three exact commands
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/homelab-vm-actuator
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+    content: |
+      {{ homelab_vm_actuator_user }} ALL=(root) NOPASSWD: /usr/local/sbin/homelab-vm-actuator status
+      {{ homelab_vm_actuator_user }} ALL=(root) NOPASSWD: /usr/local/sbin/homelab-vm-actuator switch-to-gaming
+      {{ homelab_vm_actuator_user }} ALL=(root) NOPASSWD: /usr/local/sbin/homelab-vm-actuator switch-to-kubernetes
+
+- name: Create the actuator SSH directory
+  ansible.builtin.file:
+    path: /var/lib/homelab-vm-actuator/.ssh
+    state: directory
+    owner: "{{ homelab_vm_actuator_user }}"
+    group: "{{ homelab_vm_actuator_user }}"
+    mode: "0700"
+
+- name: Install management-host-only forced SSH key
+  ansible.builtin.copy:
+    dest: /var/lib/homelab-vm-actuator/.ssh/authorized_keys
+    owner: "{{ homelab_vm_actuator_user }}"
+    group: "{{ homelab_vm_actuator_user }}"
+    mode: "0600"
+    content: >-
+      from="{{ homelab_vm_actuator_management_source }}",restrict,command="/usr/local/sbin/homelab-vm-actuator-dispatch"
+      {{ homelab_vm_actuator_authorized_key }}
+  no_log: true

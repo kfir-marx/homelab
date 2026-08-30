@@ -54,6 +54,10 @@
     - role: nfs_server
       tags:
         - nfs
+    - role: homelab_assistant
+      when: homelab_assistant_enabled | default(false) | bool
+      tags:
+        - homelab-assistant
 
   post_tasks:
     - name: Report whether a reboot is required to return NVIDIA to Ubuntu

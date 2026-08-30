@@ -1,0 +1,30 @@
+[Unit]
+Description=Local Codex App Server for the homelab Telegram client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ homelab_assistant_workstation_user }}
+Group={{ homelab_assistant_workstation_user }}
+SupplementaryGroups={{ homelab_assistant_user }}
+Environment=HOME={{ homelab_assistant_workstation_home }}
+Environment=PATH={{ homelab_assistant_workstation_home }}/.local/bin:{{ homelab_assistant_workstation_home }}/.cargo/bin:{{ homelab_assistant_workstation_home }}/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory={{ homelab_assistant_codex_cwd }}
+UMask=0007
+ExecStartPre=+/usr/bin/install -d -o {{ homelab_assistant_workstation_user }} -g {{ homelab_assistant_user }} -m 2770 {{ homelab_assistant_codex_socket_directory }}
+ExecStartPre=-/usr/bin/rm -f {{ homelab_assistant_codex_socket_path }}
+ExecStart={{ homelab_assistant_codex_binary }} --ask-for-approval never --sandbox danger-full-access app-server --listen unix://{{ homelab_assistant_codex_socket_path }}
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30
+
+# Codex intentionally has the ordinary workstation user's filesystem, network,
+# tools, configuration, authentication, skills, plugins, MCPs, and session store.
+NoNewPrivileges=false
+PrivateTmp=false
+ProtectHome=false
+ProtectSystem=false
+
+[Install]
+WantedBy=multi-user.target

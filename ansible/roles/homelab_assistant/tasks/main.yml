@@ -1,0 +1,193 @@
+---
+- name: Validate homelab assistant deployment inputs
+  ansible.builtin.assert:
+    that:
+      - homelab_assistant_image is match('^ghcr.io/kfir-marx/homelab-assistant:sha-[0-9a-f]{40}$')
+      - homelab_assistant_telegram_token | length > 20
+      - homelab_assistant_telegram_allowed_user_id is match('^[0-9]+$')
+      - homelab_assistant_telegram_allowed_chat_id is match('^[0-9]+$')
+      - homelab_assistant_kubernetes_switch_token | length > 10
+      - homelab_assistant_kubernetes_ca_source | length > 0
+      - homelab_assistant_actuator_identity_source | length > 0
+      - homelab_assistant_actuator_known_hosts_source | length > 0
+      - homelab_assistant_codex_socket_path == homelab_assistant_codex_socket_directory + '/app-server.sock'
+    fail_msg: >-
+      Supply exact Telegram identity and the switching credentials through the
+      controller environment; no Codex authentication belongs in this role.
+  no_log: true
+
+- name: Check the workstation Codex binary
+  ansible.builtin.stat:
+    path: "{{ homelab_assistant_codex_binary }}"
+  register: homelab_assistant_codex_binary_stat
+
+- name: Check the Codex repository working directory
+  ansible.builtin.stat:
+    path: "{{ homelab_assistant_codex_cwd }}"
+  register: homelab_assistant_codex_cwd_stat
+
+- name: Require the existing workstation Codex installation and repository
+  ansible.builtin.assert:
+    that:
+      - homelab_assistant_codex_binary_stat.stat.exists
+      - homelab_assistant_codex_binary_stat.stat.executable
+      - homelab_assistant_codex_cwd_stat.stat.isdir
+    fail_msg: >-
+      Install and authenticate Codex as the normal workstation user and clone
+      the homelab repository before enabling the Telegram bridge.
+
+- name: Install the application container runtime
+  ansible.builtin.apt:
+    name: podman
+    state: present
+    update_cache: true
+
+- name: Create the dedicated assistant group
+  ansible.builtin.group:
+    name: "{{ homelab_assistant_user }}"
+    gid: "{{ homelab_assistant_uid }}"
+    system: true
+
+- name: Create the dedicated assistant user
+  ansible.builtin.user:
+    name: "{{ homelab_assistant_user }}"
+    uid: "{{ homelab_assistant_uid }}"
+    group: "{{ homelab_assistant_user }}"
+    home: /var/lib/homelab-assistant-runtime
+    create_home: false
+    shell: /usr/sbin/nologin
+    system: true
+
+- name: Create assistant configuration and durable state directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /etc/homelab-assistant
+      owner: root
+      group: "{{ homelab_assistant_user }}"
+      mode: "0750"
+    - path: /etc/homelab-assistant/credentials
+      owner: root
+      group: "{{ homelab_assistant_user }}"
+      mode: "0750"
+    - path: "{{ homelab_assistant_data_directory }}"
+      owner: "{{ homelab_assistant_uid }}"
+      group: "{{ homelab_assistant_uid }}"
+      mode: "0700"
+
+- name: Install narrow credential files
+  ansible.builtin.copy:
+    src: "{{ item.source }}"
+    dest: "/etc/homelab-assistant/credentials/{{ item.destination }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - source: "{{ homelab_assistant_kubernetes_ca_source }}"
+      destination: kubernetes-ca.crt
+      owner: root
+      group: "{{ homelab_assistant_user }}"
+      mode: "0640"
+    - source: "{{ homelab_assistant_actuator_identity_source }}"
+      destination: actuator-ssh-key
+      owner: "{{ homelab_assistant_user }}"
+      group: "{{ homelab_assistant_user }}"
+      mode: "0400"
+    - source: "{{ homelab_assistant_actuator_known_hosts_source }}"
+      destination: actuator-known-hosts
+      owner: root
+      group: "{{ homelab_assistant_user }}"
+      mode: "0640"
+  no_log: true
+  notify: Restart homelab assistant
+
+- name: Install the switching-only Kubernetes token
+  ansible.builtin.copy:
+    dest: /etc/homelab-assistant/credentials/kubernetes-switch-token
+    owner: root
+    group: "{{ homelab_assistant_user }}"
+    mode: "0640"
+    content: "{{ homelab_assistant_kubernetes_switch_token }}\n"
+  no_log: true
+  notify: Restart homelab assistant
+
+- name: Install the secret bridge runtime environment
+  ansible.builtin.copy:
+    dest: /etc/homelab-assistant/secrets.env
+    owner: root
+    group: "{{ homelab_assistant_user }}"
+    mode: "0640"
+    content: |
+      HOMELAB_ASSISTANT_TELEGRAM_TOKEN={{ homelab_assistant_telegram_token }}
+      HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_USER_ID={{ homelab_assistant_telegram_allowed_user_id }}
+      HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_CHAT_ID={{ homelab_assistant_telegram_allowed_chat_id }}
+  no_log: true
+  notify: Restart homelab assistant
+
+- name: Install the non-secret bridge runtime environment
+  ansible.builtin.copy:
+    dest: /etc/homelab-assistant/runtime.env
+    owner: root
+    group: "{{ homelab_assistant_user }}"
+    mode: "0640"
+    content: |
+      HOMELAB_ASSISTANT_CODEX_SOCKET_PATH=/run/codex-app-server/app-server.sock
+      HOMELAB_ASSISTANT_CODEX_CWD={{ homelab_assistant_codex_cwd }}
+      HOMELAB_ASSISTANT_STATE_DATABASE_PATH=/var/lib/homelab-assistant/bridge.db
+      HOMELAB_ASSISTANT_ADMINISTRATOR_LEASE_SECONDS={{ homelab_assistant_administrator_lease_seconds }}
+      HOMELAB_ASSISTANT_CALLBACK_TTL_SECONDS={{ homelab_assistant_callback_ttl_seconds }}
+      HOMELAB_ASSISTANT_KUBERNETES_API_URL={{ homelab_assistant_kubernetes_api_url }}
+      HOMELAB_ASSISTANT_ACTUATOR_HOST={{ homelab_assistant_actuator_host }}
+  notify: Restart homelab assistant
+
+- name: Check whether the immutable assistant image is present
+  ansible.builtin.command: "/usr/bin/podman image exists {{ homelab_assistant_image }}"
+  register: homelab_assistant_image_present
+  changed_when: false
+  failed_when: homelab_assistant_image_present.rc not in [0, 1]
+
+- name: Pull the immutable assistant image
+  ansible.builtin.command: "/usr/bin/podman pull {{ homelab_assistant_image }}"
+  when: homelab_assistant_image_present.rc == 1
+  changed_when: true
+
+- name: Install the Codex App Server systemd unit
+  ansible.builtin.template:
+    src: homelab-codex-app-server.service.j2
+    dest: /etc/systemd/system/homelab-codex-app-server.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart homelab Codex app server
+    - Restart homelab assistant
+
+- name: Install the Telegram bridge systemd unit
+  ansible.builtin.template:
+    src: homelab-assistant.service.j2
+    dest: /etc/systemd/system/homelab-assistant.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart homelab assistant
+
+- name: Enable and start Codex App Server
+  ansible.builtin.systemd_service:
+    name: homelab-codex-app-server.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Enable and start the Telegram bridge
+  ansible.builtin.systemd_service:
+    name: homelab-assistant.service
+    enabled: true
+    state: started
+    daemon_reload: true

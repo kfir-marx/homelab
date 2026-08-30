@@ -236,7 +236,8 @@ path. Both exports must be mountable from the Talos nodes.
 | `media-state-pv` | `local-media-state` | `gpu-3:/var/mnt/media-state` | 45 Gi | **Local state** — SQLite/config; encrypted backups required |
 | `media-backups-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/media/backups` | 20 Gi | **Critical** — encrypted media-stack state archives |
 | `job-assistant-*-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/job-assistant/*` | 1–20 Gi each | **Critical** — personal job history, PostgreSQL, CV artifacts, backups, and encrypted Codex credential state |
-| `homelab-assistant-postgres-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/homelab-assistant/postgres` | 5 Gi | **Critical** — PostgreSQL-backed private Telegram sessions and immutable message provenance |
+| Workstation assistant bridge state | host filesystem | `ubuntu-workstation:/mnt/storage2-bulk/homelab-assistant/sessions` | bounded by critical tier | **Critical** — selected Codex thread IDs, opaque callback nonces, sanitized audit metadata, and retained legacy session migration artifacts; Codex transcript history remains in the user's normal `~/.codex` store |
+| `homelab-assistant-postgres-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/homelab-assistant/postgres` | 5 Gi | **Retained recovery** — inactive legacy PostgreSQL binding preserved through migration and rollback |
 | `external-ai-*-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/external-ai/*` | 1–5 Gi | **Critical** — durable external job queue and retained ChatGPT-managed Codex authentication |
 
 Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests. On the NTFS-backed bulk tier, Ansible also exports each PV child path explicitly with its own stable `fsid`; Talos mounts those child paths directly, and the parent NTFS export alone does not reliably serve a fresh child-path mount after an NFS restart.
@@ -263,6 +264,18 @@ appropriate only for replaceable caches and temporary work. It is unavailable
 while Windows owns `largegpu`, and loss or return of that borrowed host destroys
 the data. Talos VM `402` is backed up at the VM level for fast node recovery,
 while its separately attached scratch disk remains excluded and disposable.
+
+The homelab Telegram client is deliberately outside Kubernetes on the permanent
+Ubuntu workstation. A host systemd unit runs Codex App Server as the normal
+`kfir` user with `HOME=/home/kfir` and the homelab repository cwd. A separate,
+locked bridge container reaches it only through a group-protected Unix socket;
+the container cannot read Codex authentication or the workstation home. This
+reuses the normal CLI/VS Code thread store, configuration, tools, MCPs, skills,
+plugins, and repository instructions instead of creating a parallel provider
+or transcript model. Argo CD owns only the deterministic switcher identity and
+the inactive Retained PostgreSQL recovery binding. A forced-command SSH
+actuator on `largegpu` exposes three hardcoded operations for the 402/502 mutex;
+the switching path remains outside Codex and model text can never invoke it.
 
 `largegpu-hdd` stores the monthly Proxmox backup of durable Windows template VM
 `101`, with one retained copy, plus the two most recent weekly VM 502 staging

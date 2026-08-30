@@ -3,28 +3,25 @@
 ## Boundaries and data flow
 
 ```text
-Telegram -> homelab-assistant gateway -> authenticated job API
-                                      -> local vLLM (general chat)
+Telegram -> homelab-assistant -> local Codex App Server (general Codex work)
 job API/worker -> PostgreSQL, artifacts, SMTP
 restricted generation broker -> authenticated external-ai -> serialized Codex worker
-job outbox <- gateway lease/send/ack
 ```
 
-The gateway owns Telegram authorization, private-chat enforcement, polling,
-file download, callback namespacing, and transport delivery. Job-assistant owns
-the job state machines and all domain validation. External-ai owns model alias
-validation, ChatGPT authentication, queueing, Codex execution, and sanitized
-execution metadata.
+The revised homelab-assistant no longer routes `/job_*` commands, job documents,
+or the job outbox: application-owned Telegram commands are restricted to `/tg`
+and `/ops`. Job-assistant still owns its job state machines and domain
+validation, while external-ai owns model alias validation, ChatGPT
+authentication, queueing, Codex execution, and sanitized execution metadata.
+A future Telegram job surface must use a separate bot or an explicitly designed
+`/tg` subtree; it must not reclaim root Codex slash commands.
 
 ## Reliability and trust
 
-- Telegram updates remain deduplicated by update ID.
 - Work items, outbox events, and broker submissions use unique idempotency keys.
 - Generation runs persist the external job ID before workflow continuation.
-- A pending job conversation takes precedence over general chat; unrelated text
-  is never consumed by job-assistant.
-- Files are bounded and downloaded only by the gateway, then validated and
-  stored by job-assistant.
+- Any future transport must deduplicate Telegram updates and bound files before
+  handing them to job-assistant.
 - Generated output must match the required JSON Schema and cite only known
   career-inventory identifiers.
 - Recruiter delivery and application submission remain separate state machines

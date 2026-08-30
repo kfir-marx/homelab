@@ -1,0 +1,5 @@
+---
+homelab_vm_actuator_enabled: false
+homelab_vm_actuator_user: homelab-actuator
+homelab_vm_actuator_management_source: 192.168.1.105
+homelab_vm_actuator_authorized_key: ""

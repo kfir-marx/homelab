@@ -7,9 +7,18 @@ on:
       - "services/homelab-assistant/**"
       - "kubernetes/apps/homelab-assistant.yaml"
       - "kubernetes/system/homelab-assistant/**"
+      - "ansible/roles/homelab_assistant/**"
+      - "ansible/roles/homelab_vm_actuator/**"
+      - "ansible/inventory/production/host_vars/ubuntu-workstation.yml"
+      - "ansible/inventory/production/host_vars/largegpu.yml"
+      - "ansible/inventory/production/group_vars/all.yml"
+      - "ansible/playbooks/configure-ubuntu-workstation.yml"
+      - "ansible/playbooks/configure-proxmox.yml"
       - "kubernetes/system/cloudflared/network-policy.yaml"
       - "kubernetes/system/media/network-policy.yaml"
       - "kubernetes/system/workload-priorities/priority-classes.yaml"
+      - "kubernetes/system/job-assistant/network-policy.yaml"
+      - "kubernetes/system/external-ai/network-policy.yaml"
       - "docs/homelab-assistant-runbook.md"
       - "docs/media-stack-runbook.md"
       - "docs/network-policies.md"
@@ -21,9 +30,18 @@ on:
       - "services/homelab-assistant/**"
       - "kubernetes/apps/homelab-assistant.yaml"
       - "kubernetes/system/homelab-assistant/**"
+      - "ansible/roles/homelab_assistant/**"
+      - "ansible/roles/homelab_vm_actuator/**"
+      - "ansible/inventory/production/host_vars/ubuntu-workstation.yml"
+      - "ansible/inventory/production/host_vars/largegpu.yml"
+      - "ansible/inventory/production/group_vars/all.yml"
+      - "ansible/playbooks/configure-ubuntu-workstation.yml"
+      - "ansible/playbooks/configure-proxmox.yml"
       - "kubernetes/system/cloudflared/network-policy.yaml"
       - "kubernetes/system/media/network-policy.yaml"
       - "kubernetes/system/workload-priorities/priority-classes.yaml"
+      - "kubernetes/system/job-assistant/network-policy.yaml"
+      - "kubernetes/system/external-ai/network-policy.yaml"
       - "docs/homelab-assistant-runbook.md"
       - "docs/media-stack-runbook.md"
       - "docs/network-policies.md"
@@ -91,9 +109,15 @@ jobs:
         working-directory: services/homelab-assistant
         run: uv sync --locked --extra dev
       - name: Ruff format
-        run: uv run --directory services/homelab-assistant --locked --extra dev ruff format --check .
+        run: >-
+          uv run --directory services/homelab-assistant --locked --extra dev ruff format --check .
+          ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator
+          ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator-dispatch
       - name: Ruff lint
-        run: uv run --directory services/homelab-assistant --locked --extra dev ruff check .
+        run: >-
+          uv run --directory services/homelab-assistant --locked --extra dev ruff check .
+          ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator
+          ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator-dispatch
       - name: Mypy
         run: uv run --directory services/homelab-assistant --locked --extra dev mypy src tests
       - name: Tests
@@ -134,15 +158,31 @@ jobs:
             kubernetes/apps/homelab-assistant.yaml \
             kubernetes/system/cloudflared \
             kubernetes/system/workload-priorities/priority-classes.yaml \
+            kubernetes/system/job-assistant/network-policy.yaml \
+            kubernetes/system/external-ai/network-policy.yaml \
             /tmp/media.yaml
+
+  ansible:
+    name: "Ansible syntax"
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Ansible Core
+        run: python -m pip install "ansible-core>=2.16,<2.20"
+      - name: Validate affected playbooks
+        working-directory: ansible
+        run: |
+          ansible-playbook playbooks/configure-ubuntu-workstation.yml --syntax-check
+          ansible-playbook playbooks/configure-proxmox.yml --syntax-check
 
   container:
     name: "Build and publish container"
     if: >-
       needs.python.result == 'success' &&
       needs.manifests.result == 'success' &&
+      needs.ansible.result == 'success' &&
       (github.event_name == 'pull_request' || needs.changes.outputs.release == 'true')
-    needs: [changes, python, manifests]
+    needs: [changes, python, manifests, ansible]
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -184,16 +224,16 @@ jobs:
         env:
           IMAGE_TAG: sha-${{ github.sha }}
         run: |
-          manifest=kubernetes/system/homelab-assistant/telegram.yaml
-          grep --quiet "image: ${IMAGE_NAME}:" "${manifest}"
+          manifest=ansible/inventory/production/host_vars/ubuntu-workstation.yml
+          grep --quiet "homelab_assistant_image: ${IMAGE_NAME}:" "${manifest}"
           sed --in-place --regexp-extended \
-            "s|(image: ${IMAGE_NAME}:)[^[:space:]]+|\\1${IMAGE_TAG}|" "${manifest}"
-          grep --quiet "image: ${IMAGE_NAME}:${IMAGE_TAG}" "${manifest}"
+            "s|(homelab_assistant_image: ${IMAGE_NAME}:)[^[:space:]]+|\\1${IMAGE_TAG}|" "${manifest}"
+          grep --quiet "homelab_assistant_image: ${IMAGE_NAME}:${IMAGE_TAG}" "${manifest}"
       - name: Create or update the release PR
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          add-paths: kubernetes/system/homelab-assistant/telegram.yaml
+          add-paths: ansible/inventory/production/host_vars/ubuntu-workstation.yml
           branch: automation/homelab-assistant-image
           base: main
           delete-branch: true
