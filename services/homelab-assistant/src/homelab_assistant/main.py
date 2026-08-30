@@ -18,6 +18,20 @@ from .switching import KubernetesSwitcher, SwitchCoordinator
 LOG = logging.getLogger("homelab_assistant")
 
 
+class TelegramIdentityConfigurationError(RuntimeError):
+    """Fail closed when the allowed private identity is the bot itself."""
+
+
+def validate_telegram_identity(settings: Settings, bot_id: int) -> None:
+    if bot_id in {
+        settings.telegram_allowed_user_id,
+        settings.telegram_allowed_chat_id,
+    }:
+        raise TelegramIdentityConfigurationError(
+            "Telegram allowed identity targets the bot account"
+        )
+
+
 class TelegramProgress:
     """Bound progress edits so App Server fragments do not flood Telegram."""
 
@@ -83,7 +97,7 @@ def run(settings: Settings) -> None:
     )
     active: set[Future[None]] = set()
     offset: int | None = None
-    LOG.info("starting exact-identity private Telegram long polling in locked state")
+    identity_validated = False
 
     def handle(update: dict[str, object]) -> None:
         message = update.get("message")
@@ -107,17 +121,24 @@ def run(settings: Settings) -> None:
                 telegram.answer_callback(str(callback["id"]))
             for reply in replies:
                 telegram.send_message(reply.chat_id, reply.text, reply.buttons)
+        except httpx.HTTPError, ValueError:
+            # Telegram embeds the bot token in request URLs. Never log exception strings.
+            LOG.warning("Telegram outbound delivery failed")
         except Exception:  # keep token-bearing transport exceptions out of logs
             LOG.warning("Telegram update worker failed")
             try:
                 telegram.send_message(
                     chat_id, "The Telegram bridge could not complete the request."
                 )
-            except httpx.HTTPError:
-                pass
+            except httpx.HTTPError, ValueError:
+                LOG.warning("Telegram error reply delivery failed")
 
     while True:
         try:
+            if not identity_validated:
+                validate_telegram_identity(settings, telegram.get_me_id())
+                identity_validated = True
+                LOG.info("starting exact-identity private Telegram long polling in locked state")
             active = {future for future in active if not future.done()}
             updates = telegram.get_updates(offset)
             for update in updates:
@@ -125,6 +146,9 @@ def run(settings: Settings) -> None:
                 if isinstance(update_id, int):
                     offset = update_id + 1
                 active.add(executor.submit(handle, update))
+        except TelegramIdentityConfigurationError:
+            LOG.error("Telegram identity configuration is invalid; refusing to poll")
+            raise
         except httpx.HTTPError, ValueError:
             # Telegram embeds the bot token in request URLs. Never log exception strings.
             LOG.warning("Telegram polling failed; retrying")

@@ -69,6 +69,22 @@ The bridge accepts only the configured numeric Telegram user ID and numeric
 private-chat ID. Groups, channels, mismatched callback actors, and forwarded
 contexts are ignored before routing.
 
+For a direct private chat, the allowed user ID and chat ID are the same
+administrator ID. They are not the bot ID returned by Telegram `getMe`.
+Deployment resolves `getMe` without logging the token or IDs and refuses a
+self-targeting configuration. The bridge also records only non-sensitive
+rejection reason classes (actor mismatch, chat mismatch, non-private chat, or
+forwarded context) and never logs the rejected IDs or message text.
+
+The Telegram token or private identity can be rotated without supplying or
+rewriting the deterministic switching credentials:
+
+```bash
+cd ansible
+ansible-playbook playbooks/configure-ubuntu-workstation.yml \
+  --limit ubuntu-workstation --tags telegram-identity --ask-become-pass
+```
+
 ## Codex status and streaming
 
 `/status` combines sanitized values from `thread/read`, cached

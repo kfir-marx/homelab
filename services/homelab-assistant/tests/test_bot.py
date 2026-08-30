@@ -172,6 +172,19 @@ def test_exact_private_identity_and_forwarded_context_are_rejected(tmp_path: Pat
     assert bot.process(callback(nonce, chat_id=999)) == []
 
 
+def test_identity_rejections_log_only_safe_reason_classes(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    bot, _ = make_bot(tmp_path)
+    caplog.set_level(logging.WARNING)
+
+    assert bot.process(update("/tg help", user_id=999)) == []
+    assert "actor identity mismatch" in caplog.text
+    assert "999" not in caplog.text
+    assert "123" not in caplog.text
+    assert "456" not in caplog.text
+
+
 def test_tg_current_routes_to_transport_control(tmp_path: Path) -> None:
     bot, fake = make_bot(tmp_path)
     bot.state.select_thread(123, "thr-vscode")

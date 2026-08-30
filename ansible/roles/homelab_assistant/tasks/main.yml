@@ -1,11 +1,22 @@
 ---
-- name: Validate homelab assistant deployment inputs
+- name: Validate homelab assistant Telegram deployment inputs
   ansible.builtin.assert:
     that:
-      - homelab_assistant_image is match('^ghcr.io/kfir-marx/homelab-assistant:sha-[0-9a-f]{40}$')
       - homelab_assistant_telegram_token | length > 20
       - homelab_assistant_telegram_allowed_user_id is match('^[0-9]+$')
       - homelab_assistant_telegram_allowed_chat_id is match('^[0-9]+$')
+      - homelab_assistant_telegram_allowed_user_id == homelab_assistant_telegram_allowed_chat_id
+    fail_msg: >-
+      Supply the bot token and exact administrator private-chat identity
+      through the controller environment.
+  no_log: true
+  tags:
+    - telegram-identity
+
+- name: Validate remaining homelab assistant deployment inputs
+  ansible.builtin.assert:
+    that:
+      - homelab_assistant_image is match('^ghcr.io/kfir-marx/homelab-assistant:sha-[0-9a-f]{40}$')
       - homelab_assistant_kubernetes_switch_token | length > 10
       - homelab_assistant_kubernetes_ca_source | length > 0
       - homelab_assistant_actuator_identity_source | length > 0
@@ -15,6 +26,31 @@
       Supply exact Telegram identity and the switching credentials through the
       controller environment; no Codex authentication belongs in this role.
   no_log: true
+
+- name: Resolve the configured Telegram bot identity
+  ansible.builtin.uri:
+    url: "https://api.telegram.org/bot{{ homelab_assistant_telegram_token }}/getMe"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: homelab_assistant_telegram_get_me
+  check_mode: false
+  no_log: true
+  tags:
+    - telegram-identity
+
+- name: Reject the bot account as the allowed private-chat identity
+  ansible.builtin.assert:
+    that:
+      - homelab_assistant_telegram_get_me.json.ok | default(false) | bool
+      - homelab_assistant_telegram_get_me.json.result.id | string != homelab_assistant_telegram_allowed_user_id
+      - homelab_assistant_telegram_get_me.json.result.id | string != homelab_assistant_telegram_allowed_chat_id
+    fail_msg: >-
+      The allowed Telegram user/chat identity must be the administrator's
+      private-chat ID, not the bot identity returned by getMe.
+  no_log: true
+  tags:
+    - telegram-identity
 
 - name: Check the workstation Codex binary
   ansible.builtin.stat:
@@ -127,6 +163,8 @@
       HOMELAB_ASSISTANT_TELEGRAM_ALLOWED_CHAT_ID={{ homelab_assistant_telegram_allowed_chat_id }}
   no_log: true
   notify: Restart homelab assistant
+  tags:
+    - telegram-identity
 
 - name: Install the non-secret bridge runtime environment
   ansible.builtin.copy:

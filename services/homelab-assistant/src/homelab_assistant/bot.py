@@ -144,13 +144,16 @@ class AssistantBot:
         if chat is None and isinstance(message, dict):
             chat = message.get("chat")
         if not isinstance(actor, dict) or not isinstance(chat, dict):
+            LOG.warning("rejected Telegram update: missing actor or chat identity")
             return None
         if actor.get("id") != self.settings.telegram_allowed_user_id:
+            LOG.warning("rejected Telegram update: actor identity mismatch")
             return None
-        if (
-            chat.get("id") != self.settings.telegram_allowed_chat_id
-            or chat.get("type") != "private"
-        ):
+        if chat.get("id") != self.settings.telegram_allowed_chat_id:
+            LOG.warning("rejected Telegram update: chat identity mismatch")
+            return None
+        if chat.get("type") != "private":
+            LOG.warning("rejected Telegram update: non-private chat")
             return None
         if isinstance(message, dict) and any(
             key in message
@@ -161,6 +164,7 @@ class AssistantBot:
                 "is_automatic_forward",
             )
         ):
+            LOG.warning("rejected Telegram update: forwarded context")
             return None
         return int(actor["id"]), int(chat["id"]), message if isinstance(message, dict) else {}
 

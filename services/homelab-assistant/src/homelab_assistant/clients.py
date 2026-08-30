@@ -14,6 +14,14 @@ class TelegramClient:
             base_url=f"https://api.telegram.org/bot{token}", timeout=timeout
         )
 
+    def get_me_id(self) -> int:
+        response = self._client.get("/getMe")
+        response.raise_for_status()
+        bot_id = response.json().get("result", {}).get("id")
+        if not isinstance(bot_id, int):
+            raise ValueError("Telegram getMe returned no numeric bot identity")
+        return bot_id
+
     def get_updates(self, offset: int | None) -> list[dict[str, Any]]:
         response = self._client.get(
             "/getUpdates",
