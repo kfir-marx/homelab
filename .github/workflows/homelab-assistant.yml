@@ -115,6 +115,7 @@ jobs:
           uv run --directory services/homelab-assistant --locked --extra dev ruff format --check .
           uv run --directory services/homelab-assistant --locked --extra dev ruff format \
             --check --target-version py313 \
+            ../../ansible/roles/homelab_assistant/files/homelab-codex-socket-proxy.py \
             ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator \
             ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator-dispatch
       - name: Ruff lint
@@ -122,6 +123,7 @@ jobs:
           uv run --directory services/homelab-assistant --locked --extra dev ruff check .
           uv run --directory services/homelab-assistant --locked --extra dev ruff check \
             --target-version py313 \
+            ../../ansible/roles/homelab_assistant/files/homelab-codex-socket-proxy.py \
             ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator \
             ../../ansible/roles/homelab_vm_actuator/files/homelab-vm-actuator-dispatch
       - name: Check Proxmox Python compatibility

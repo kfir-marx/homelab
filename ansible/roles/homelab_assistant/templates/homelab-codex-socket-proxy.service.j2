@@ -1,0 +1,25 @@
+[Unit]
+Description=Authenticated Unix socket proxy for the local Codex App Server
+After=homelab-codex-app-server.service
+Requires=homelab-codex-app-server.service
+
+[Service]
+Type=simple
+User={{ homelab_assistant_workstation_user }}
+Group={{ homelab_assistant_workstation_user }}
+SupplementaryGroups={{ homelab_assistant_user }}
+ExecStartPre=+/usr/bin/install -d -o {{ homelab_assistant_workstation_user }} -g {{ homelab_assistant_user }} -m 2770 {{ homelab_assistant_codex_socket_directory }}
+ExecStartPre=-/usr/bin/rm -f {{ homelab_assistant_codex_socket_path }}
+ExecStart=/usr/bin/python3 /usr/local/libexec/homelab-codex-socket-proxy --listen-socket {{ homelab_assistant_codex_socket_path }} --upstream-host {{ homelab_assistant_codex_websocket_host }} --upstream-port {{ homelab_assistant_codex_websocket_port }} --token-file {{ homelab_assistant_codex_websocket_token_path }} --socket-group {{ homelab_assistant_user }}
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths={{ homelab_assistant_codex_websocket_token_path }}
+
+[Install]
+WantedBy=multi-user.target

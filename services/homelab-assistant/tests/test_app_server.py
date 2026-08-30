@@ -15,6 +15,8 @@ class FakeRpc:
         self.calls.append((method, params))
         if method == "thread/read":
             return {"thread": {"id": "thr-1", "status": {"type": "notLoaded"}}}
+        if method == "thread/start":
+            return {"thread": {"id": "thr-new", "status": {"type": "idle"}}}
         if method == "thread/resume":
             return {"thread": {"id": "thr-1", "status": {"type": "idle"}}}
         if method == "thread/compact/start":
@@ -72,6 +74,19 @@ def test_turn_uses_never_approval_and_danger_full_access() -> None:
     assert turn_call[1] is not None
     assert turn_call[1]["approvalPolicy"] == "never"
     assert turn_call[1]["sandboxPolicy"] == {"type": "dangerFullAccess"}
+
+
+def test_thread_start_and_resume_use_current_sandbox_mode_spelling() -> None:
+    rpc = FakeRpc()
+    codex = CodexAppServer(rpc, "/home/kfir/repos/homelab")
+
+    codex.start_thread()
+    codex.resume_thread("thr-1")
+
+    start = next(params for method, params in rpc.calls if method == "thread/start")
+    resume = next(params for method, params in rpc.calls if method == "thread/resume")
+    assert start is not None and start["sandbox"] == "danger-full-access"
+    assert resume is not None and resume["sandbox"] == "danger-full-access"
 
 
 def test_output_redaction_removes_secret_assignments_and_private_keys() -> None:

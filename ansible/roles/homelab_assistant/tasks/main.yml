@@ -16,7 +16,6 @@
 - name: Validate remaining homelab assistant deployment inputs
   ansible.builtin.assert:
     that:
-      - homelab_assistant_image is match('^ghcr.io/kfir-marx/homelab-assistant:sha-[0-9a-f]{40}$')
       - homelab_assistant_kubernetes_switch_token | length > 10
       - homelab_assistant_kubernetes_ca_source | length > 0
       - homelab_assistant_actuator_identity_source | length > 0
@@ -26,6 +25,14 @@
       Supply exact Telegram identity and the switching credentials through the
       controller environment; no Codex authentication belongs in this role.
   no_log: true
+
+- name: Validate the immutable homelab assistant image pin
+  ansible.builtin.assert:
+    that:
+      - homelab_assistant_image is match('^ghcr.io/kfir-marx/homelab-assistant:sha-[0-9a-f]{40}$')
+    fail_msg: Supply the tested immutable GHCR image tag.
+  tags:
+    - assistant-image
 
 - name: Resolve the configured Telegram bot identity
   ansible.builtin.uri:
@@ -51,6 +58,19 @@
   no_log: true
   tags:
     - telegram-identity
+
+- name: Validate the authenticated Codex transport inputs
+  ansible.builtin.assert:
+    that:
+      - homelab_assistant_codex_websocket_host == '127.0.0.1'
+      - homelab_assistant_codex_websocket_port | int >= 1024
+      - homelab_assistant_codex_websocket_port | int <= 65535
+      - homelab_assistant_codex_websocket_token_path is match('^/etc/homelab-assistant/credentials/[A-Za-z0-9._-]+$')
+    fail_msg: >-
+      Codex must use an authenticated loopback WebSocket behind the
+      group-protected Unix socket proxy.
+  tags:
+    - codex-transport
 
 - name: Check the workstation Codex binary
   ansible.builtin.stat:
@@ -114,6 +134,35 @@
       owner: "{{ homelab_assistant_uid }}"
       group: "{{ homelab_assistant_uid }}"
       mode: "0700"
+
+- name: Generate the local Codex WebSocket capability token once
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/openssl
+      - rand
+      - -hex
+      - -out
+      - "{{ homelab_assistant_codex_websocket_token_path }}"
+      - "32"
+    creates: "{{ homelab_assistant_codex_websocket_token_path }}"
+  no_log: true
+  notify:
+    - Restart homelab Codex app server
+    - Restart homelab Codex socket proxy
+    - Restart homelab assistant
+  tags:
+    - codex-transport
+
+- name: Protect the local Codex WebSocket capability token
+  ansible.builtin.file:
+    path: "{{ homelab_assistant_codex_websocket_token_path }}"
+    state: file
+    owner: root
+    group: "{{ homelab_assistant_user }}"
+    mode: "0640"
+  no_log: true
+  tags:
+    - codex-transport
 
 - name: Install narrow credential files
   ansible.builtin.copy:
@@ -188,6 +237,8 @@
   changed_when: false
   failed_when: homelab_assistant_image_present.rc not in [0, 1]
   when: not ansible_check_mode
+  tags:
+    - assistant-image
 
 - name: Pull the immutable assistant image
   ansible.builtin.command: "/usr/bin/podman pull {{ homelab_assistant_image }}"
@@ -195,6 +246,21 @@
     - not ansible_check_mode
     - homelab_assistant_image_present.rc == 1
   changed_when: true
+  tags:
+    - assistant-image
+
+- name: Install the authenticated Codex Unix socket proxy
+  ansible.builtin.copy:
+    src: homelab-codex-socket-proxy.py
+    dest: /usr/local/libexec/homelab-codex-socket-proxy
+    owner: root
+    group: root
+    mode: "0755"
+  notify:
+    - Restart homelab Codex socket proxy
+    - Restart homelab assistant
+  tags:
+    - codex-transport
 
 - name: Install the Codex App Server systemd unit
   ansible.builtin.template:
@@ -206,7 +272,24 @@
   notify:
     - Reload systemd
     - Restart homelab Codex app server
+    - Restart homelab Codex socket proxy
     - Restart homelab assistant
+  tags:
+    - codex-transport
+
+- name: Install the authenticated Codex Unix socket proxy unit
+  ansible.builtin.template:
+    src: homelab-codex-socket-proxy.service.j2
+    dest: /etc/systemd/system/homelab-codex-socket-proxy.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart homelab Codex socket proxy
+    - Restart homelab assistant
+  tags:
+    - codex-transport
 
 - name: Install the Telegram bridge systemd unit
   ansible.builtin.template:
@@ -218,6 +301,9 @@
   notify:
     - Reload systemd
     - Restart homelab assistant
+  tags:
+    - codex-transport
+    - assistant-image
 
 - name: Enable and start Codex App Server
   ansible.builtin.systemd_service:
@@ -227,6 +313,16 @@
     daemon_reload: true
   when: not ansible_check_mode
 
+- name: Enable and start the authenticated Codex Unix socket proxy
+  ansible.builtin.systemd_service:
+    name: homelab-codex-socket-proxy.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+  tags:
+    - codex-transport
+
 - name: Enable and start the Telegram bridge
   ansible.builtin.systemd_service:
     name: homelab-assistant.service
@@ -234,3 +330,5 @@
     state: started
     daemon_reload: true
   when: not ansible_check_mode
+  tags:
+    - assistant-image

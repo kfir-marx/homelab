@@ -13,13 +13,18 @@ The runtime path is:
 Telegram private chat
   -> homelab-assistant container (UID 10001, locked after every restart)
   -> /run/homelab-codex/app-server.sock
+  -> authenticated loopback WebSocket proxy
   -> codex app-server (user kfir, HOME=/home/kfir)
   -> /home/kfir/repos/homelab and the user's existing ~/.codex
 ```
 
-App Server has no TCP listener. Its WebSocket protocol is carried over the Unix
-socket. The socket directory is `0770`, App Server uses umask `0007`, and the
-bridge receives that directory as a read-only bind mount. The bridge does not
+App Server binds only an authenticated WebSocket on `127.0.0.1`. A host proxy
+accepts WebSocket clients on the group-protected Unix socket, injects a
+host-generated capability token, and relays opaque WebSocket frames to Codex.
+The token is readable only by the two host services and is never passed through
+Telegram or stored in the repository. The socket directory is
+`2770 kfir:homelab-assistant`, the socket is `0660 kfir:homelab-assistant`, and
+the bridge receives it as a read-only bind mount. The bridge does not
 mount `/home/kfir`, `~/.codex`, `.env`, kubeconfig, or workstation SSH config.
 Codex accesses those files only in its host process when an authorized task
 genuinely needs them.
@@ -83,6 +88,24 @@ rewriting the deterministic switching credentials:
 cd ansible
 ansible-playbook playbooks/configure-ubuntu-workstation.yml \
   --limit ubuntu-workstation --tags telegram-identity --ask-become-pass
+```
+
+If Codex is running but the bridge reports that App Server is unavailable,
+repair only the authenticated Unix-to-loopback transport with:
+
+```bash
+cd ansible
+ansible-playbook playbooks/configure-ubuntu-workstation.yml \
+  --limit ubuntu-workstation --tags codex-transport --ask-become-pass
+```
+
+After CI publishes and the release pin is merged, deploy only a new immutable
+bridge image with:
+
+```bash
+cd ansible
+ansible-playbook playbooks/configure-ubuntu-workstation.yml \
+  --limit ubuntu-workstation --tags assistant-image --ask-become-pass
 ```
 
 ## Codex status and streaming

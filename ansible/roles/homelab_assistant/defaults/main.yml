@@ -10,6 +10,9 @@ homelab_assistant_codex_binary: /home/kfir/.local/bin/codex
 homelab_assistant_codex_cwd: /home/kfir/repos/homelab
 homelab_assistant_codex_socket_directory: /run/homelab-codex
 homelab_assistant_codex_socket_path: /run/homelab-codex/app-server.sock
+homelab_assistant_codex_websocket_host: 127.0.0.1
+homelab_assistant_codex_websocket_port: 8765
+homelab_assistant_codex_websocket_token_path: /etc/homelab-assistant/credentials/codex-ws-token
 homelab_assistant_administrator_lease_seconds: 900
 homelab_assistant_callback_ttl_seconds: 120
 homelab_assistant_kubernetes_api_url: https://192.168.1.211:6443

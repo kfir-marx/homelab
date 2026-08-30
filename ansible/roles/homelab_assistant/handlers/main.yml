@@ -10,6 +10,12 @@
     state: restarted
   when: not ansible_check_mode
 
+- name: Restart homelab Codex socket proxy
+  ansible.builtin.systemd_service:
+    name: homelab-codex-socket-proxy.service
+    state: restarted
+  when: not ansible_check_mode
+
 - name: Restart homelab assistant
   ansible.builtin.systemd_service:
     name: homelab-assistant.service

@@ -243,7 +243,7 @@ class CodexAppServer:
             {
                 "cwd": self.cwd,
                 "approvalPolicy": "never",
-                "sandbox": "dangerFullAccess",
+                "sandbox": "danger-full-access",
                 "serviceName": "homelab_assistant",
             },
         )
@@ -260,7 +260,7 @@ class CodexAppServer:
             "threadId": thread_id,
             "cwd": self.cwd,
             "approvalPolicy": "never",
-            "sandbox": "dangerFullAccess",
+            "sandbox": "danger-full-access",
         }
         if model:
             params["model"] = model

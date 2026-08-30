@@ -1,8 +1,9 @@
 [Unit]
 Description=Private Telegram client for local Codex App Server
-After=network-online.target homelab-codex-app-server.service
+After=network-online.target homelab-codex-app-server.service homelab-codex-socket-proxy.service
 Wants=network-online.target
 Requires=homelab-codex-app-server.service
+Requires=homelab-codex-socket-proxy.service
 RequiresMountsFor={{ homelab_assistant_data_directory }}
 
 [Service]
