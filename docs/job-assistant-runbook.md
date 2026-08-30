@@ -2,15 +2,23 @@
 
 ## Current runtime boundary
 
+This runbook describes the currently deployed service runtime. The internal
+Telegram adapter is present, but no bot currently calls it. The private
+homelab-assistant bot does not route job commands. The accepted target is the
+dedicated, friend-shareable bot in
+[`job-assistant-architecture.md`](job-assistant-architecture.md). Do not admit
+friends or add a job bot token to the existing pods until its per-user ownership
+and migration gates are implemented.
+
 Job-assistant owns job discovery, truthful prompt construction, career fact
 validation, workflow state, artifacts, delivery approval, SMTP delivery, and
 audit events. It does not poll Telegram, call Telegram, install Codex, mount
 `auth.json`, or authenticate to ChatGPT.
 
-The shared homelab-assistant gateway calls the authenticated internal API. Its
-typed replies contain text and unprefixed callback actions; the gateway adds
-the `job:` namespace. Async Telegram replies remain in the database outbox
-until the gateway leases, sends, and acknowledges them.
+The authenticated internal API retains typed Telegram update, file, pending
+conversation, and notification lease/ack contracts for the future dedicated
+gateway. Async Telegram replies remain in the database outbox; without a
+gateway they are not delivered.
 
 The worker submits generation with a requester-scoped idempotency key to
 external-ai, records `external_job_id`, waits for the durable result, validates
@@ -37,12 +45,15 @@ The legacy `/mnt/storage2-bulk/job-assistant/codex-home` PV/PVC and
 intentionally retained but have no runtime consumer. Remove them only after a
 verified external-ai cutover and an explicit operator decision.
 
-## Operate from Telegram
+## Dedicated bot acceptance workflow
 
-Use a private chat with the shared homelab-assistant bot from an allowlisted
-Telegram account. Group chats and non-allowlisted users are ignored. Job
-commands have the `/job_` prefix; `/help` is the general assistant help, while
-`/job_help` is the job workflow help.
+This section becomes operational only after the dedicated gateway and the
+per-user ownership gates in the architecture are deployed. Until then there is
+no supported Telegram interface for job-assistant.
+
+Use a private chat with the dedicated job-assistant bot from an admitted
+Telegram account. Group chats and non-members are ignored. Job commands retain
+the `/job_` prefix during migration; `/job_help` is the job workflow help.
 
 ### Safe first test
 
@@ -168,21 +179,14 @@ The workflow `.github/workflows/job-assistant.yml` builds and pins the same
 image for API, delivery worker, generation broker, migration, discovery, and
 backup roles. The runtime image must not contain a `codex` binary.
 
-## Staged cutover
+## Dedicated bot rollout
 
-1. Deploy and authenticate external-ai without changing job-assistant.
-2. Add job-assistant's external-ai token and run database migration `0002`.
-3. Release the broker-backed job-assistant image and verify an idempotent test
-   generation through the internal workflow.
-4. Add gateway routing and verify `/job_help`, callbacks, pending conversations,
-   documents, and async notification acknowledgment.
-5. Stop and prune the job-assistant Telegram and Codex-generation Deployments.
-6. Verify no job-assistant pod has `TELEGRAM_TOKEN`, `CODEX_HOME`, `auth.json`,
-   Codex/OpenAI egress, or direct Telegram egress.
-7. Revoke the old separate bot token after confirming the shared bot receives
-   all intended commands.
-8. Retain old Codex recovery material until the new authentication has survived
-   refresh, restart, and one operator-approved recovery exercise.
+Follow the migration gates in
+[`job-assistant-architecture.md`](job-assistant-architecture.md). In particular,
+do not deploy the gateway or add a friend until owner-scoped applications,
+profiles, files, callbacks, and tests are in place. The bot token belongs only
+to the new gateway; it must not be added to the API, workers, discovery job,
+external-ai, or the private homelab-assistant bridge.
 
 ## Troubleshooting
 
@@ -192,7 +196,9 @@ backup roles. The runtime image must not contain a `codex` binary.
   not add auth material back to job-assistant.
 - `usage_limit` or `timeout`: external-ai classifies and bounds retries; inspect
   sanitized job metadata and queue metrics, never prompt/result logs.
-- missing Telegram notification: inspect the durable outbox lease and gateway
-  health. Do not deliver directly from a worker.
+- missing Telegram notification after the dedicated gateway is deployed:
+  inspect the durable outbox lease and gateway health. Do not deliver directly
+  from a worker. Before that rollout, undelivered Telegram outbox rows are
+  expected because no gateway exists.
 - invalid claims/output: treat as terminal generation failure and repair the
   prompt/schema/inventory; never weaken fail-closed validation.
