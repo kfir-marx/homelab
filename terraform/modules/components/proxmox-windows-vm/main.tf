@@ -179,6 +179,15 @@ resource "proxmox_virtual_environment_vm" "this" {
   vm_id     = var.vm_id
   tags      = ["windows", "terraform"]
 
+  # The Windows service is installed from virtio-win.iso. Keeping the channel
+  # enabled allows Proxmox to query guest state and run scoped diagnostics
+  # without exposing a separate Windows management port.
+  agent {
+    enabled = true
+    trim    = false
+    type    = "virtio"
+  }
+
   # q35 + OVMF is required for both the GPU passthrough path AND for Windows 11
   # (Secure Boot, TPM). Use it unconditionally — there's no SeaBIOS branch here.
   machine = var.machine_type

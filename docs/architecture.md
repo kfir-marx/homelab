@@ -513,6 +513,7 @@ Creates the Windows 11 gaming VM in standalone or clone-provisioned mode (see "W
 - **vTPM 2.0:** Created via `tpm_state` block (Win11 hard requirement).
 - **Optional `cdrom` block (Windows ISO on `ide2`).** It is absent for the restored production VM. `virtio-win.iso` is attached manually on SATA for a fresh install.
 - **`boot_order`:** standalone production boots `scsi0`; a deliberate install boots `ide2` first; clone mode inherits its source order.
+- **QEMU guest agent:** The Proxmox virtio channel is enabled. Windows must have the agent service installed from `virtio-win.iso`; privileged diagnostics remain reachable through Proxmox without opening a separate Windows management port.
 - **USB passthrough:** Dynamic `usb` block — accepts either `VID:PID` (replug-safe) or `bus-port` (when two devices share a VID:PID).
 - **`on_boot = false`** — never auto-start; user toggles manually with `qm start/shutdown`.
 - **No `initialization` block** — Windows ignores nocloud cidata. DHCP is used; static IP would require Autounattend.xml.
