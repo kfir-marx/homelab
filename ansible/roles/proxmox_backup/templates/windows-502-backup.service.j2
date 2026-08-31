@@ -1,0 +1,12 @@
+[Unit]
+Description=Stage, transfer, and verify Windows VM 502 backup
+Documentation=file:///usr/share/doc/homelab/windows-vm-backup.md
+After=pve-cluster.service
+Wants=pve-cluster.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/windows-502-backup
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=infinity

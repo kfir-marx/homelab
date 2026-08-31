@@ -1,3 +1,19 @@
 ---
 proxmox_backup_jobs: []
 proxmox_backup_retired_job_ids: []
+proxmox_windows_backup_enabled: false
+proxmox_windows_backup_vmid: 502
+proxmox_windows_backup_peer_vmid: 402
+proxmox_windows_backup_schedule: "04:15"
+proxmox_windows_backup_staging_directory: /mnt/pve/largegpu-hdd/windows-502-staging
+proxmox_windows_backup_lock_file: /run/lock/windows-502-backup.lock
+proxmox_windows_backup_minimum_free_bytes: 751619276800
+proxmox_windows_backup_bandwidth_limit_kib: 65536
+proxmox_windows_backup_remote_inventory_host: smallgpu
+proxmox_windows_backup_remote_host: 192.168.1.106
+proxmox_windows_backup_remote_user: windows502backup
+proxmox_windows_backup_remote_directory: /mnt/data10tb/proxmox-backups/from-largegpu/windows-502
+proxmox_windows_backup_remote_keep_last: 2
+proxmox_windows_backup_identity_file: /root/.ssh/windows-502-backup-ed25519
+proxmox_windows_backup_known_hosts_file: /root/.ssh/windows-502-backup-known-hosts
+proxmox_windows_backup_remote_host_key: ""

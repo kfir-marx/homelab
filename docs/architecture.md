@@ -273,9 +273,17 @@ the inactive Retained PostgreSQL recovery binding. A forced-command SSH
 actuator on `largegpu` exposes three hardcoded operations for the 402/502 mutex;
 the switching path remains outside Codex and model text can never invoke it.
 
-The opposite-node `backup-on-smallgpu` storage holds the two newest nightly
-native archives of standalone Windows VM 502. Its dedicated job runs at 04:15.
-The snapshot job has no hook and never changes the power state of VM 502 or its
+Standalone Windows VM 502 uses a staged backup path so its 600 GiB-class
+archive never traverses an NFS client mount on `largegpu`. At 04:15, a systemd
+service writes snapshot-mode `vzdump` output to an isolated directory on
+`largegpu-hdd`, then transfers the completed archive over bandwidth-limited,
+restricted SSH/rsync to smallgpu's local NTFS filesystem. smallgpu verifies
+size, SHA-256, the compressed VMA stream, and readable configuration metadata
+before the source copy is deleted; only the two newest verified destination
+archives are retained. Failures preserve local completed output, and legacy
+emergency archives live outside both managed directories.
+
+The workflow has no hook and never changes the power state of VM 502 or its
 GPU-sharing peer 402. A running VM is backed up online; for a stopped VM,
 Proxmox's temporary backup-only QEMU process does not change configured power
 state or claim the passed-through GPU. General cross-node jobs protect the

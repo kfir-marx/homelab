@@ -1,0 +1,52 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+readonly DESTINATION={{ proxmox_windows_backup_remote_directory | quote }}
+readonly KEEP_LAST={{ proxmox_windows_backup_remote_keep_last | int }}
+
+case "${SSH_ORIGINAL_COMMAND:-}" in
+  rsync\ --server\ *)
+    exec /usr/bin/rrsync -wo "${DESTINATION}"
+    ;;
+  status)
+    printf 'ready\n'
+    ;;
+  verify\ *)
+    read -r action archive_name expected_size expected_sha256 extra <<<"${SSH_ORIGINAL_COMMAND}"
+    if [[ "${action}" != verify || -n "${extra:-}" ||
+          ! "${archive_name}" =~ ^vzdump-qemu-502-[0-9_:-]+\.vma\.zst$ ||
+          ! "${expected_size}" =~ ^[0-9]+$ ||
+          ! "${expected_sha256}" =~ ^[0-9a-f]{64}$ ]]; then
+      exit 64
+    fi
+
+    archive="${DESTINATION}/${archive_name}"
+    [[ -f "${archive}" ]]
+    [[ "$(stat -c %s -- "${archive}")" == "${expected_size}" ]]
+    [[ "$(nice -n 19 ionice -c 3 sha256sum -- "${archive}" | awk '{print $1}')" == "${expected_sha256}" ]]
+    nice -n 19 ionice -c 3 zstd -q -dc -- "${archive}" |
+      nice -n 19 ionice -c 3 vma verify -
+    metadata="$(nice -n 19 ionice -c 3 zstd -q -dc -- "${archive}" | vma config -)"
+    [[ "${metadata}" == *$'name:'* ]]
+
+    marker="${archive}.verified"
+    printf 'size=%s\nsha256=%s\nverified_utc=%s\n' \
+      "${expected_size}" "${expected_sha256}" "$(date -u +%FT%TZ)" >"${marker}.tmp"
+    mv -f -- "${marker}.tmp" "${marker}"
+
+    mapfile -t verified_markers < <(
+      find "${DESTINATION}" -maxdepth 1 -type f \
+        -name 'vzdump-qemu-502-*.vma.zst.verified' -printf '%f\n' | sort
+    )
+    while (( {% raw %}${#verified_markers[@]}{% endraw %} > KEEP_LAST )); do
+      oldest_marker="${verified_markers[0]}"
+      oldest_archive="${oldest_marker%.verified}"
+      [[ -f "${DESTINATION}/${oldest_archive}" ]]
+      rm -f -- "${DESTINATION}/${oldest_archive}" "${DESTINATION}/${oldest_marker}"
+      verified_markers=("${verified_markers[@]:1}")
+    done
+    ;;
+  *)
+    exit 64
+    ;;
+esac

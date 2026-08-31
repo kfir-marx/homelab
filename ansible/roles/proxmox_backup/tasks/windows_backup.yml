@@ -1,0 +1,175 @@
+---
+- name: Validate staged Windows backup declaration
+  ansible.builtin.assert:
+    that:
+      - proxmox_windows_backup_vmid | string is match('^[1-9][0-9]*$')
+      - proxmox_windows_backup_peer_vmid | string is match('^[1-9][0-9]*$')
+      - proxmox_windows_backup_vmid | int != proxmox_windows_backup_peer_vmid | int
+      - proxmox_windows_backup_staging_directory is match('^/mnt/pve/[^/]+/.+$')
+      - proxmox_windows_backup_remote_directory is match('^/mnt/[^/]+/.+$')
+      - proxmox_windows_backup_minimum_free_bytes | int >= 681826058240
+      - proxmox_windows_backup_bandwidth_limit_kib | int > 0
+      - proxmox_windows_backup_remote_keep_last | int >= 2
+      - proxmox_windows_backup_remote_host_key is match('^[^ ]+ ssh-ed25519 [A-Za-z0-9+/=]+$')
+    fail_msg: Staged Windows backup settings are incomplete or unsafe.
+
+- name: Ensure backup transfer packages are installed
+  ansible.builtin.apt:
+    name:
+      - openssh-client
+      - rsync
+    state: present
+
+- name: Ensure remote backup transfer package is installed
+  ansible.builtin.apt:
+    name: rsync
+    state: present
+  delegate_to: "{{ proxmox_windows_backup_remote_inventory_host }}"
+
+- name: Create isolated Windows backup staging directory
+  ansible.builtin.file:
+    path: "{{ proxmox_windows_backup_staging_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Create dedicated remote backup account
+  ansible.builtin.user:
+    name: "{{ proxmox_windows_backup_remote_user }}"
+    home: "/var/lib/{{ proxmox_windows_backup_remote_user }}"
+    create_home: true
+    shell: /bin/sh
+    password_lock: true
+    system: true
+  delegate_to: "{{ proxmox_windows_backup_remote_inventory_host }}"
+
+- name: Allow execute-only traversal of remote archive parents
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0711"
+  loop:
+    - "{{ proxmox_windows_backup_remote_directory | dirname | dirname }}"
+    - "{{ proxmox_windows_backup_remote_directory | dirname }}"
+  delegate_to: "{{ proxmox_windows_backup_remote_inventory_host }}"
+
+- name: Create dedicated remote Windows backup directory
+  ansible.builtin.file:
+    path: "{{ proxmox_windows_backup_remote_directory }}"
+    state: directory
+    owner: "{{ proxmox_windows_backup_remote_user }}"
+    group: "{{ proxmox_windows_backup_remote_user }}"
+    mode: "0700"
+  delegate_to: "{{ proxmox_windows_backup_remote_inventory_host }}"
+
+- name: Install restricted remote backup receiver
+  ansible.builtin.template:
+    src: windows-502-backup-receive.j2
+    dest: /usr/local/sbin/windows-502-backup-receive
+    owner: root
+    group: root
+    mode: "0755"
+  delegate_to: "{{ proxmox_windows_backup_remote_inventory_host }}"
+
+- name: Create local root SSH directory
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Create host-local backup identity when absent
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -q
+      - -t
+      - ed25519
+      - -N
+      - ""
+      - -C
+      - windows-502-backup@largegpu
+      - -f
+      - "{{ proxmox_windows_backup_identity_file }}"
+    creates: "{{ proxmox_windows_backup_identity_file }}"
+  no_log: true
+
+- name: Inspect host-local backup public key
+  ansible.builtin.stat:
+    path: "{{ proxmox_windows_backup_identity_file }}.pub"
+  register: proxmox_windows_backup_public_key_stat
+
+- name: Read host-local backup public key
+  ansible.builtin.slurp:
+    path: "{{ proxmox_windows_backup_identity_file }}.pub"
+  register: proxmox_windows_backup_public_key
+  when: proxmox_windows_backup_public_key_stat.stat.exists
+
+- name: Create remote SSH authorization directory
+  ansible.builtin.file:
+    path: "/var/lib/{{ proxmox_windows_backup_remote_user }}/.ssh"
+    state: directory
+    owner: "{{ proxmox_windows_backup_remote_user }}"
+    group: "{{ proxmox_windows_backup_remote_user }}"
+    mode: "0700"
+  delegate_to: "{{ proxmox_windows_backup_remote_inventory_host }}"
+
+- name: Authorize only the restricted host-local backup public key
+  ansible.builtin.copy:
+    dest: "/var/lib/{{ proxmox_windows_backup_remote_user }}/.ssh/authorized_keys"
+    content: >-
+      restrict,from="{{ ansible_host }}",command="/usr/local/sbin/windows-502-backup-receive"
+      {{ (proxmox_windows_backup_public_key.content | b64decode).strip() }}
+    owner: "{{ proxmox_windows_backup_remote_user }}"
+    group: "{{ proxmox_windows_backup_remote_user }}"
+    mode: "0600"
+  delegate_to: "{{ proxmox_windows_backup_remote_inventory_host }}"
+  when: proxmox_windows_backup_public_key_stat.stat.exists
+
+- name: Pin remote backup host key
+  ansible.builtin.copy:
+    dest: "{{ proxmox_windows_backup_known_hosts_file }}"
+    content: "{{ proxmox_windows_backup_remote_host_key }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Install staged Windows backup script
+  ansible.builtin.template:
+    src: windows-502-backup.j2
+    dest: /usr/local/sbin/windows-502-backup
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install staged Windows backup service
+  ansible.builtin.template:
+    src: windows-502-backup.service.j2
+    dest: /etc/systemd/system/windows-502-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: proxmox_windows_backup_service_unit
+
+- name: Install staged Windows backup timer
+  ansible.builtin.template:
+    src: windows-502-backup.timer.j2
+    dest: /etc/systemd/system/windows-502-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: proxmox_windows_backup_timer_unit
+
+- name: Enable staged Windows backup timer
+  ansible.builtin.systemd_service:
+    name: windows-502-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: >-
+      {{ proxmox_windows_backup_service_unit.changed
+         or proxmox_windows_backup_timer_unit.changed }}
+  when: not ansible_check_mode

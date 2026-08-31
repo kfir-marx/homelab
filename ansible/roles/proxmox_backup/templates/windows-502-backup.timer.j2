@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly staged Windows VM 502 backup
+
+[Timer]
+OnCalendar=*-*-* {{ proxmox_windows_backup_schedule }}:00
+Persistent=false
+Unit=windows-502-backup.service
+
+[Install]
+WantedBy=timers.target

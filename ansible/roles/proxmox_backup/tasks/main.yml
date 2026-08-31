@@ -28,6 +28,10 @@
     path: /usr/local/sbin/vzdump-gpu-mutex-hook
     state: absent
 
+- name: Configure staged Windows backup workflow
+  ansible.builtin.include_tasks: windows_backup.yml
+  when: proxmox_windows_backup_enabled | bool
+
 - name: Read backup target status
   ansible.builtin.command:
     argv:

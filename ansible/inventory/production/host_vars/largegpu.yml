@@ -72,19 +72,21 @@ proxmox_iso_relocations:
     destination: /mnt/pve/largegpu-hdd/template/iso/virtio-win.iso
     remove_source: true
 
-# VM 502 is the durable standalone Windows guest. Its dedicated nightly job
-# relies on native snapshot behavior and never changes either GPU-sharing VM's
-# power state. The general job excludes 502 to avoid duplicate archives.
+# VM 502 is staged on largegpu-hdd and sent by restricted SSH/rsync instead of
+# traversing the smallgpu NFS mount. The general job still excludes 502.
+proxmox_windows_backup_enabled: true
+proxmox_windows_backup_schedule: "04:15"
+proxmox_windows_backup_staging_directory: /mnt/pve/largegpu-hdd/windows-502-staging
+proxmox_windows_backup_minimum_free_bytes: 751619276800
+proxmox_windows_backup_bandwidth_limit_kib: 65536
+proxmox_windows_backup_remote_inventory_host: smallgpu
+proxmox_windows_backup_remote_host: 192.168.1.106
+proxmox_windows_backup_remote_directory: /mnt/data10tb/proxmox-backups/from-largegpu/windows-502
+proxmox_windows_backup_remote_keep_last: 2
+proxmox_windows_backup_remote_host_key: >-
+  192.168.1.106 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKgdJrLUXI7hKrF4BTdxjdZM7yR4QoGH7b/V2Ir6pSww
+
 proxmox_backup_jobs:
-  - id: largegpu-windows-502
-    vmid: 502
-    storage: backup-on-smallgpu
-    node: largegpu
-    schedule: "04:15"
-    mode: snapshot
-    compress: zstd
-    keep_last: 2
-    enabled: true
   - id: smallgpu-cross-node
     all: true
     exclude:
@@ -111,6 +113,7 @@ proxmox_backup_jobs:
     enabled: true
 
 proxmox_backup_retired_job_ids:
+  - largegpu-windows-502
   - personal-workstation
   - largegpu-windows-template
 

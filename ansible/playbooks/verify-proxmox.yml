@@ -362,6 +362,234 @@
       tags:
         - backup
 
+    - name: Read staged Windows backup timer state
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - windows-502-backup.timer
+          - --property=ActiveState
+          - --property=UnitFileState
+          - --property=TimersCalendar
+      register: verified_windows_backup_timer
+      changed_when: false
+      check_mode: false
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Require staged Windows backup timer to be enabled and scheduled
+      ansible.builtin.assert:
+        that:
+          - "'ActiveState=active' in verified_windows_backup_timer.stdout_lines"
+          - "'UnitFileState=enabled' in verified_windows_backup_timer.stdout_lines"
+          - >-
+            verified_windows_backup_timer.stdout is search(
+              'OnCalendar=.*' ~ proxmox_windows_backup_schedule
+            )
+        fail_msg: Staged Windows backup timer is not active at the declared schedule.
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Inspect staged Windows backup files
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      register: verified_windows_backup_files
+      loop:
+        - path: /usr/local/sbin/windows-502-backup
+          mode: "0700"
+        - path: "{{ proxmox_windows_backup_staging_directory }}"
+          mode: "0700"
+        - path: "{{ proxmox_windows_backup_identity_file | default('/root/.ssh/windows-502-backup-ed25519') }}"
+          mode: "0600"
+        - path: "{{ proxmox_windows_backup_known_hosts_file | default('/root/.ssh/windows-502-backup-known-hosts') }}"
+          mode: "0600"
+      loop_control:
+        label: "{{ item.path }}"
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Require staged Windows backup file permissions
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.mode == item.item.mode
+          - item.stat.pw_name == 'root'
+        fail_msg: "{{ item.item.path }} is absent or has unsafe ownership or mode."
+      loop: "{{ verified_windows_backup_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Read staged Windows backup free space
+      ansible.builtin.command:
+        argv:
+          - df
+          - --output=avail
+          - -B1
+          - "{{ proxmox_windows_backup_staging_directory }}"
+      register: verified_windows_backup_free_space
+      changed_when: false
+      check_mode: false
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Require safe staged Windows backup headroom
+      ansible.builtin.assert:
+        that:
+          - verified_windows_backup_free_space.stdout_lines | last | int
+            >= proxmox_windows_backup_minimum_free_bytes | int
+        fail_msg: Staged Windows backup no longer has its declared free-space headroom.
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Scan installed local backup script for forbidden VM state commands
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -E
+          - "qm[[:space:]]+(start|stop|shutdown|reboot|reset|resume)([[:space:]]|$)"
+          - /usr/local/sbin/windows-502-backup
+      register: verified_windows_backup_forbidden_commands
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Require no forbidden VM state commands in local backup script
+      ansible.builtin.assert:
+        that:
+          - verified_windows_backup_forbidden_commands.rc == 1
+        fail_msg: Installed Windows backup automation contains a forbidden VM state command.
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Verify restricted remote backup endpoint
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -i
+          - "{{ proxmox_windows_backup_identity_file | default('/root/.ssh/windows-502-backup-ed25519') }}"
+          - -o
+          - BatchMode=yes
+          - -o
+          - IdentitiesOnly=yes
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - "UserKnownHostsFile={{ proxmox_windows_backup_known_hosts_file | default('/root/.ssh/windows-502-backup-known-hosts') }}"
+          - "{{ proxmox_windows_backup_remote_user | default('windows502backup') }}@{{ proxmox_windows_backup_remote_host }}"
+          - status
+      register: verified_windows_backup_remote_endpoint
+      changed_when: false
+      check_mode: false
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Require restricted remote backup endpoint
+      ansible.builtin.assert:
+        that:
+          - verified_windows_backup_remote_endpoint.stdout == 'ready'
+        fail_msg: Restricted remote Windows backup endpoint is unavailable.
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Inspect restricted remote backup files
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      register: verified_windows_backup_remote_files
+      delegate_to: "{{ proxmox_windows_backup_remote_inventory_host | default('smallgpu') }}"
+      loop:
+        - path: /usr/local/sbin/windows-502-backup-receive
+          mode: "0755"
+        - path: "/var/lib/{{ proxmox_windows_backup_remote_user | default('windows502backup') }}/.ssh/authorized_keys"
+          mode: "0600"
+        - path: "{{ proxmox_windows_backup_remote_directory }}"
+          mode: "0700"
+      loop_control:
+        label: "{{ item.path }}"
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Inspect execute-only remote archive parents
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: verified_windows_backup_remote_parent
+      loop:
+        - "{{ proxmox_windows_backup_remote_directory | dirname | dirname }}"
+        - "{{ proxmox_windows_backup_remote_directory | dirname }}"
+      delegate_to: "{{ proxmox_windows_backup_remote_inventory_host | default('smallgpu') }}"
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Require execute-only remote archive parents
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.mode == '0711'
+          - item.stat.pw_name == 'root'
+        fail_msg: "{{ item.item }} lacks its execute-only traversal mode."
+      loop: "{{ verified_windows_backup_remote_parent.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
+    - name: Require restricted remote backup files
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.mode == item.item.mode
+        fail_msg: "{{ item.item.path }} is absent or has an unexpected mode."
+      loop: "{{ verified_windows_backup_remote_files.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      when:
+        - inventory_hostname in groups.get('backup_hosts', [])
+        - proxmox_windows_backup_enabled | default(false) | bool
+      tags:
+        - backup
+
     - name: Require managed Proxmox backup job definitions
       ansible.builtin.assert:
         that:

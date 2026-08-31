@@ -173,14 +173,23 @@ Talos images remain in each node's `local` storage because the image download
 resource is per Proxmox node. The same HDD accepts VM images so Terraform can
 attach a capped, disposable scratch disk to VM `402`.
 
-The `proxmox_backup` role owns node-scoped vzdump jobs. Standalone gaming VM
-`502` has a dedicated 04:15 job on `backup-on-smallgpu`, with two recent copies.
-The job uses snapshot mode without a hook: a running VM is backed up online,
-while a stopped VM remains stopped when Proxmox uses its temporary backup-only
-QEMU process. That process does not claim the VM's passed-through GPU. The role
-rejects backup-job scripts and removes the retired GPU mutex hook so no managed
-backup automation can change VM power state. The general `largegpu-cross-node`
-job runs at 07:00 and excludes `502` to avoid a duplicate large archive.
+The `proxmox_backup` role owns node-scoped vzdump jobs and VM 502's staged
+systemd workflow. At 04:15, `largegpu` writes a snapshot-mode archive to the
+isolated `/mnt/pve/largegpu-hdd/windows-502-staging` directory, then sends the
+completed file over restricted SSH/rsync to smallgpu's local filesystem. It
+requires 700 GiB free before starting, runs with idle I/O priority, and limits
+the transfer to 64 MiB/s. The remote receiver verifies exact size, SHA-256,
+the Zstandard/VMA stream, and readable vzdump configuration metadata before the
+local staging copy is removed. It keeps two verified remote archives and never
+prunes unverified files or the separate preserved emergency archives.
+
+The workflow uses snapshot mode without a hook: a running VM is backed up
+online, while a stopped VM remains stopped when Proxmox uses its temporary
+backup-only QEMU process. It only reads the states of VMs 402 and 502 and fails
+if both are already running. The role rejects backup-job scripts and removes
+the retired GPU mutex hook; no managed backup automation can change VM power
+state. The general `largegpu-cross-node` job remains automatic at 07:00 and
+excludes `502`.
 `smallgpu-cross-node` runs at 02:15; general jobs keep three recent and two
 weekly copies. Disks declared with Proxmox `backup=0`, including disposable GPU
 scratch, remain excluded by `vzdump`.

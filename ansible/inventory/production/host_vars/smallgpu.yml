@@ -52,11 +52,19 @@ nfs_server_directories:
   - path: /mnt/data10tb/media/torrents/whisparr
     mount_point: /mnt/data10tb
     mode: "0777"
+  - path: /mnt/data10tb/proxmox-backups
+    mount_point: /mnt/data10tb
+    owner: root
+    group: root
+    # Permit traversal to dedicated children without allowing directory lists.
+    mode: "0711"
   - path: /mnt/data10tb/proxmox-backups/from-largegpu
     mount_point: /mnt/data10tb
     owner: root
     group: root
-    mode: "0700"
+    # NTFS3 does not support POSIX ACLs. Execute-only access lets the dedicated
+    # VM 502 transfer account reach its 0700 child without listing this parent.
+    mode: "0711"
 nfs_server_exports:
   - path: /mnt/data10tb
     client: 192.168.1.0/24

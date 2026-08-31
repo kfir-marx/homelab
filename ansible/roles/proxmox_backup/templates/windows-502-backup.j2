@@ -1,0 +1,82 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+readonly VMID={{ proxmox_windows_backup_vmid | quote }}
+readonly PEER_VMID={{ proxmox_windows_backup_peer_vmid | quote }}
+readonly STAGING={{ proxmox_windows_backup_staging_directory | quote }}
+readonly LOCK_FILE={{ proxmox_windows_backup_lock_file | quote }}
+readonly MINIMUM_FREE_BYTES={{ proxmox_windows_backup_minimum_free_bytes | int }}
+readonly IDENTITY={{ proxmox_windows_backup_identity_file | quote }}
+readonly KNOWN_HOSTS={{ proxmox_windows_backup_known_hosts_file | quote }}
+readonly REMOTE={{ (proxmox_windows_backup_remote_user ~ '@' ~ proxmox_windows_backup_remote_host) | quote }}
+readonly BANDWIDTH_LIMIT_KIB={{ proxmox_windows_backup_bandwidth_limit_kib | int }}
+
+log() {
+  printf 'windows-502-backup: %s\n' "$*" >&2
+}
+
+exec 9>"${LOCK_FILE}"
+if ! flock -n 9; then
+  log "another execution holds ${LOCK_FILE}; refusing to overlap"
+  exit 1
+fi
+
+vm_state="$(qm status "${VMID}" | awk '{print $2}')"
+peer_state="$(qm status "${PEER_VMID}" | awk '{print $2}')"
+if [[ "${vm_state}" == running && "${peer_state}" == running ]]; then
+  log "VMs ${VMID} and ${PEER_VMID} are both running; refusing to back up an invalid GPU-sharing state"
+  exit 1
+fi
+
+available_bytes="$(df --output=avail -B1 "${STAGING}" | awk 'NR == 2 {print $1}')"
+if [[ ! "${available_bytes}" =~ ^[0-9]+$ ]] || (( available_bytes < MINIMUM_FREE_BYTES )); then
+  log "staging preflight failed: ${available_bytes:-unknown} bytes free; ${MINIMUM_FREE_BYTES} required"
+  exit 1
+fi
+
+run_marker="$(mktemp "${STAGING}/.windows-502-run.XXXXXX")"
+trap 'rm -f -- "${run_marker}"' EXIT
+
+log "creating a local snapshot-mode archive; VM power states will not be changed"
+nice -n 19 ionice -c 3 vzdump "${VMID}" \
+  --dumpdir "${STAGING}" \
+  --mode snapshot \
+  --compress zstd \
+  --remove 0
+
+mapfile -d '' archives < <(
+  find "${STAGING}" -maxdepth 1 -type f -newer "${run_marker}" \
+    -name "vzdump-qemu-${VMID}-*.vma.zst" -print0
+)
+if (( {% raw %}${#archives[@]}{% endraw %} != 1 )); then
+  log "expected exactly one completed archive, found {% raw %}${#archives[@]}{% endraw %}; preserving all staging files"
+  exit 1
+fi
+
+archive="${archives[0]}"
+archive_name="$(basename "${archive}")"
+archive_size="$(stat -c %s -- "${archive}")"
+archive_sha256="$(nice -n 19 ionice -c 3 sha256sum -- "${archive}" | awk '{print $1}')"
+
+ssh_options=(
+  -i "${IDENTITY}"
+  -o BatchMode=yes
+  -o IdentitiesOnly=yes
+  -o StrictHostKeyChecking=yes
+  -o "UserKnownHostsFile=${KNOWN_HOSTS}"
+)
+
+log "transferring completed archive with a ${BANDWIDTH_LIMIT_KIB} KiB/s limit"
+nice -n 19 ionice -c 3 rsync \
+  --archive \
+  --partial \
+  --bwlimit="${BANDWIDTH_LIMIT_KIB}" \
+  --rsh="ssh ${ssh_options[*]}" \
+  -- "${archive}" "${REMOTE}:/"
+
+log "verifying remote size, SHA-256, Zstandard stream, and vzdump configuration metadata"
+nice -n 19 ionice -c 3 ssh "${ssh_options[@]}" "${REMOTE}" \
+  "verify ${archive_name} ${archive_size} ${archive_sha256}"
+
+rm -f -- "${archive}"
+log "remote verification succeeded; removed local staging copy ${archive_name}"
