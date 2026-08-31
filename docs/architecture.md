@@ -279,8 +279,8 @@ service writes snapshot-mode `vzdump` output to an isolated directory on
 `largegpu-hdd`, then transfers the completed archive over bandwidth-limited,
 restricted SSH/rsync to smallgpu's local NTFS filesystem. smallgpu verifies
 size, SHA-256, the compressed VMA stream, and readable configuration metadata
-before the source copy is deleted; only the two newest verified destination
-archives are retained. Failures preserve local completed output, and legacy
+before the source copy is deleted; only the newest verified destination archive
+is retained. Failures preserve local completed output, and legacy
 emergency archives live outside both managed directories.
 
 The workflow has no hook and never changes the power state of VM 502 or its

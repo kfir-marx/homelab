@@ -82,7 +82,7 @@ proxmox_windows_backup_bandwidth_limit_kib: 65536
 proxmox_windows_backup_remote_inventory_host: smallgpu
 proxmox_windows_backup_remote_host: 192.168.1.106
 proxmox_windows_backup_remote_directory: /mnt/data10tb/proxmox-backups/from-largegpu/windows-502
-proxmox_windows_backup_remote_keep_last: 2
+proxmox_windows_backup_remote_keep_last: 1
 proxmox_windows_backup_remote_host_key: >-
   192.168.1.106 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKgdJrLUXI7hKrF4BTdxjdZM7yR4QoGH7b/V2Ir6pSww
 

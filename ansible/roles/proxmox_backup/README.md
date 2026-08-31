@@ -3,7 +3,7 @@
 This role manages ordinary snapshot-mode Proxmox backup jobs and the special
 staged workflow for Windows VM 502. Ordinary jobs must be hook-free. VM 502 is
 instead backed up by a systemd timer that stages on `largegpu-hdd`, transfers
-through restricted SSH/rsync, verifies remotely, and retains two verified
+through restricted SSH/rsync, verifies remotely, and retains one verified
 copies.
 
 The workflow intentionally separates its staging and destination directories

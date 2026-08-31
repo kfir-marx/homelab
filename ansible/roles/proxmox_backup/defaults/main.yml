@@ -13,7 +13,7 @@ proxmox_windows_backup_remote_inventory_host: smallgpu
 proxmox_windows_backup_remote_host: 192.168.1.106
 proxmox_windows_backup_remote_user: windows502backup
 proxmox_windows_backup_remote_directory: /mnt/data10tb/proxmox-backups/from-largegpu/windows-502
-proxmox_windows_backup_remote_keep_last: 2
+proxmox_windows_backup_remote_keep_last: 1
 proxmox_windows_backup_identity_file: /root/.ssh/windows-502-backup-ed25519
 proxmox_windows_backup_known_hosts_file: /root/.ssh/windows-502-backup-known-hosts
 proxmox_windows_backup_remote_host_key: ""

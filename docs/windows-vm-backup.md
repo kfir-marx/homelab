@@ -22,13 +22,13 @@ does not write through an NFS mount on `largegpu`.
 6. On `smallgpu`, compares the exact size and SHA-256, runs
    `zstd -dc ARCHIVE | vma verify -`, and confirms
    `zstd -dc ARCHIVE | vma config -` returns configuration metadata.
-7. Writes a `.verified` marker, keeps the two newest verified archives, and
+7. Writes a `.verified` marker, keeps the newest verified archive, and
    only then deletes the local staging copy.
 
 If backup, transfer, or verification fails, the service fails and preserves
 the completed local archive. Unverified remote files are not retention
 candidates. Retention refuses to delete an archive without its verification
-marker and never reduces the verified set below two. The older emergency
+marker and never deletes the last verified archive. The older emergency
 archives in `largegpu-hdd/dump/` and smallgpu's
 `proxmox-backups/from-largegpu/dump/` are outside the managed staging and
 destination directories and are never pruned by this workflow.

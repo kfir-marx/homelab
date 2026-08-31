@@ -180,7 +180,7 @@ completed file over restricted SSH/rsync to smallgpu's local filesystem. It
 requires 700 GiB free before starting, runs with idle I/O priority, and limits
 the transfer to 64 MiB/s. The remote receiver verifies exact size, SHA-256,
 the Zstandard/VMA stream, and readable vzdump configuration metadata before the
-local staging copy is removed. It keeps two verified remote archives and never
+local staging copy is removed. It keeps one verified remote archive and never
 prunes unverified files or the separate preserved emergency archives.
 
 The workflow uses snapshot mode without a hook: a running VM is backed up
