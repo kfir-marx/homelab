@@ -101,9 +101,11 @@ remote_state {
 }
 
 # Auto-detect the Terraform stack module from the deployment directory name.
-# deployments/prod/homelab-cluster → modules/stacks/homelab-cluster
+# The // keeps the full modules tree in Terragrunt's cache so stacks may reuse
+# sibling modules under modules/components.
+# deployments/prod/homelab-cluster → modules//stacks/homelab-cluster
 terraform {
-  source = "${local.root_deployments_dir}/../modules/stacks/${local.stack}"
+  source = "${local.root_deployments_dir}/../modules//stacks/${local.stack}"
 }
 
 # Terragrunt's built-in transient-error retry policy is used here. Its defaults

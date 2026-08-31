@@ -1,3 +1,12 @@
 ---
 proxmox_backup_jobs: []
 proxmox_backup_retired_job_ids: []
+
+# Some stopped passthrough VMs still require QEMU to start briefly during a
+# native vzdump. This optional hook gracefully releases a conflicting VM for
+# that backup and restores it afterward.
+proxmox_backup_gpu_mutex_hook_enabled: false
+proxmox_backup_gpu_mutex_hook_path: /usr/local/sbin/vzdump-gpu-mutex-hook
+proxmox_backup_gpu_mutex_source_vmid: 502
+proxmox_backup_gpu_mutex_conflicting_vmids: []
+proxmox_backup_gpu_mutex_shutdown_timeout_seconds: 600

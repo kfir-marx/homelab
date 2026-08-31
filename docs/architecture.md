@@ -173,36 +173,32 @@ the source VM instead of immediately forcing it off.
 The configured runtime allocation is:
 
 - `gpu-2` and the Windows VM each request 14 vCPUs and 52 GiB RAM. They remain mutually exclusive because they share the RTX 3080. In either mode, `cp-1` retains 2 vCPUs / 4 GiB, leaving about 6.7 GiB nominal memory headroom for Proxmox and QEMU overhead.
-- The largegpu host's NVMe LVM-thin holds the 635 GiB Windows disk and the resident 50 GiB control-plane disk. The disposable `gpu-2` system disk stays off this pool so a nearly full Windows linked clone cannot pause Kubernetes VMs with a thin-pool `nospace` error.
+- The largegpu host's NVMe LVM-thin is reserved for the standalone 635 GiB Windows disk. The resident 50 GiB control-plane disk and the disposable `gpu-2` disks stay on `largegpu-hdd`. The Proxmox host's root, swap, and thin-pool metadata necessarily remain on the physical NVMe. VM 502 has no linked-clone parent, so ordinary rewrites do not retain a template's old blocks until `nospace`.
 - The 159 GiB `gpu-2` system disk and a separate 400 GiB scratch disk are sparse `qcow2` volumes on `largegpu-hdd`; scratch backups remain disabled. Talos provisions the latter as the `gpu-scratch` user volume and mounts it at `/var/mnt/gpu-scratch`; Kubernetes exposes it through the static `local-gpu-scratch` StorageClass/PV.
 - A retained 50 GiB local-lvm disk is attached to `gpu-3` for the media stack's SQLite/config state. Talos selects the unique non-system disk by its declared size and mounts it at `/var/mnt/media-state`; encrypted daily backups land on the permanent critical NFS tier.
 - The 2 GiB hugepage pool is kept only on dedicated `gpu-2`. Mixed `gpu-3` sets `vm.nr_hugepages=0` so Jellyfin and ordinary workloads can use that memory.
 - `on_boot = true` for the Talos GPU worker (auto-start on Proxmox boot); `on_boot = false` for the Windows VM (manual).
 
-### Windows VM lifecycle: retained template → linked workstation clone
+### Windows VM lifecycle: standalone NVMe workstation
 
 Windows is managed by the independent `windows-workstation` stack and remote
-state. The reusable image is template VM 101; working VM 502 is a linked
-LVM-thin clone (`template_vm_id: 101`, `full_clone: false`). This is required
-because `largegpu` local-lvm has insufficient free physical space for another
-635 GiB full copy.
+state. VM 502 is a standalone guest on `local-lvm` with no clone source. The
+thin pool therefore stores only its live disk and does not pin old template
+blocks whenever Windows rewrites data.
 
 The shared component supports two modes:
 
 | Mode      | When                        | What happens                                                                 |
 |-----------|-----------------------------|------------------------------------------------------------------------------|
-| INSTALL   | `template_vm_id: null`      | Empty VM with scsi0 install disk, EFI vars (Secure Boot pre-enrolled), vTPM 2.0, and the Win11 ISO on ide2. One-time use: install Windows + apps + drivers, shut down, snapshot. |
-| CLONE     | `template_vm_id: 101`       | Clones the retained template. Full clone = independent disk; linked clone (`full_clone: false`) = LVM-thin copy-on-write. |
+| STANDALONE | `template_vm_id: null`     | Independent scsi0 disk, EFI vars, and vTPM 2.0. The installer ISO is attached only when `attach_install_media: true`; normal disaster recovery restores VM 502 from a native backup. |
+| CLONE     | `template_vm_id: <source>`  | Optional provisioning from another VM/template. Full clone = independent disk; linked clone (`full_clone: false`) = LVM-thin copy-on-write. |
 
-`virtio-win.iso` (Fedora's signed driver ISO) must be attached manually on a SATA slot before the first install — `bpg/proxmox` v0.105 only allows one `cdrom` block per VM, and SATA is hot-pluggable (IDE is not).
+`virtio-win.iso` (Fedora's signed driver ISO) must be attached manually on a SATA slot before a fresh install — `bpg/proxmox` v0.105 only allows one `cdrom` block per VM, and SATA is hot-pluggable (IDE is not).
 
-Template 101 must remain stopped. VM 502 is disposable and can be recreated
-from it by applying only the `windows-workstation` stack. A Sunday 01:00
-Ansible-installed maintenance timer first creates and verifies an independent
-backup of 502, then replaces template 101 with that state and recreates linked
-clone 502. Both IDs remain stable, as do 502's MAC, SMBIOS UUID, and VM
-generation ID. The detailed failure boundaries and recovery commands are in
-[`windows-template-refresh.md`](windows-template-refresh.md).
+VM 502 is restored directly from its nightly native archive before Terraform
+is used to reconcile hardware settings. The archive preserves the VM disk and
+configuration under the stable VMID. Backup mutex behavior and recovery commands are in
+[`windows-vm-backup.md`](windows-vm-backup.md).
 
 ---
 
@@ -215,8 +211,8 @@ mounts the existing ext4 LV; it is not registered as Proxmox storage.
 
 | Host         | Storage name        | Type         | Size       | Purpose                                                         |
 |--------------|---------------------|--------------|------------|-----------------------------------------------------------------|
-| `largegpu`      | `local-lvm`           | LVM-thin     | 808 GB     | Windows VM (~635 GB) + resident Talos control plane (~50 GB)            |
-| `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | Priority: VM backups, Windows/VirtIO ISOs, then `gpu-2`'s sparse 159 GiB system disk and capped 400 GiB disposable scratch |
+| `largegpu`      | `local-lvm`           | LVM-thin     | 810 GB     | Independent Windows VM 502 disk (~635 GB) |
+| `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | Resident `cp-1`, Windows/VirtIO ISOs, then `gpu-2`'s sparse 159 GiB system disk and capped 400 GiB disposable scratch |
 | `ubuntu-workstation` | `gpu1-extra`          | LVM-thin     | 912 GB     | Existing pool containing the critical-data LV |
 | `ubuntu-workstation` | `storage2-bulk` (NFS) | ext4 LV on `gpu1-extra`, NFSv4 export | 800 GB | **Critical tier** — Immich and personal data |
 | `smallgpu`      | `storage1-bulk` (NFS) | 10 TB NTFS via kernel `ntfs3`, NFSv4 export | 10 TB  | **Bulk tier** — active and mount-verified from Talos |
@@ -277,13 +273,14 @@ the inactive Retained PostgreSQL recovery binding. A forced-command SSH
 actuator on `largegpu` exposes three hardcoded operations for the 402/502 mutex;
 the switching path remains outside Codex and model text can never invoke it.
 
-`largegpu-hdd` stores the monthly Proxmox backup of durable Windows template VM
-`101`, with one retained copy, plus the two most recent weekly VM 502 staging
-archives used to refresh that template. Every guest is also protected by
-staggered daily cross-node `vzdump` jobs: `smallgpu` writes to a dedicated
-directory on `largegpu-hdd` at 02:15, while `largegpu` writes to a dedicated
-directory on `smallgpu`'s NTFS bulk disk at 04:15. Both retain three recent and two weekly
-Zstandard archives. Proxmox registrations restrict each backup storage to its
+The opposite-node `backup-on-smallgpu` storage holds the two newest nightly
+native archives of standalone Windows VM 502. Its dedicated job runs at 04:15.
+If 502 is stopped while GPU-sharing VM 402 is active, a backup hook gracefully
+stops 402 and restarts it after the archive completes; this is required because
+Proxmox briefly starts QEMU even for a stopped passthrough VM. General cross-node
+jobs protect the remaining guests: `smallgpu` writes to `largegpu-hdd` at 02:15,
+while `largegpu` writes to `smallgpu`'s NTFS bulk disk at 07:00 and excludes 502.
+They retain three recent and two weekly Zstandard archives. Proxmox registrations restrict each backup storage to its
 source node, and the server exports only the dedicated destination to the
 opposite host. Ansible registers `storage1-bulk` at the `/mnt/data10tb` export.
 Windows and VirtIO installation ISOs remain
@@ -407,7 +404,7 @@ authentication is required.
 | `terraform/modules/stacks/homelab-cluster/providers.tf` | Proxmox (username/password), Talos, Helm provider configs | Auth changes |
 | `terraform/modules/stacks/homelab-cluster/modules/proxmox-vm/main.tf` | One Talos VM (CP/worker/GPU) with conditional PCIe passthrough | Changing Talos VM defaults |
 | `terraform/modules/stacks/windows-workstation/` | Independent Windows stack backed by `prod/windows-workstation.tfstate` | Changing Windows orchestration |
-| `terraform/modules/components/proxmox-windows-vm/main.tf` | Windows 11 VM: INSTALL mode (build) or CLONE mode (from template) | Changing Windows VM defaults or drivers |
+| `terraform/modules/components/proxmox-windows-vm/main.tf` | Windows 11 VM: standalone disk or optional clone provisioning | Changing Windows VM defaults or drivers |
 | `terraform/modules/stacks/homelab-cluster/modules/talos-cluster/main.tf` | Per-role machine configs, applies them, bootstraps etcd | Changing Talos config patches, cluster topology |
 | `terraform/modules/stacks/homelab-cluster/helm/cilium-l2-config/` | Cilium LB IPAM pool and LAN L2 announcement policy | Changing LoadBalancer address allocation or advertisement |
 | `terraform/modules/stacks/homelab-cluster/talos-images/*.yaml` | Talos Image Factory extensions for base and GPU images | Adding or removing OS-level extensions |
@@ -500,13 +497,13 @@ Creates a single Proxmox QEMU VM for Talos. Key behaviors:
 
 ### Module: `proxmox-windows-vm`
 
-Creates the Windows 11 gaming VM with two operating modes (see "Windows VM lifecycle" above). Key behaviors:
+Creates the Windows 11 gaming VM in standalone or clone-provisioned mode (see "Windows VM lifecycle" above). Key behaviors:
 
 - **Always `q35` + `ovmf`** — Win11 requires both.
 - **Secure Boot:** `efi_disk.pre_enrolled_keys = true` so Microsoft's signing keys are baked into the EFI vars at creation.
 - **vTPM 2.0:** Created via `tpm_state` block (Win11 hard requirement).
-- **Single `cdrom` block (Windows ISO on `ide2`).** `virtio-win.iso` is attached manually on SATA (provider v0.105 caps `cdrom` at 1 block).
-- **`boot_order`:** `["ide2", "scsi0"]` in INSTALL mode (boot installer first); inherited from template in CLONE mode.
+- **Optional `cdrom` block (Windows ISO on `ide2`).** It is absent for the restored production VM. `virtio-win.iso` is attached manually on SATA for a fresh install.
+- **`boot_order`:** standalone production boots `scsi0`; a deliberate install boots `ide2` first; clone mode inherits its source order.
 - **USB passthrough:** Dynamic `usb` block — accepts either `VID:PID` (replug-safe) or `bus-port` (when two devices share a VID:PID).
 - **`on_boot = false`** — never auto-start; user toggles manually with `qm start/shutdown`.
 - **No `initialization` block** — Windows ignores nocloud cidata. DHCP is used; static IP would require Autounattend.xml.

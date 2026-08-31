@@ -12,9 +12,10 @@ during node replacement.
 | `smallgpu` | `192.168.1.106/24` | `backup-on-largegpu` | `largegpu:/mnt/pve/largegpu-hdd/proxmox-backups/from-smallgpu` |
 | `largegpu` | `192.168.1.107/24` | `backup-on-smallgpu` | `smallgpu:/mnt/data10tb/proxmox-backups/from-largegpu` |
 
-Both nodes use gateway `192.168.1.1` and bridge `vmbr0`. Daily snapshot jobs
-run at 02:15 (`smallgpu`) and 04:15 (`largegpu`), use Zstandard, and retain
-three recent plus two weekly archives.
+Both nodes use gateway `192.168.1.1` and bridge `vmbr0`. The general snapshot
+jobs run at 02:15 (`smallgpu`) and 07:00 (`largegpu`), use Zstandard, and retain
+three recent plus two weekly archives. Standalone gaming VM `502` has a
+separate 04:15 job with two recent archives.
 
 The one-time 2026 emergency recovery is different: it uses
 `ansible/playbooks/restore-smallgpu.yml` and the accepted workstation qcow2
@@ -170,9 +171,10 @@ For `smallgpu`, restore VM 403. It must retain `hostpci` device `09:00`; the
 role checks this before optional startup. The control plane remains on
 `largegpu` throughout a `smallgpu` recovery.
 
-For `largegpu`, restore control-plane VM 201 before the Windows template and
-GPU worker, then validate the Kubernetes API before relying on VM 402. Do not
-start VM 402 and Windows VM 502 together.
+For `largegpu`, restore control-plane VM 201 to `largegpu-hdd`, followed by GPU
+worker 402 on the HDD and standalone Windows VM 502 on NVMe. Automatic startup
+starts only VM 201; choose either 402 or 502 manually after validating the
+Kubernetes API. Never start VM 402 and Windows VM 502 together.
 
 ## Validate Talos and Kubernetes
 

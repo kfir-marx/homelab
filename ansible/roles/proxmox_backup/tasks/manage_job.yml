@@ -78,6 +78,8 @@
            != proxmox_backup_job.keep_last | int
         or proxmox_backup_job_current_keep_weekly | default(0, true) | int
            != proxmox_backup_job.keep_weekly | default(0) | int
+        or proxmox_backup_job_current.get('script', '')
+           != proxmox_backup_job.script | default('')
       }}
 
 - name: Build backup job command for {{ proxmox_backup_job.id }}
@@ -120,6 +122,11 @@
         + (
           ['--exclude', proxmox_backup_job.exclude | map('string') | join(',')]
           if proxmox_backup_job.exclude | default([]) | length > 0
+          else []
+        )
+        + (
+          ['--script', proxmox_backup_job.script]
+          if proxmox_backup_job.script | default('') | length > 0
           else []
         )
       }}

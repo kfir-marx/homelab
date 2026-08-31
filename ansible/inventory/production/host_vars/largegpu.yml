@@ -72,18 +72,19 @@ proxmox_iso_relocations:
     destination: /mnt/pve/largegpu-hdd/template/iso/virtio-win.iso
     remove_source: true
 
-# The Windows template is the durable, manually configured state on largegpu.
-# The linked Windows VM 502 and all Terraform-managed Talos VMs are disposable.
-# The old workstation VM 100 and its Proxmox node no longer exist.
+# VM 502 is the durable standalone Windows guest. Its dedicated nightly job has
+# a GPU mutex hook because Proxmox briefly starts QEMU when backing up a stopped
+# passthrough VM. The general job excludes 502 to avoid duplicate archives.
 proxmox_backup_jobs:
-  - id: largegpu-windows-template
-    vmid: 101
-    storage: largegpu-hdd
+  - id: largegpu-windows-502
+    vmid: 502
+    storage: backup-on-smallgpu
     node: largegpu
-    schedule: monthly
-    mode: stop
+    schedule: "04:15"
+    mode: snapshot
     compress: zstd
-    keep_last: 1
+    keep_last: 2
+    script: /usr/local/sbin/vzdump-gpu-mutex-hook
     enabled: true
   - id: smallgpu-cross-node
     all: true
@@ -99,9 +100,11 @@ proxmox_backup_jobs:
     enabled: true
   - id: largegpu-cross-node
     all: true
+    exclude:
+      - 502
     storage: backup-on-smallgpu
     node: largegpu
-    schedule: "04:15"
+    schedule: "07:00"
     mode: snapshot
     compress: zstd
     keep_last: 3
@@ -110,24 +113,13 @@ proxmox_backup_jobs:
 
 proxmox_backup_retired_job_ids:
   - personal-workstation
+  - largegpu-windows-template
 
-# VM 502 is a space-efficient linked clone of template 101. This weekly
-# maintenance window promotes the stopped, backed-up state of 502 into a new
-# template 101 and then recreates 502 with the same VMID and guest identity.
-# The script never force-stops Windows and retains two source archives for
-# manual recovery. Keep this clear of the 04:15 cross-node backup window.
-proxmox_windows_template_refresh_enabled: true
-proxmox_windows_template_refresh_source_vmid: 502
-proxmox_windows_template_refresh_template_vmid: 101
-proxmox_windows_template_refresh_backup_storage: largegpu-hdd
-proxmox_windows_template_refresh_target_storage: local-lvm
-proxmox_windows_template_refresh_schedule: "Sun *-*-* 01:00:00"
-proxmox_windows_template_refresh_keep_backups: 2
-proxmox_windows_template_refresh_shutdown_timeout_seconds: 600
-proxmox_windows_template_refresh_clone_name: largegpu-win11
-proxmox_windows_template_refresh_conflicting_vmids:
+proxmox_backup_gpu_mutex_hook_enabled: true
+proxmox_backup_gpu_mutex_source_vmid: 502
+proxmox_backup_gpu_mutex_conflicting_vmids:
   - 402
-proxmox_windows_template_refresh_restart_if_previously_running: true
+proxmox_backup_gpu_mutex_shutdown_timeout_seconds: 600
 
 # The independently generated public key is supplied through the controller
 # environment; only ubuntu-workstation's management IP may use it.

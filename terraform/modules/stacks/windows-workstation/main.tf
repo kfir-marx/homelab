@@ -11,17 +11,21 @@ module "windows_vms" {
   hostname     = each.key
   proxmox_node = each.value.proxmox_node
   vm_id        = each.value.vm_id
+  machine_type = each.value.machine_type
   cores        = each.value.cores
   memory_mb    = each.value.memory_mb
   disk_size_gb = each.value.disk_size_gb
+  datastore_id = each.value.datastore_id
   bridge       = var.network_bridge
 
-  windows_iso      = each.value.windows_iso
-  virtio_iso       = each.value.virtio_iso
-  iso_datastore_id = each.value.iso_datastore_id
+  windows_iso          = each.value.windows_iso
+  attach_install_media = each.value.attach_install_media
+  virtio_iso           = each.value.virtio_iso
+  iso_datastore_id     = each.value.iso_datastore_id
 
   template_vm_id = each.value.template_vm_id
   full_clone     = each.value.full_clone
+  boot_order     = each.value.boot_order
 
   pci_devices = each.value.pci_devices
   usb_devices = each.value.usb_devices

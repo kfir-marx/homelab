@@ -5,6 +5,8 @@
       {{ proxmox_native_restore_backup_storage_by_node.get(inventory_hostname, '') }}
     proxmox_native_restore_vm_ids: >-
       {{ proxmox_native_restore_vm_ids_by_node.get(inventory_hostname, []) }}
+    proxmox_native_restore_start_vm_ids: >-
+      {{ proxmox_native_restore_start_vm_ids_by_node.get(inventory_hostname, []) }}
 
 - name: Require an exact, explicitly confirmed restore scope
   ansible.builtin.assert:
@@ -13,6 +15,14 @@
       - proxmox_native_restore_backup_storage | length > 0
       - proxmox_native_restore_vm_ids | length > 0
       - proxmox_native_restore_vm_ids | unique | length == proxmox_native_restore_vm_ids | length
+      - >-
+        proxmox_native_restore_vm_ids
+        | reject('in', proxmox_native_restore_target_storage_by_vm.keys() | list)
+        | list | length == 0
+      - >-
+        proxmox_native_restore_start_vm_ids
+        | reject('in', proxmox_native_restore_vm_ids)
+        | list | length == 0
       - ansible_check_mode or proxmox_restore_confirm | bool
     fail_msg: >-
       Limit this play to exactly one replacement node and pass
@@ -83,7 +93,7 @@
     argv:
       - pvesh
       - get
-      - "/nodes/{{ inventory_hostname }}/storage/{{ proxmox_native_restore_target_storage }}/content"
+      - "/nodes/{{ inventory_hostname }}/storage/{{ proxmox_native_restore_target_storage_by_vm[item] }}/content"
       - --content
       - images
       - --vmid
@@ -161,7 +171,7 @@
       - "{{ proxmox_native_restore_selected[item | string] }}"
       - "{{ item | string }}"
       - --storage
-      - "{{ proxmox_native_restore_target_storage }}"
+      - "{{ proxmox_native_restore_target_storage_by_vm[item] }}"
   loop: "{{ proxmox_native_restore_vm_ids }}"
   when:
     - not ansible_check_mode
@@ -185,7 +195,11 @@
 - name: Verify declared PCI passthrough survives restoration
   ansible.builtin.assert:
     that:
-      - item.stdout is search('(?m)^hostpci[0-9]+:.*host=' ~ (expected_hostpci | regex_escape))
+      - >-
+        item.stdout is search(
+          '(?m)^hostpci[0-9]+:.*(?:host=|0000:)?'
+          ~ (expected_hostpci | regex_escape)
+        )
     fail_msg: >-
       Restored VM {{ item.item }} is missing expected PCI passthrough device
       {{ expected_hostpci }}; leave it stopped and reconcile host hardware first.
@@ -205,7 +219,7 @@
       - qm
       - start
       - "{{ item | string }}"
-  loop: "{{ proxmox_native_restore_vm_ids }}"
+  loop: "{{ proxmox_native_restore_start_vm_ids }}"
   when:
     - not ansible_check_mode
     - proxmox_restore_confirm | bool
@@ -219,7 +233,7 @@
     connect_timeout: 3
     timeout: 180
   delegate_to: localhost
-  loop: "{{ proxmox_native_restore_vm_ids }}"
+  loop: "{{ proxmox_native_restore_start_vm_ids }}"
   when:
     - item in proxmox_native_restore_expected_ips
     - not ansible_check_mode

@@ -1,8 +1,6 @@
 ---
 proxmox_restore_confirm: false
 proxmox_native_restore_start: false
-proxmox_native_restore_target_storage: local-lvm
-
 proxmox_native_restore_backup_storage_by_node:
   smallgpu: backup-on-largegpu
   largegpu: backup-on-smallgpu
@@ -12,8 +10,21 @@ proxmox_native_restore_vm_ids_by_node:
     - 403
   largegpu:
     - 201
-    - 101
     - 402
+    - 502
+
+proxmox_native_restore_target_storage_by_vm:
+  201: largegpu-hdd
+  402: largegpu-hdd
+  403: local-lvm
+  502: local-lvm
+
+# Never start both RTX 3080 consumers during an unattended node restore.
+proxmox_native_restore_start_vm_ids_by_node:
+  smallgpu:
+    - 403
+  largegpu:
+    - 201
 
 proxmox_native_restore_expected_ips:
   201: 192.168.1.211
@@ -21,4 +32,5 @@ proxmox_native_restore_expected_ips:
   403: 192.168.1.233
 
 proxmox_native_restore_expected_hostpci:
+  502: "08:00"
   403: "09:00"

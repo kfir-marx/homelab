@@ -41,6 +41,11 @@ control_plane_nodes:
     cores: 2
     memory_mb: 4096
     disk_size_gb: 50
+    # Reserve largegpu's NVMe thin pool for the gaming VM. The single control
+    # plane remains resident on largegpu, but its reproducible Talos disk lives
+    # on the host HDD.
+    system_disk_datastore_id: "largegpu-hdd"
+    system_disk_file_format: "qcow2"
 
 # ── General workers ───────────────────────────────────────────────────────────
 # None: gpu-3 is a mixed general+GPU worker in one VM. NFS runs on the Proxmox
@@ -61,8 +66,7 @@ gpu_nodes:
     memory_mb: 53248
     disk_size_gb: 159
     # Keep this disposable worker's system and scratch disks off local-lvm.
-    # Windows and cp-1 otherwise exhaust that NVMe thin pool when the linked
-    # Windows clone approaches its declared 635 GiB size.
+    # Reserve the NVMe thin pool for the independent Windows disk.
     system_disk_datastore_id: "largegpu-hdd"
     system_disk_file_format: "qcow2"
     # The 400 GiB scratch cap protects the higher-priority Proxmox backup reserve.

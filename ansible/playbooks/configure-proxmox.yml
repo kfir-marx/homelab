@@ -24,10 +24,6 @@
       when: inventory_hostname in groups.get('backup_hosts', [])
       tags:
         - backup
-    - role: proxmox_windows_template_refresh
-      when: proxmox_windows_template_refresh_enabled | default(false) | bool
-      tags:
-        - windows-template-refresh
     - role: homelab_vm_actuator
       when: homelab_vm_actuator_enabled | default(false) | bool
       tags:

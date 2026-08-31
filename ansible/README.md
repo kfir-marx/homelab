@@ -3,8 +3,8 @@
 Ansible owns configuration of physical Proxmox hosts after they have been
 installed and joined to `HomeLab-Cluster`. It does not install Proxmox, create
 or change corosync membership, own VM declarations, or reboot a host during the
-normal configuration play. It does install the explicitly declared maintenance
-timer that refreshes Windows template 101 from Terraform-owned VM 502. On
+normal configuration play. It does install the backup hook required to archive
+standalone passthrough VM 502 when GPU-sharing VM 402 is active. On
 `smallgpu` and `largegpu`, it also configures each directly attached UPS with
 Network UPS Tools (NUT).
 
@@ -135,7 +135,6 @@ ansible-playbook playbooks/configure-proxmox.yml --check --diff --tags repositor
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nfs
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags storage
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags backup
-ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags windows-template-refresh
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags homelab-vm-actuator
 ansible-playbook playbooks/configure-ubuntu-workstation.yml --tags homelab-assistant
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nut
@@ -143,17 +142,16 @@ ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags vfio
 ansible-playbook playbooks/verify-proxmox.yml --limit nfs_servers --tags nfs
 ansible-playbook playbooks/verify-proxmox.yml --limit local_storage_hosts --tags storage
 ansible-playbook playbooks/verify-proxmox.yml --limit backup_hosts --tags backup
-ansible-playbook playbooks/verify-proxmox.yml --limit largegpu --tags windows-template-refresh
 ansible-playbook playbooks/verify-proxmox.yml --limit nut_servers --tags nut
 ```
 
 Available configuration tags are `repositories`, `packages`, `nfs`, `storage`,
-`backup`, `windows-template-refresh`, `homelab-vm-actuator`, `homelab-assistant`,
+`backup`, `homelab-vm-actuator`, `homelab-assistant`,
 `nut`, and `vfio`. Common preflight checks
 (hostname, Proxmox major version, and quorate cluster membership) always run.
 Filesystem checks run only with NFS or directory-storage work, while PCI/IOMMU
 and running-VM conflict checks run only with VFIO work. A repository-, package-,
-storage-, backup-, Windows-template-, NFS-, or NUT-only run is therefore not
+storage-, backup-, NFS-, or NUT-only run is therefore not
 blocked by a GPU legitimately assigned to a running VM.
 
 ## Local directory storage and backups
@@ -176,15 +174,14 @@ Talos images remain in each node's `local` storage because the image download
 resource is per Proxmox node. The same HDD accepts VM images so Terraform can
 attach a capped, disposable scratch disk to VM `402`.
 
-The `proxmox_backup` role owns node-scoped vzdump jobs. The durable Windows
-template VM `101` is backed up monthly to `largegpu-hdd` with one retained copy.
-The retired workstation VM `100` backup job is explicitly removed. Two daily
-cross-node jobs also protect every current guest: `smallgpu-cross-node` writes
-to `backup-on-largegpu` at 02:15, and `largegpu-cross-node` writes to
-`backup-on-smallgpu` at 04:15. Both use snapshot mode, Zstandard, three recent
-copies, and two weekly copies. Temporary repair VM `990` is excluded. Disks
-declared with Proxmox `backup=0`, including disposable GPU scratch, remain
-excluded by `vzdump`.
+The `proxmox_backup` role owns node-scoped vzdump jobs. Standalone gaming VM
+`502` has a dedicated 04:15 job on `backup-on-smallgpu`, with two recent copies.
+Its hook gracefully stops and later restarts GPU-sharing VM `402` only when
+`502` is stopped and Proxmox needs the shared PCI device for backup. The
+general `largegpu-cross-node` job runs at 07:00 and excludes `502` to avoid a
+duplicate large archive. `smallgpu-cross-node` runs at 02:15; general jobs keep
+three recent and two weekly copies. Disks declared with Proxmox `backup=0`,
+including disposable GPU scratch, remain excluded by `vzdump`.
 
 The opposite-node exports are dedicated root-owned `0700` directories. Native
 restoration is handled separately by `playbooks/restore-proxmox-node.yml`; it
@@ -192,13 +189,9 @@ selects the latest archive per declared VM, refuses existing VM IDs or volumes,
 and requires `proxmox_restore_confirm=true`. See
 [`docs/proxmox-node-disaster-recovery.md`](../docs/proxmox-node-disaster-recovery.md).
 
-The `proxmox_windows_template_refresh` role installs a weekly systemd timer
-on `largegpu`. Every Sunday at 01:00 it backs up linked workstation VM 502,
-rebuilds that backup as template 101, and recreates 502 as a linked clone while
-preserving its Proxmox VMID and Windows-facing identity. Two staging archives
-are retained. The first run should be supervised; see
-[`docs/windows-template-refresh.md`](../docs/windows-template-refresh.md) for
-the exact transaction and recovery procedure.
+VM 502 recovery restores its native archive directly to `local-lvm`; template
+VM 101 and the former weekly template-refresh timer are not part of the active
+design. See [`docs/windows-vm-backup.md`](../docs/windows-vm-backup.md).
 
 ## UPS shutdown and recovery
 

@@ -170,7 +170,7 @@ resource "proxmox_virtual_environment_vm" "this" {
   # Without this block Talos comes up in maintenance mode on a DHCP lease,
   # and `talos_machine_configuration_apply` can't find the node.
   initialization {
-    datastore_id = "local-lvm"
+    datastore_id = var.system_disk_datastore_id
 
     ip_config {
       ipv4 {
@@ -183,7 +183,7 @@ resource "proxmox_virtual_environment_vm" "this" {
   dynamic "efi_disk" {
     for_each = length(var.pci_devices) > 0 ? [1] : []
     content {
-      datastore_id = "local-lvm"
+      datastore_id = var.system_disk_datastore_id
       type         = "4m"
     }
   }

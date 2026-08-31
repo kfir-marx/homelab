@@ -42,7 +42,7 @@ Do not silently edit code to match prose. Establish which side is stale first.
 |---|---|---|
 | Production topology, IPs, VM sizing | `terraform/deployments/prod/config.yml` | `terraform/deployments/config.yml`, relevant stack variables |
 | Talos, Kubernetes, Cilium, or Argo CD bootstrap | `terraform/modules/stacks/homelab-cluster/main.tf` | `modules/talos-cluster/`, `helm/`, `talos-images/` |
-| Windows VM or RTX 3080 sharing | `terraform/deployments/prod/windows-workstation/config.yml` | `terraform/modules/stacks/windows-workstation/`, `terraform/modules/components/proxmox-windows-vm/`, `docs/windows-template-refresh.md` for the weekly image rotation |
+| Windows VM or RTX 3080 sharing | `terraform/deployments/prod/windows-workstation/config.yml` | `terraform/modules/stacks/windows-workstation/`, `terraform/modules/components/proxmox-windows-vm/`, `docs/windows-vm-backup.md` for backup and recovery |
 | Physical Proxmox hosts | `ansible/README.md` and the relevant playbook | matching inventory host vars and role |
 | Ubuntu workstation or critical NFS | `docs/ubuntu-workstation-runbook.md` | `ansible/playbooks/configure-ubuntu-workstation.yml`, Ubuntu host vars, `nfs_server` role |
 | Kubernetes application | matching file in `kubernetes/apps/` | its directory under `kubernetes/system/` and matching runbook |

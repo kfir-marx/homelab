@@ -4,16 +4,16 @@
 #   Talos → Windows: qm shutdown 402 && qm start 502
 #   Windows → Talos: qm shutdown 502 && qm start 402
 #
-# Template 101 is the retained Windows image. local-lvm has limited free space,
-# so VM 502 must remain a linked LVM-thin clone rather than a full clone.
-# An Ansible-installed Sunday maintenance timer promotes a verified backup of
-# 502 into a replacement template 101 and recreates this same resource VMID.
+# VM 502 is a standalone VM on NVMe, with no template or linked-clone parent.
+# Native nightly backups are stored on the opposite host's HDD and are the
+# disaster-recovery source. Terraform manages the restored VM in standalone
+# mode; it does not recreate Windows from a retained template.
 windows_vms:
   largegpu-win11:
     proxmox_node: "largegpu"
     vm_id: 502
-    template_vm_id: 101
-    full_clone: false
+    machine_type: "pc-q35-10.1"
+    datastore_id: "local-lvm"
 
     # Leaves two of largegpu's 16 hardware threads for cp-1.
     cores: 14
@@ -21,14 +21,18 @@ windows_vms:
     memory_mb: 53248
     disk_size_gb: 635
 
-    # Ignored in clone mode, but retained for a future deliberate reinstall.
+    # Retained for a future deliberate reinstall, but not attached normally.
+    attach_install_media: false
+    boot_order:
+      - scsi0
     iso_datastore_id: "largegpu-hdd"
     windows_iso: "Win11_25H2_EnglishInternational_x64_v2.iso"
     virtio_iso: "virtio-win.iso"
 
     pci_devices:
-      - id: "08:00"
+      - id: "0000:08:00"
         pcie: true
+        xvga: true
 
     usb_devices:
       - host: "046d:c077" # Logitech USB Optical Mouse
