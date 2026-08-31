@@ -11,9 +11,9 @@ does not write through an NFS mount on `largegpu`.
 1. Acquires `/run/lock/windows-502-backup.lock` without waiting.
 2. Reads the states of VMs `402` and `502`. If both are already running, it
    fails without attempting to correct the invalid shared-GPU state.
-3. Requires at least 751,619,276,800 bytes (700 GiB) free in
+3. Requires at least 805,306,368,000 bytes (750 GiB) free in
    `/mnt/pve/largegpu-hdd/windows-502-staging`. This covers a worst-case
-   635 GiB archive plus 65 GiB of headroom.
+   700 GiB archive plus 50 GiB of headroom.
 4. Runs snapshot-mode `vzdump` locally with Zstandard compression and idle I/O
    priority.
 5. Computes the completed archive's size and SHA-256 and transfers it at no

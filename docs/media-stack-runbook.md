@@ -330,8 +330,10 @@ Maintainerr's native collection handler is batch-oriented and cannot stop when
 a free-space target is reached. The `maintainerr-storage-cleanup` CronJob runs
 hourly and supplies that high/low-water behavior:
 
-- It starts only below `500 GB` free on the shared `media-data` filesystem and
-  deletes one file at a time until the filesystem has more than `1 TB` free.
+- It starts only below `900 GB` free on the shared `media-data` filesystem and
+  deletes one file at a time until the filesystem has more than `1.2 TB` free.
+  This preserves working room for the Windows VM's 750 GiB backup requirement
+  on the same physical filesystem.
 - Candidates are ordered lexicographically: watched files first, then older
   Arr import/download dates, then larger individual files. Movies and episodes
   share the same ordered list, so a 5 GiB movie sorts ahead of a 2 GiB episode

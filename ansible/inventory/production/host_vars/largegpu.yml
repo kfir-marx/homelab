@@ -77,7 +77,7 @@ proxmox_iso_relocations:
 proxmox_windows_backup_enabled: true
 proxmox_windows_backup_schedule: "04:15"
 proxmox_windows_backup_staging_directory: /mnt/pve/largegpu-hdd/windows-502-staging
-proxmox_windows_backup_minimum_free_bytes: 751619276800
+proxmox_windows_backup_minimum_free_bytes: 805306368000
 proxmox_windows_backup_bandwidth_limit_kib: 65536
 proxmox_windows_backup_remote_inventory_host: smallgpu
 proxmox_windows_backup_remote_host: 192.168.1.106

@@ -177,7 +177,7 @@ The `proxmox_backup` role owns node-scoped vzdump jobs and VM 502's staged
 systemd workflow. At 04:15, `largegpu` writes a snapshot-mode archive to the
 isolated `/mnt/pve/largegpu-hdd/windows-502-staging` directory, then sends the
 completed file over restricted SSH/rsync to smallgpu's local filesystem. It
-requires 700 GiB free before starting, runs with idle I/O priority, and limits
+requires 750 GiB free before starting, runs with idle I/O priority, and limits
 the transfer to 64 MiB/s. The remote receiver verifies exact size, SHA-256,
 the Zstandard/VMA stream, and readable vzdump configuration metadata before the
 local staging copy is removed. It keeps one verified remote archive and never

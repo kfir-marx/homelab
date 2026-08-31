@@ -173,7 +173,7 @@ the source VM instead of immediately forcing it off.
 The configured runtime allocation is:
 
 - `gpu-2` and the Windows VM each request 14 vCPUs and 52 GiB RAM. They remain mutually exclusive because they share the RTX 3080. In either mode, `cp-1` retains 2 vCPUs / 4 GiB, leaving about 6.7 GiB nominal memory headroom for Proxmox and QEMU overhead.
-- The largegpu host's NVMe LVM-thin is reserved for the standalone 635 GiB Windows disk. The resident 50 GiB control-plane disk and the disposable `gpu-2` disks stay on `largegpu-hdd`. The Proxmox host's root, swap, and thin-pool metadata necessarily remain on the physical NVMe. VM 502 has no linked-clone parent, so ordinary rewrites do not retain a template's old blocks until `nospace`.
+- The largegpu host's NVMe LVM-thin is reserved for the standalone 700 GiB Windows disk. The resident 50 GiB control-plane disk and the disposable `gpu-2` disks stay on `largegpu-hdd`. The Proxmox host's root, swap, and thin-pool metadata necessarily remain on the physical NVMe. VM 502 has no linked-clone parent, so ordinary rewrites do not retain a template's old blocks until `nospace`.
 - The 159 GiB `gpu-2` system disk and a separate 400 GiB scratch disk are sparse `qcow2` volumes on `largegpu-hdd`; scratch backups remain disabled. Talos provisions the latter as the `gpu-scratch` user volume and mounts it at `/var/mnt/gpu-scratch`; Kubernetes exposes it through the static `local-gpu-scratch` StorageClass/PV.
 - A retained 50 GiB local-lvm disk is attached to `gpu-3` for the media stack's SQLite/config state. Talos selects the unique non-system disk by its declared size and mounts it at `/var/mnt/media-state`; encrypted daily backups land on the permanent critical NFS tier.
 - The 2 GiB hugepage pool is kept only on dedicated `gpu-2`. Mixed `gpu-3` sets `vm.nr_hugepages=0` so Jellyfin and ordinary workloads can use that memory.
@@ -211,7 +211,7 @@ mounts the existing ext4 LV; it is not registered as Proxmox storage.
 
 | Host         | Storage name        | Type         | Size       | Purpose                                                         |
 |--------------|---------------------|--------------|------------|-----------------------------------------------------------------|
-| `largegpu`      | `local-lvm`           | LVM-thin     | 810 GB     | Independent Windows VM 502 disk (~635 GB) |
+| `largegpu`      | `local-lvm`           | LVM-thin     | 810 GB     | Independent Windows VM 502 disk (~700 GB) |
 | `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | Resident `cp-1`, Windows/VirtIO ISOs, then `gpu-2`'s sparse 159 GiB system disk and capped 400 GiB disposable scratch |
 | `ubuntu-workstation` | `gpu1-extra`          | LVM-thin     | 912 GB     | Existing pool containing the critical-data LV |
 | `ubuntu-workstation` | `storage2-bulk` (NFS) | ext4 LV on `gpu1-extra`, NFSv4 export | 800 GB | **Critical tier** — Immich and personal data |

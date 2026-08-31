@@ -7,7 +7,7 @@
       - proxmox_windows_backup_vmid | int != proxmox_windows_backup_peer_vmid | int
       - proxmox_windows_backup_staging_directory is match('^/mnt/pve/[^/]+/.+$')
       - proxmox_windows_backup_remote_directory is match('^/mnt/[^/]+/.+$')
-      - proxmox_windows_backup_minimum_free_bytes | int >= 681826058240
+      - proxmox_windows_backup_minimum_free_bytes | int >= 751619276800
       - proxmox_windows_backup_bandwidth_limit_kib | int > 0
       - proxmox_windows_backup_remote_keep_last | int >= 1
       - proxmox_windows_backup_remote_host_key is match('^[^ ]+ ssh-ed25519 [A-Za-z0-9+/=]+$')

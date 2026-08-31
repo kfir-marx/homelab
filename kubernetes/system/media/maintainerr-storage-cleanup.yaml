@@ -66,9 +66,9 @@ spec:
                 - name: STATE_PATH
                   value: /state/pending-no-reclaim.json
                 - name: TRIGGER_FREE_GB
-                  value: "500"
+                  value: "900"
                 - name: TARGET_FREE_GB
-                  value: "1000"
+                  value: "1200"
                 - name: MIN_RECLAIM_MIB
                   value: "16"
                 - name: RECLAIM_POLL_SECONDS

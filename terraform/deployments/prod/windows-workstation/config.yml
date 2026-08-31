@@ -19,7 +19,7 @@ windows_vms:
     cores: 14
     # Leaves 4 GiB for cp-1 and about 6.7 GiB nominal host headroom.
     memory_mb: 53248
-    disk_size_gb: 635
+    disk_size_gb: 700
 
     # Retained for a future deliberate reinstall, but not attached normally.
     attach_install_media: false
