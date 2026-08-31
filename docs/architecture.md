@@ -197,7 +197,7 @@ The shared component supports two modes:
 
 VM 502 is restored directly from its nightly native archive before Terraform
 is used to reconcile hardware settings. The archive preserves the VM disk and
-configuration under the stable VMID. Backup mutex behavior and recovery commands are in
+configuration under the stable VMID. Backup power-state behavior and recovery commands are in
 [`windows-vm-backup.md`](windows-vm-backup.md).
 
 ---
@@ -275,12 +275,13 @@ the switching path remains outside Codex and model text can never invoke it.
 
 The opposite-node `backup-on-smallgpu` storage holds the two newest nightly
 native archives of standalone Windows VM 502. Its dedicated job runs at 04:15.
-If 502 is stopped while GPU-sharing VM 402 is active, a backup hook gracefully
-stops 402 and restarts it after the archive completes; this is required because
-Proxmox briefly starts QEMU even for a stopped passthrough VM. General cross-node
-jobs protect the remaining guests: `smallgpu` writes to `largegpu-hdd` at 02:15,
-while `largegpu` writes to `smallgpu`'s NTFS bulk disk at 07:00 and excludes 502.
-They retain three recent and two weekly Zstandard archives. Proxmox registrations restrict each backup storage to its
+The snapshot job has no hook and never changes the power state of VM 502 or its
+GPU-sharing peer 402. A running VM is backed up online; for a stopped VM,
+Proxmox's temporary backup-only QEMU process does not change configured power
+state or claim the passed-through GPU. General cross-node jobs protect the
+remaining guests: `smallgpu` writes to `largegpu-hdd` at 02:15, while `largegpu`
+writes to `smallgpu`'s NTFS bulk disk at 07:00 and excludes 502. They retain
+three recent and two weekly Zstandard archives. Proxmox registrations restrict each backup storage to its
 source node, and the server exports only the dedicated destination to the
 opposite host. Ansible registers `storage1-bulk` at the `/mnt/data10tb` export.
 Windows and VirtIO installation ISOs remain

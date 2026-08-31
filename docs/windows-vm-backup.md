@@ -10,21 +10,17 @@ Zstandard compression, and retains the two newest archives. The general
 `largegpu-cross-node` job runs at 07:00 and excludes `502`, avoiding duplicate
 600 GiB-class archives.
 
-## Shared-GPU backup hook
+## Shared-GPU and power-state behavior
 
-VMs `402` and `502` share the RTX 3080. Proxmox briefly starts QEMU to back up
-a stopped VM with TPM state, so a stopped `502` cannot be archived while `402`
-owns the passthrough device. The job's `vzdump-gpu-mutex-hook` handles this
-case:
+VMs `402` and `502` share the RTX 3080, but backups do not participate in that
+runtime mutex. Snapshot mode backs up a running `502` online. When `502` is
+stopped, Proxmox may use a temporary backup-only QEMU process; this neither
+changes the VM's configured power state nor claims its passed-through GPU.
+Therefore `402` can remain in its existing state throughout the backup.
 
-1. If `502` is running, require `402` to be stopped and let snapshot backup run.
-2. If `502` is stopped and `402` is running, gracefully stop `402`.
-3. Run the native backup without changing `502`'s hardware configuration.
-4. Restart `402` after success or failure when the hook stopped it.
-
-The hook never force-stops a guest. A failed graceful shutdown fails the backup
-instead. Because backing up stopped `502` temporarily removes the GPU worker,
-`cp-1` remains on `largegpu-hdd` and keeps the Kubernetes API available.
+The job has no hook script. The Ansible role rejects backup-job scripts and
+removes the retired `vzdump-gpu-mutex-hook`, so no managed backup job, hook, or
+helper starts, stops, shuts down, or reboots either VM.
 
 ## Installation and verification
 
@@ -39,12 +35,13 @@ ansible-playbook playbooks/verify-proxmox.yml \
   --limit largegpu --tags backup
 ```
 
-Verify the installed hook and schedule without starting a backup:
+Verify the schedule and absence of a hook without starting a backup:
 
 ```bash
-ssh root@192.168.1.107 'bash -n /usr/local/sbin/vzdump-gpu-mutex-hook'
 ssh root@192.168.1.107 \
   'pvesh get /cluster/backup/largegpu-windows-502 --output-format json-pretty'
+ssh root@192.168.1.107 \
+  'test ! -e /usr/local/sbin/vzdump-gpu-mutex-hook'
 ```
 
 After the first scheduled or supervised run, require a real VM 502 archive:

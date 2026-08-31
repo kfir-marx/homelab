@@ -72,9 +72,9 @@ proxmox_iso_relocations:
     destination: /mnt/pve/largegpu-hdd/template/iso/virtio-win.iso
     remove_source: true
 
-# VM 502 is the durable standalone Windows guest. Its dedicated nightly job has
-# a GPU mutex hook because Proxmox briefly starts QEMU when backing up a stopped
-# passthrough VM. The general job excludes 502 to avoid duplicate archives.
+# VM 502 is the durable standalone Windows guest. Its dedicated nightly job
+# relies on native snapshot behavior and never changes either GPU-sharing VM's
+# power state. The general job excludes 502 to avoid duplicate archives.
 proxmox_backup_jobs:
   - id: largegpu-windows-502
     vmid: 502
@@ -84,7 +84,6 @@ proxmox_backup_jobs:
     mode: snapshot
     compress: zstd
     keep_last: 2
-    script: /usr/local/sbin/vzdump-gpu-mutex-hook
     enabled: true
   - id: smallgpu-cross-node
     all: true
@@ -114,12 +113,6 @@ proxmox_backup_jobs:
 proxmox_backup_retired_job_ids:
   - personal-workstation
   - largegpu-windows-template
-
-proxmox_backup_gpu_mutex_hook_enabled: true
-proxmox_backup_gpu_mutex_source_vmid: 502
-proxmox_backup_gpu_mutex_conflicting_vmids:
-  - 402
-proxmox_backup_gpu_mutex_shutdown_timeout_seconds: 600
 
 # The independently generated public key is supplied through the controller
 # environment; only ubuntu-workstation's management IP may use it.

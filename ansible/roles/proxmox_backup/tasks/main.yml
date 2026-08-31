@@ -13,42 +13,20 @@
       - item.exclude | default([]) | length == 0 or item.all | default(false) | bool
       - item.storage is match('^[a-zA-Z][a-zA-Z0-9_-]+$')
       - item.node is match('^[a-zA-Z][a-zA-Z0-9_-]+$')
-      - item.mode in ['snapshot', 'stop', 'suspend']
+      - item.mode == 'snapshot'
       - item.compress in ['zstd', 'gzip', 'lzo', '0']
       - item.keep_last | int > 0
       - item.keep_weekly | default(0) | int >= 0
-      - >-
-        item.script | default('') | length == 0
-        or item.script is match('^/[a-zA-Z0-9_./-]+$')
+      - item.script is not defined
     fail_msg: "Invalid Proxmox backup job declaration: {{ item }}"
   loop: "{{ proxmox_backup_jobs }}"
   loop_control:
     label: "{{ item.id | default('unnamed') }}"
 
-- name: Validate GPU mutex backup hook configuration
-  ansible.builtin.assert:
-    that:
-      - proxmox_backup_gpu_mutex_hook_path is match('^/[a-zA-Z0-9_./-]+$')
-      - proxmox_backup_gpu_mutex_source_vmid | int >= 100
-      - proxmox_backup_gpu_mutex_shutdown_timeout_seconds | int >= 60
-      - >-
-        proxmox_backup_gpu_mutex_conflicting_vmids | map('int')
-        | select('equalto', proxmox_backup_gpu_mutex_source_vmid | int)
-        | list | length == 0
-      - >-
-        proxmox_backup_gpu_mutex_conflicting_vmids | map('string')
-        | reject('match', '^[1-9][0-9]*$') | list | length == 0
-    fail_msg: "Invalid GPU mutex backup hook declaration."
-  when: proxmox_backup_gpu_mutex_hook_enabled | bool
-
-- name: Install GPU mutex backup hook
-  ansible.builtin.template:
-    src: vzdump-gpu-mutex-hook.sh.j2
-    dest: "{{ proxmox_backup_gpu_mutex_hook_path }}"
-    owner: root
-    group: root
-    mode: "0750"
-  when: proxmox_backup_gpu_mutex_hook_enabled | bool
+- name: Remove retired GPU mutex backup hook
+  ansible.builtin.file:
+    path: /usr/local/sbin/vzdump-gpu-mutex-hook
+    state: absent
 
 - name: Read backup target status
   ansible.builtin.command:

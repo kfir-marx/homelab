@@ -3,10 +3,9 @@
 Ansible owns configuration of physical Proxmox hosts after they have been
 installed and joined to `HomeLab-Cluster`. It does not install Proxmox, create
 or change corosync membership, own VM declarations, or reboot a host during the
-normal configuration play. It does install the backup hook required to archive
-standalone passthrough VM 502 when GPU-sharing VM 402 is active. On
-`smallgpu` and `largegpu`, it also configures each directly attached UPS with
-Network UPS Tools (NUT).
+normal configuration play. Backup automation never starts, stops, shuts down,
+or reboots a VM. On `smallgpu` and `largegpu`, it also configures each directly
+attached UPS with Network UPS Tools (NUT).
 
 The former `gpunvdgtx1060` node is no longer a Proxmox host. The separate
 `configure-ubuntu-workstation.yml` play configures its replacement Ubuntu
@@ -176,12 +175,15 @@ attach a capped, disposable scratch disk to VM `402`.
 
 The `proxmox_backup` role owns node-scoped vzdump jobs. Standalone gaming VM
 `502` has a dedicated 04:15 job on `backup-on-smallgpu`, with two recent copies.
-Its hook gracefully stops and later restarts GPU-sharing VM `402` only when
-`502` is stopped and Proxmox needs the shared PCI device for backup. The
-general `largegpu-cross-node` job runs at 07:00 and excludes `502` to avoid a
-duplicate large archive. `smallgpu-cross-node` runs at 02:15; general jobs keep
-three recent and two weekly copies. Disks declared with Proxmox `backup=0`,
-including disposable GPU scratch, remain excluded by `vzdump`.
+The job uses snapshot mode without a hook: a running VM is backed up online,
+while a stopped VM remains stopped when Proxmox uses its temporary backup-only
+QEMU process. That process does not claim the VM's passed-through GPU. The role
+rejects backup-job scripts and removes the retired GPU mutex hook so no managed
+backup automation can change VM power state. The general `largegpu-cross-node`
+job runs at 07:00 and excludes `502` to avoid a duplicate large archive.
+`smallgpu-cross-node` runs at 02:15; general jobs keep three recent and two
+weekly copies. Disks declared with Proxmox `backup=0`, including disposable GPU
+scratch, remain excluded by `vzdump`.
 
 The opposite-node exports are dedicated root-owned `0700` directories. Native
 restoration is handled separately by `playbooks/restore-proxmox-node.yml`; it

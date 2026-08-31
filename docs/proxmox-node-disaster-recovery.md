@@ -15,7 +15,8 @@ during node replacement.
 Both nodes use gateway `192.168.1.1` and bridge `vmbr0`. The general snapshot
 jobs run at 02:15 (`smallgpu`) and 07:00 (`largegpu`), use Zstandard, and retain
 three recent plus two weekly archives. Standalone gaming VM `502` has a
-separate 04:15 job with two recent archives.
+separate 04:15 job with two recent archives. All jobs use snapshot mode without
+power-management hooks; backup automation does not change any VM power state.
 
 The one-time 2026 emergency recovery is different: it uses
 `ansible/playbooks/restore-smallgpu.yml` and the accepted workstation qcow2

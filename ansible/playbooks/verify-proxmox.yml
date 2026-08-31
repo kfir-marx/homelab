@@ -310,6 +310,58 @@
       tags:
         - backup
 
+    - name: Read all Proxmox backup jobs for power-state safety
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - get
+          - /cluster/backup
+          - --output-format
+          - json
+      register: verified_all_proxmox_backup_jobs
+      changed_when: false
+      check_mode: false
+      when: inventory_hostname in groups.get('backup_hosts', [])
+      tags:
+        - backup
+
+    - name: Require snapshot-only hook-free Proxmox backup jobs
+      ansible.builtin.assert:
+        that:
+          - >-
+            backup_jobs | rejectattr('mode', 'equalto', 'snapshot')
+            | list | length == 0
+          - >-
+            backup_jobs | selectattr('script', 'defined')
+            | rejectattr('script', 'equalto', '') | list | length == 0
+        fail_msg: >-
+          Every Proxmox backup job must use snapshot mode without a hook so
+          backup automation cannot change VM power state.
+      vars:
+        backup_jobs: "{{ verified_all_proxmox_backup_jobs.stdout | from_json }}"
+      when: inventory_hostname in groups.get('backup_hosts', [])
+      tags:
+        - backup
+
+    - name: Inspect retired GPU mutex backup hook
+      ansible.builtin.stat:
+        path: /usr/local/sbin/vzdump-gpu-mutex-hook
+      register: verified_retired_gpu_mutex_backup_hook
+      when: inventory_hostname in groups.get('backup_hosts', [])
+      tags:
+        - backup
+
+    - name: Require retired GPU mutex backup hook to be absent
+      ansible.builtin.assert:
+        that:
+          - not verified_retired_gpu_mutex_backup_hook.stat.exists
+        fail_msg: >-
+          Retired backup helper /usr/local/sbin/vzdump-gpu-mutex-hook still
+          exists and must be removed.
+      when: inventory_hostname in groups.get('backup_hosts', [])
+      tags:
+        - backup
+
     - name: Require managed Proxmox backup job definitions
       ansible.builtin.assert:
         that:
