@@ -19,6 +19,7 @@ class UncertainTelegramError(RuntimeError):
 class TelegramClient:
     def __init__(self, settings: Settings) -> None:
         token = settings.telegram_token.get_secret_value()
+        self._request_timeout_seconds = settings.request_timeout_seconds
         self._api = httpx.AsyncClient(
             base_url=f"https://api.telegram.org/bot{token}",
             timeout=httpx.Timeout(settings.request_timeout_seconds),
@@ -28,9 +29,18 @@ class TelegramClient:
             timeout=httpx.Timeout(settings.file_timeout_seconds),
         )
 
-    async def call(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def call(
+        self,
+        method: str,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         try:
-            response = await self._api.post(f"/{method}", json=payload)
+            request_options: dict[str, Any] = {"json": payload}
+            if timeout_seconds is not None:
+                request_options["timeout"] = timeout_seconds
+            response = await self._api.post(f"/{method}", **request_options)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             raise UncertainTelegramError(type(exc).__name__) from exc
         if response.status_code >= 500 or response.status_code == 429:
@@ -52,6 +62,7 @@ class TelegramClient:
                 "timeout": poll_timeout,
                 "allowed_updates": ["message", "callback_query"],
             },
+            timeout_seconds=poll_timeout + self._request_timeout_seconds,
         )
         value = result.get("value", result)
         return value if isinstance(value, list) else []
