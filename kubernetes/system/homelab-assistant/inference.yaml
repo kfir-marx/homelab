@@ -1,0 +1,159 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm
+  namespace: homelab-assistant
+  labels:
+    app: local-llm
+    component: inference
+spec:
+  # The OpenAI-compatible API is intentionally reachable only through cluster
+  # networking. There is no Gateway, Ingress, LoadBalancer, or NodePort.
+  type: ClusterIP
+  selector:
+    app: local-llm
+    component: inference
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm
+  namespace: homelab-assistant
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: local-llm
+      component: inference
+  template:
+    metadata:
+      labels:
+        app: local-llm
+        component: inference
+    spec:
+      priorityClassName: homelab-assistant
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/hostname: gpu-2
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 2000
+        runAsGroup: 0
+        fsGroup: 0
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vllm
+          # v0.27.1 was previously rolled back because it did not start on this
+          # node. Restore the last known-good image before considering upgrades.
+          image: docker.io/vllm/vllm-openai:v0.26.0@sha256:ffb2d59b1c059a5bd8d781320c9f5189de8293693b7d95da54befddaa54abf52
+          imagePullPolicy: IfNotPresent
+          args:
+            - --model
+            - Qwen/Qwen3-8B-AWQ
+            - --revision
+            - 9e07647a76edf7424dfe621814b6a1fe8fc54d4a
+            - --served-model-name
+            - local-llm
+            - --quantization
+            - awq
+            - --dtype
+            - half
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.90"
+            - --max-num-seqs
+            - "2"
+            - --generation-config
+            - vllm
+            - --enable-auto-tool-choice
+            - --tool-call-parser
+            - hermes
+          env:
+            - name: HOME
+              value: /home/vllm
+            - name: HF_HOME
+              value: /home/vllm/.cache/huggingface
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+            - name: TRITON_CACHE_DIR
+              value: /home/vllm/.cache/triton
+            - name: DO_NOT_TRACK
+              value: "1"
+            - name: VLLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: LLM_API_KEY
+          ports:
+            - name: http
+              containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 180
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "8"
+              memory: 24Gi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: cache
+              mountPath: /home/vllm/.cache
+            - name: model-cache
+              mountPath: /home/vllm/.cache/huggingface
+            - name: runtime
+              mountPath: /tmp
+            - name: config
+              mountPath: /home/vllm/.config
+            - name: shared-memory
+              mountPath: /dev/shm
+      volumes:
+        - name: cache
+          emptyDir:
+            sizeLimit: 8Gi
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: llm-model-cache
+        - name: runtime
+          emptyDir:
+            sizeLimit: 4Gi
+        - name: config
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: shared-memory
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi

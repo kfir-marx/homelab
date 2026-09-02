@@ -34,6 +34,7 @@ apply step is required.
 | `external-ai/api` | Job generation broker and Prometheus to TCP/8080 | PostgreSQL and cluster DNS only |
 | `external-ai/worker` | None | PostgreSQL, cluster DNS, and allowlisted OpenAI/ChatGPT HTTPS only |
 | `external-ai/postgres` | external-ai API and worker to TCP/5432 | None |
+| `homelab-assistant/local-llm` | Namespaced cluster pods and node health probes to TCP/8000; no north/south Service | Cluster DNS and pinned-model Hugging Face HTTPS only |
 | `immich/redis` | Server to TCP/6379 | None |
 | `media` | Same-namespace application traffic; Gateway to each web UI; Cloudflared to Jellyfin TCP/8096 and Seerr TCP/5055; LAN/world peers to qBittorrent TCP/UDP 51413 | Cluster DNS; public-only TCP 80/443 for metadata, indexers, subtitle providers, and trackers; qBittorrent additionally reaches public TCP/UDP peers |
 | `tailscale-router` | Public/LAN UDP 41641 (pinned in the Deployment) | Not isolated; see the Cilium Gateway hairpin exception below |

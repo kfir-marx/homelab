@@ -101,7 +101,7 @@ makes failures easier to reason about.
 | Capability | Implementation | Why it is here |
 |---|---|---|
 | Private photo platform | Immich with PostgreSQL and Redis | A real stateful workload whose irreplaceable data must stay on permanent hardware |
-| Private AI assistants | Workstation Telegram client for the existing local Codex environment, plus job-assistant and external-ai | Reuses Codex threads, tools, skills, and configuration while keeping deterministic VM switching outside the model |
+| Private AI assistants | Workstation Telegram client for Codex, job-assistant, external-ai, and a cluster-private Qwen/vLLM API | Reuses Codex threads and tools while retaining an OpenAI-compatible local inference option on the RTX 3080 |
 | Home streaming | Jellyfin, Seerr, Servarr, Bazarr, qBittorrent, and Maintainerr | GPU-accelerated streaming with automated subtitles, recoverable bulk media, and policy-driven retention |
 | Observability | kube-prometheus-stack, Grafana, Alertmanager, and NVIDIA DCGM metrics | Cluster, workload, and GPU visibility with explicit retention limits |
 | Private DNS | AdGuard Home | Split DNS for private services and optional network-wide filtering |
@@ -217,6 +217,7 @@ export are unavailable even though the API on `largegpu` remains up.
 | [Job assistant runbook](docs/job-assistant-runbook.md) | Private inputs, broker migration, secrets, deployment, restore, and troubleshooting |
 | [Homelab assistant runbook](docs/homelab-assistant-runbook.md) | Workstation Codex App Server, Telegram thread UX, Unix-socket boundary, deterministic VM switching, cutover, and rollback |
 | [External AI runbook](docs/external-ai-runbook.md) | Durable broker, requester scopes, Codex authentication, rollout, and recovery |
+| [Local LLM API runbook](docs/local-llm-runbook.md) | Qwen/vLLM recovery, ClusterIP API contract, retained GPU cache, and health checks |
 | [GPU Operator runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, rollout, CUDA validation, and metrics |
 | [Jellyfin media stack runbook](docs/media-stack-runbook.md) | Backup restoration, storage, GPU transcoding, credential rotation, and cleanup policy |
 | [Ubuntu workstation runbook](docs/ubuntu-workstation-runbook.md) | Critical NFS service and local NVIDIA/HDMI recovery |

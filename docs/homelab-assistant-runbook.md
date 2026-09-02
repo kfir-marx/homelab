@@ -4,8 +4,11 @@
 
 `homelab-assistant` is a private Telegram frontend for the normal local Codex
 environment on `ubuntu-workstation`. Ansible owns both host services. Argo CD
-owns only the deterministic switcher identity and the retained legacy
-PostgreSQL recovery volume in the `homelab-assistant` namespace.
+owns the deterministic switcher identity, the retained legacy PostgreSQL
+recovery volume, and a separately operated cluster-private local LLM in the
+`homelab-assistant` namespace. The Telegram client does not depend on that LLM;
+its API and recovery procedure are documented in the
+[local LLM runbook](local-llm-runbook.md).
 
 The runtime path is:
 

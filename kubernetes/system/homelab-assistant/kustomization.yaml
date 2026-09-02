@@ -6,3 +6,6 @@ resources:
   - rbac.yaml
   - credentials.yaml
   - retained-storage.yaml
+  - model-storage.yaml
+  - inference.yaml
+  - llm-network-policy.yaml

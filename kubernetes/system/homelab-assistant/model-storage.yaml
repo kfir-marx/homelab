@@ -1,0 +1,18 @@
+# Model weights and generated caches are replaceable. Reuse the retained
+# gpu-2 scratch PV and the original claim identity so an existing warm cache can
+# be adopted without moving data or depending on either NFS host.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llm-model-cache
+  namespace: homelab-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-gpu-scratch
+  volumeName: gpu2-scratch-pv
+  resources:
+    requests:
+      storage: 390Gi

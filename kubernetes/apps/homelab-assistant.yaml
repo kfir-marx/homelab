@@ -1,6 +1,6 @@
-# The deterministic switcher identity and inactive retained PostgreSQL recovery
-# volume only. The Telegram Codex client runs on ubuntu-workstation; this
-# Application owns no assistant workload, running database, or model cache.
+# The deterministic switcher identity, inactive retained PostgreSQL recovery
+# volume, and private GPU-backed local LLM. The Telegram Codex client itself
+# runs on ubuntu-workstation; the LLM exposes only a ClusterIP API.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

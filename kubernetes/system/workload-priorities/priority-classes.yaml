@@ -111,7 +111,7 @@ kind: PriorityClass
 metadata:
   name: homelab-assistant
 value: 1000250
-description: "Temporary rollback compatibility for retired homelab-assistant pods"
+description: "Private local LLM and homelab-assistant compatibility"
 ---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass

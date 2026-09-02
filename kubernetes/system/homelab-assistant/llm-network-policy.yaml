@@ -1,0 +1,105 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: llm-default-deny
+  namespace: homelab-assistant
+  annotations:
+    # Establish every allow rule before isolation during the first sync.
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  podSelector:
+    matchLabels:
+      app: local-llm
+      component: inference
+  policyTypes: [Ingress, Egress]
+---
+# Any namespaced Kubernetes pod may use the API when it also has the bearer
+# key. Empty namespaceSelector means all cluster namespaces, not external/LAN
+# clients; the ClusterIP Service has no north/south entry point.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: llm-cluster-clients
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: local-llm
+      component: inference
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 8000
+          protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llm-dns-egress
+  namespace: homelab-assistant
+spec:
+  endpointSelector:
+    matchLabels:
+      app: local-llm
+      component: inference
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+# The model and revision are pinned. Egress exists only to populate or repair
+# the disposable cache; remove this rule if the cache is managed offline.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llm-model-download-egress
+  namespace: homelab-assistant
+spec:
+  endpointSelector:
+    matchLabels:
+      app: local-llm
+      component: inference
+  egress:
+    - toFQDNs:
+        - matchName: huggingface.co
+        - matchPattern: "*.huggingface.co"
+        - matchName: hf.co
+        - matchPattern: "*.hf.co"
+        - matchPattern: "*.xethub.hf.co"
+        - matchName: us.aws.cdn.hf.co
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# Kubelet health probes originate from node identities rather than namespaced
+# pods. They can reach only the container's HTTP port; no Service is published
+# outside the cluster.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llm-health-probes
+  namespace: homelab-assistant
+spec:
+  endpointSelector:
+    matchLabels:
+      app: local-llm
+      component: inference
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
