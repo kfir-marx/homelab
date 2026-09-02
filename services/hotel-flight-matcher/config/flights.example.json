@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "flights": [
+    {
+      "id": "poc-london-2026-10",
+      "label": "London trip, October 2026",
+      "arrival_date": "2026-10-12",
+      "departure_date": "2026-10-17",
+      "destination": {
+        "city": "London",
+        "country": "United Kingdom",
+        "airport_codes": ["LHR", "LGW", "LCY", "STN", "LTN"],
+        "aliases": ["London", "Greater London", "UK", "England"]
+      }
+    }
+  ]
+}

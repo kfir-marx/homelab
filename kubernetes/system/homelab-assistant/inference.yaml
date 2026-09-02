@@ -76,6 +76,8 @@ spec:
             - "2"
             - --generation-config
             - vllm
+            # Customer email content must never enter vLLM request logs.
+            - --no-enable-log-requests
             - --enable-auto-tool-choice
             - --tool-call-parser
             - hermes

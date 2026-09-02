@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>FlightStay Match</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="mark" aria-hidden="true">FS</span>
+        <div><h1>FlightStay Match</h1><p>Hotel confirmations for your flights</p></div>
+      </header>
+
+      <section class="consent">
+        <strong>You stay in control.</strong>
+        <p>When you press Scan, Google asks for read-only Gmail access. We read bounded message text,
+          never attachments, and process it transiently on the FlightStay Match service.</p>
+        <a href="https://staymatch.547600.xyz/privacy" target="_blank" rel="noreferrer">Privacy policy</a>
+      </section>
+
+      <form id="scan-form">
+        <label for="query">Gmail search</label>
+        <input id="query" name="query" value="newer_than:365d" maxlength="300" required />
+        <label for="max-results">Messages to inspect</label>
+        <input id="max-results" name="max-results" type="number" min="1" max="20" value="10" required />
+        <button id="scan" type="submit">Connect Gmail & scan</button>
+      </form>
+
+      <div id="status" role="status" aria-live="polite"></div>
+      <ol id="results" aria-label="Matches"></ol>
+      <button id="sign-out" class="secondary" type="button">Disconnect Gmail</button>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

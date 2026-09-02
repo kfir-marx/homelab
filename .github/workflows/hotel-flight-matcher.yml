@@ -1,0 +1,99 @@
+name: hotel-flight-matcher
+
+on:
+  pull_request:
+    paths:
+      - services/hotel-flight-matcher/**
+      - extensions/flightstay-match/**
+      - scripts/package-flightstay-extension.sh
+      - kubernetes/apps/hotel-flight-matcher.yaml
+      - kubernetes/system/hotel-flight-matcher/**
+      - kubernetes/system/cloudflared/network-policy.yaml
+      - kubernetes/system/homelab-assistant/inference.yaml
+      - docs/hotel-flight-matcher-runbook.md
+      - .github/workflows/hotel-flight-matcher.yml
+  push:
+    branches: [main]
+    paths:
+      - services/hotel-flight-matcher/**
+      - .github/workflows/hotel-flight-matcher.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hotel-flight-matcher-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/kfir-marx/hotel-flight-matcher
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.6"
+          enable-cache: true
+          cache-dependency-glob: services/hotel-flight-matcher/uv.lock
+      - run: uv sync --directory services/hotel-flight-matcher --locked --extra dev
+      - run: uv run --directory services/hotel-flight-matcher --locked --extra dev ruff format --check .
+      - run: uv run --directory services/hotel-flight-matcher --locked --extra dev ruff check .
+      - run: uv run --directory services/hotel-flight-matcher --locked --extra dev mypy src tests
+      - run: uv run --directory services/hotel-flight-matcher --locked --extra dev pytest
+      - name: Test extension modules
+        working-directory: extensions/flightstay-match
+        run: node --test tests/*.test.js
+      - name: Validate extension manifest
+        run: python -m json.tool extensions/flightstay-match/manifest.json >/dev/null
+      - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5
+      - name: Render manifests
+        run: |
+          kubectl kustomize kubernetes/system/hotel-flight-matcher >/tmp/hotel-flight-matcher.yaml
+          kubectl kustomize kubernetes/system/homelab-assistant >/tmp/homelab-assistant.yaml
+          kubectl create --dry-run=client --validate=false \
+            -f kubernetes/system/cloudflared -o yaml >/tmp/cloudflared.yaml
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: services/hotel-flight-matcher
+          push: false
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: services/hotel-flight-matcher
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+      - name: Pin immutable image
+        run: >-
+          sed -i
+          's|ghcr.io/kfir-marx/hotel-flight-matcher:sha-[a-f0-9]*|ghcr.io/kfir-marx/hotel-flight-matcher:sha-${{ github.sha }}|g;
+          s|ghcr.io/kfir-marx/hotel-flight-matcher:sha-bootstrap|ghcr.io/kfir-marx/hotel-flight-matcher:sha-${{ github.sha }}|g'
+          kubernetes/system/hotel-flight-matcher/workload.yaml
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        with:
+          branch: automation/hotel-flight-matcher-image
+          delete-branch: true
+          commit-message: "deploy(hotel-flight-matcher): pin image sha-${{ github.sha }}"
+          title: "deploy(hotel-flight-matcher): release sha-${{ github.sha }}"
+          body: Automated immutable image release.

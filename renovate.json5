@@ -23,7 +23,8 @@
   "ignoreDeps": [
     "ghcr.io/kfir-marx/homelab-assistant",
     "ghcr.io/kfir-marx/homelab-job-assistant",
-    "ghcr.io/kfir-marx/homelab-external-ai"
+    "ghcr.io/kfir-marx/homelab-external-ai",
+    "ghcr.io/kfir-marx/hotel-flight-matcher"
   ],
   "customManagers": [
     {

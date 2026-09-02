@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hotel-flight-matcher"
+version = "0.1.0"
+description = "Privacy-bounded hotel email extraction and deterministic flight matching API"
+requires-python = ">=3.14.6"
+dependencies = [
+  "fastapi>=0.141.1,<1",
+  "httpx>=0.28.1,<1",
+  "pydantic>=2.13.4,<3",
+  "pydantic-settings>=2.15.0,<3",
+  "structlog>=26.1.0,<27",
+  "typer>=0.27.1,<1",
+  "uvicorn>=0.52.4,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=2.3.1,<3",
+  "pytest>=9.1.1,<10",
+  "pytest-asyncio>=1.3.0,<2",
+  "respx>=0.23.1,<1",
+  "ruff>=0.16.4,<1",
+]
+
+[project.scripts]
+hotel-flight-matcher = "hotel_flight_matcher.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hotel_flight_matcher"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]

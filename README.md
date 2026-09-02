@@ -218,6 +218,7 @@ export are unavailable even though the API on `largegpu` remains up.
 | [Homelab assistant runbook](docs/homelab-assistant-runbook.md) | Workstation Codex App Server, Telegram thread UX, Unix-socket boundary, deterministic VM switching, cutover, and rollback |
 | [External AI runbook](docs/external-ai-runbook.md) | Durable broker, requester scopes, Codex authentication, rollout, and recovery |
 | [Local LLM API runbook](docs/local-llm-runbook.md) | Qwen/vLLM recovery, ClusterIP API contract, retained GPU cache, and health checks |
+| [FlightStay Match POC](docs/hotel-flight-matcher-runbook.md) | Gmail-consented Chrome extension, schema extraction, deterministic flight scoring, Cloudflare API, and store gates |
 | [GPU Operator runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, rollout, CUDA validation, and metrics |
 | [Jellyfin media stack runbook](docs/media-stack-runbook.md) | Backup restoration, storage, GPU transcoding, credential rotation, and cleanup policy |
 | [Ubuntu workstation runbook](docs/ubuntu-workstation-runbook.md) | Critical NFS service and local NVIDIA/HDMI recovery |

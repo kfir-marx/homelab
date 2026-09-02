@@ -1,0 +1,105 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hotel-flight-matcher-default-deny
+  namespace: homelab-assistant
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  podSelector:
+    matchLabels:
+      app: hotel-flight-matcher
+      component: api
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared-to-hotel-flight-matcher
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: hotel-flight-matcher
+      component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudflared
+          podSelector:
+            matchLabels:
+              app: cloudflared
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hotel-flight-matcher-to-llm
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: hotel-flight-matcher
+      component: api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: local-llm
+              component: inference
+      ports:
+        - port: 8000
+          protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hotel-flight-matcher-external-egress
+  namespace: homelab-assistant
+spec:
+  endpointSelector:
+    matchLabels:
+      app: hotel-flight-matcher
+      component: api
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: oauth2.googleapis.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hotel-flight-matcher-health-probes
+  namespace: homelab-assistant
+spec:
+  endpointSelector:
+    matchLabels:
+      app: hotel-flight-matcher
+      component: api
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

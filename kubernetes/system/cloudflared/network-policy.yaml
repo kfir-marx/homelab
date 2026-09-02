@@ -58,6 +58,17 @@ spec:
       ports:
         - port: 2283
           protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: homelab-assistant
+          podSelector:
+            matchLabels:
+              app: hotel-flight-matcher
+              component: api
+      ports:
+        - port: 8080
+          protocol: TCP
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

@@ -16,7 +16,7 @@ infrastructure.
 ```text
 Family and friends
         |
-        | HTTPS: jellyfin / seerr / immich public hostnames
+        | HTTPS: jellyfin / seerr / immich / staymatch public hostnames
         v
 Cloudflare edge --- outbound Cloudflare Tunnel ---> Jellyfin / Immich services
 
@@ -53,6 +53,7 @@ Cloudflare. No inbound port forwarding or public home IP is required.
 | Jellyfin | `jellyfin.547600.xyz` | `jellyfin.media.svc:8096` | Jellyfin account |
 | Seerr | `seerr.547600.xyz` | `seerr.media.svc:5055` | Individual Jellyfin account and Seerr permissions |
 | Immich | `immich.547600.xyz` | `immich-server.immich.svc:2283` | Immich account |
+| FlightStay Match API | `staymatch.547600.xyz` | `hotel-flight-matcher.homelab-assistant.svc:8080` | Google OAuth token issued to the exact Chrome client |
 
 Add only applications intended for external users to the tunnel. Do not put
 ArgoCD, Proxmox, the Kubernetes API, or other administrative endpoints on it.
@@ -98,7 +99,7 @@ application traffic remains WireGuard encrypted between peers.
   Telegram and the authenticated, ClusterIP-only model endpoint, and it has no
   Kubernetes token or execution tools.
 - The cloudflared network policy permits only the documented Jellyfin, Seerr,
-  and Immich origins and Cloudflare tunnel endpoints. Adding a dashboard origin
+  Immich, and FlightStay Match origins plus Cloudflare tunnel endpoints. Adding a dashboard origin
   also requires a matching declarative policy change or it fails closed.
 - Bitwarden has no Cloudflare rule, public DNS address, LoadBalancer, NodePort,
   or Funnel. All private web applications use the shared Cilium Gateway with

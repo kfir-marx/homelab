@@ -1,0 +1,28 @@
+# Public Chrome-extension backend. The only public path is the remotely managed
+# Cloudflare Tunnel hostname; the origin Service remains ClusterIP-only.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hotel-flight-matcher
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/hotel-flight-matcher
+  destination:
+    server: https://kubernetes.default.svc
+    # Reuse the local LLM's namespace so only the API key, not the whole Secret,
+    # is projected into this Deployment. Resources remain owned by this app.
+    namespace: homelab-assistant
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true

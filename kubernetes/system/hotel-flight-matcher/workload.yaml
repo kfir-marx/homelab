@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hotel-flight-matcher
+  namespace: homelab-assistant
+  labels:
+    app: hotel-flight-matcher
+    component: api
+spec:
+  type: ClusterIP
+  selector:
+    app: hotel-flight-matcher
+    component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hotel-flight-matcher
+  namespace: homelab-assistant
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hotel-flight-matcher
+      component: api
+  template:
+    metadata:
+      labels:
+        app: hotel-flight-matcher
+        component: api
+    spec:
+      priorityClassName: homelab-hotel-flight-matcher
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/kfir-marx/hotel-flight-matcher:sha-bootstrap
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MATCHER_GOOGLE_OAUTH_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: hotel-flight-matcher
+                  key: GOOGLE_OAUTH_CLIENT_ID
+            - name: MATCHER_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: LLM_API_KEY
+            - name: MATCHER_FLIGHTS_CONFIG_PATH
+              value: /config/flights.json
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: hotel-flight-matcher
+            items:
+              - key: flights.json
+                path: flights.json
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
