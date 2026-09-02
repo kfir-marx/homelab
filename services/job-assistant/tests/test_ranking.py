@@ -60,6 +60,67 @@ def test_preferences_and_feedback_affect_ranking() -> None:
     assert adjusted.components["feedback"] == 0.04
 
 
+def test_seniority_and_timezone_thresholds_are_deterministic() -> None:
+    configured = criteria().model_copy(update={"seniority": ["mid", "senior"]})
+    matching = rank_job(
+        job(seniority="senior", timezone_difference_hours=4),
+        configured,
+        {"Kubernetes", "Terraform"},
+    )
+    assert matching.passed
+    assert matching.components["seniority"] == 1
+    assert matching.components["timezone"] == 1
+    assert not rank_job(job(seniority="junior"), configured, {"Kubernetes", "Terraform"}).passed
+    assert not rank_job(
+        job(timezone_difference_hours=5), configured, {"Kubernetes", "Terraform"}
+    ).passed
+
+
+def test_unknown_optional_job_data_is_not_scored_or_penalized() -> None:
+    result = rank_job(job(published_at=None), criteria(), {"Kubernetes", "Terraform"})
+    assert result.passed
+    assert "freshness" not in result.components
+    assert "job age" in result.explanation
+    assert "salary" not in result.components
+
+
+def test_language_salary_and_required_technology_criteria() -> None:
+    salary_criteria = criteria().model_copy(
+        update={"minimum_salary": 30_000, "salary_currency": "ILS"}
+    )
+    matched = rank_job(
+        job(
+            languages=["English"],
+            salary_min=32_000,
+            salary_max=36_000,
+            salary_currency="ILS",
+        ),
+        salary_criteria,
+        {"Kubernetes", "Terraform"},
+    )
+    assert matched.passed
+    assert {"languages", "salary"} <= matched.components.keys()
+    below = rank_job(
+        job(salary_max=29_000, salary_currency="ILS"),
+        salary_criteria,
+        {"Kubernetes", "Terraform"},
+    )
+    assert not below.passed
+    missing_required = rank_job(
+        job(description_text="Kubernetes only"), criteria(), {"Kubernetes", "Terraform"}
+    )
+    assert not missing_required.passed
+
+
+def test_unknown_salary_currency_is_explained_without_penalty() -> None:
+    configured = criteria().model_copy(update={"minimum_salary": 30_000, "salary_currency": "ILS"})
+    baseline = rank_job(job(), criteria(), {"Kubernetes", "Terraform"})
+    unknown = rank_job(job(), configured, {"Kubernetes", "Terraform"})
+    assert unknown.passed
+    assert unknown.score == baseline.score
+    assert "salary" in unknown.explanation
+
+
 def test_digest_never_exceeds_five() -> None:
     ranked = []
     for index in range(12):

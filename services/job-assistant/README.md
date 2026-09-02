@@ -24,8 +24,14 @@ Runtime roles:
 | `worker` | domain queue and approved SMTP delivery | normal database role and SMTP |
 | `broker-worker` | external-ai submission and result validation | restricted database role and requester token |
 | `discover` | scheduled ATS/email discovery | database and source credentials |
+| `reminders` | scheduled, idempotent owner notifications | database |
 | `migrate` | schema and restricted-role setup | database identities |
 
 No role receives a Telegram bot token, Codex binary, `CODEX_HOME`, `auth.json`,
 or Kubernetes service-account token. See `docs/job-assistant-runbook.md` and
 `docs/job-assistant-architecture.md`.
+
+The primary Telegram flow is `/job_setup` → `/job_today` →
+`/job_applications`. Existing code-based `/job_*` commands remain available.
+Career-inventory onboarding from CV is not implemented; uploads can only revise
+an application CV and never replace the confirmed inventory.

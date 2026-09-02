@@ -77,9 +77,10 @@ Do not fabricate encrypted snapshots before the live Secrets exist.
    same way. Do not delete the legacy source until post-migration recovery has
    been tested. This is a live filesystem action and requires separate
    authorization.
-5. Syncing Job Assistant runs migration `0003_multi_user_ownership`. A missing
-   or invalid owner identity fails closed. Inspect only migration status and
-   counts; do not print user/profile/application rows.
+5. Syncing Job Assistant runs migrations `0003_multi_user_ownership` and
+   `0004_guided_workflow`. A missing or invalid owner identity fails closed.
+   Inspect only migration status and counts; do not print
+   user/profile/application rows.
 6. Validate the owner's inventory through an owner Apply smoke test. The user
    record's `inventory_valid` flag becomes true only after validation.
 
@@ -108,9 +109,18 @@ requires `user-enroll ... --reactivate`; re-evaluate features separately.
 ## Job workflow
 
 Gateway `/help` lists shared services. `/job_help` lists the Job Assistant
-adapter. Supported commands are `/job_add`, `/job_status`, `/job_final`,
+adapter. The guided commands are `/job_setup`, `/job_today`, and
+`/job_applications`. Setup drafts expire after 24 hours, are resumable before
+expiry, and do not replace confirmed settings until Confirm Save. Back,
+Cancel, Keep Current, Reset, and View are available throughout. Confirmed
+database profiles override the user's private YAML, which overrides shared
+YAML; this preserves existing configurations while allowing durable per-user
+setup.
+
+Fallback commands remain `/job_add`, `/job_status`, `/job_final`,
 `/job_contact`, `/job_approve`, `/job_manual`, `/job_submitted`, `/job_reopen`,
-and `/job_help`; recommendation buttons are Apply, Skip, Snooze, Why, and Open.
+and `/job_help`. Recommendation cards provide Apply, Skip, Snooze, Why, Next,
+and the original URL.
 
 Manual public URL ingestion is always available for enrolled users. If parsing
 fails, the backend requests `Company | Title | Location | description`.
@@ -121,11 +131,31 @@ slug and terms, update `company-registry.yaml`, leave only the verified entry
 enabled, run adapter tests, and review discovery egress; never invent slugs.
 
 Apply creates a per-user application. Generation runs only when the user's flag
-is enabled and their own inventory validates. Final CV is accepted only as PDF
-or DOCX document up to 10 MB. Recruiter delivery remains a separate explicit
-confirmation and is blocked unless the user flag, per-user sender/review
-configuration, verified company-domain contact, final material, and duplicate
-send protections all pass. `/job_manual` sends nothing.
+is enabled and their own inventory validates. Generated PDF and DOCX files are
+delivered through the typed gateway with match explanation, gaps, warnings,
+recruiter draft, and review buttons. Email review remains optional. A final CV
+is accepted only as a generated draft or validated PDF/DOCX replacement up to
+10 MB. A contact requires a real name and user-supplied address plus explicit
+identity confirmation; the service never invents an address.
+
+The final approval screen displays the exact recipient, subject, recruiter
+message, and selected attachment. Recruiter delivery remains separate from
+official submission and is blocked unless the per-user flag, matching sender,
+high-confidence verified company-domain contact, explicit CV/message approval,
+and duplicate-send protections all pass. `/job_manual` sends nothing. SMTP or
+Telegram outcomes that may have succeeded are manual-only and never retried
+blindly.
+
+`/job_applications` offers Submitted, Interview, Rejected, Offer, Withdrawn,
+and user-selected follow-up dates when valid for the current state. The daily
+`job-assistant-reminders` CronJob only queues owner notifications. Snooze and
+Disable affect the selected application; `/job_setup` controls profile-level
+recommendation and reminder notifications.
+
+`/job_today` explains empty results using the last sanitized discovery
+summary: no configured source, cooldown, failure, zero returned jobs, filtered
+jobs, incomplete profile/inventory, or all jobs reviewed. It never exposes
+source exceptions or secret configuration.
 
 ## Backup and restore
 
@@ -156,3 +186,7 @@ tests queues/outbox and the restricted generation role, and requires
 `TEST_POSTGRES_URL`. Container and manifest validation run in CI. No validation
 command here contacts the live cluster unless the operator explicitly supplies
 such access.
+
+After a release is built and only during an authorized rollout, run the normal
+migration Job before starting the new API/worker images. No separate live data
+rewrite or Kubernetes apply is required beyond the declarative Argo CD rollout.

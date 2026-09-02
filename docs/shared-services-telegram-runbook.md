@@ -50,13 +50,15 @@ container build context, or the homelab-assistant host service.
 3. Send `/job_add` with a real public job URL, complete manual metadata if
    requested, and press Apply. Confirm a code is returned and generation uses
    only the owner's inventory. Do not enable recruiter delivery for this test.
-4. Check `/job_status CODE`, wait for the owner-scoped ready notification, then
-   start `/job_final CODE`. Confirm a photo is ignored, invalid/oversized files
-   are rejected, and a valid bounded PDF/DOCX is accepted only while the upload
-   conversation is pending.
+4. Run `/job_setup`, exercise Back/View/Cancel and confirm a profile. Use
+   `/job_today` and `/job_applications` without typing a code. Check
+   `/job_status CODE` as a fallback. Confirm generated PDF/DOCX documents arrive
+   with no storage path/key, and that a photo or invalid/oversized revision is
+   rejected unless an upload conversation is pending.
 5. Restart the gateway during a pending notification lease. Confirm delivered
-   messages are acked, definite failures retry with bounds, and an uncertain
-   send raises the alert and remains `uncertain` rather than being replayed.
+   messages/documents are acked, definite failures retry with bounds, and an
+   uncertain send or expired gateway lease remains `uncertain` rather than
+   being replayed.
 6. Confirm the owner-only homelab-assistant still has its original commands and
    that `/job_help` there has no route.
 

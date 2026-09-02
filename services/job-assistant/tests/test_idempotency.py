@@ -67,6 +67,25 @@ def test_stale_outbox_lease_recovery(session: Session) -> None:
     assert recovered and recovered.status == "retry"
 
 
+def test_stale_telegram_lease_becomes_uncertain_without_retry(session: Session) -> None:
+    prefix = "99999999-9999-9999-9999-999999999999"
+    user = User(
+        telegram_user_id=123,
+        storage_prefix=prefix,
+        career_inventory_key=f"{prefix}/private/career-inventory.yaml",
+    )
+    session.add(user)
+    session.flush()
+    event = put_outbox(session, "telegram", "notify", "123", {}, "stale-telegram", user_id=user.id)
+    event.status = "leased"
+    event.lease_owner = "dead-gateway"
+    event.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    session.flush()
+    assert recover_stale_outbox(session) == 1
+    recovered = session.get(OutboxEvent, event.id)
+    assert recovered and recovered.status == "uncertain"
+
+
 def test_duplicate_telegram_apply_creates_one_application(session: Session, tmp_path: Path) -> None:
     candidate = NormalizedJob(
         source="manual",

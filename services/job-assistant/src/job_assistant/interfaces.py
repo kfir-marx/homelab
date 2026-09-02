@@ -20,6 +20,12 @@ class NormalizedJob(BaseModel):
     location: str | None = None
     workplace_type: str | None = None
     employment_type: str | None = None
+    seniority: str | None = None
+    timezone_difference_hours: float | None = None
+    languages: list[str] | None = None
+    salary_min: int | None = None
+    salary_max: int | None = None
+    salary_currency: str | None = None
     description_html: str | None = None
     description_text: str = ""
     published_at: datetime | None = None
@@ -52,11 +58,11 @@ class GenerationResult(BaseModel):
     skill_groups: dict[str, list[str]]
     experience_bullets: list[GeneratedBullet]
     requirement_evidence: list[RequirementEvidence]
-    unsupported_requirements: list[str]
-    recruiter_message: str
+    unsupported_requirements: list[str] = Field(max_length=50)
+    recruiter_message: str = Field(min_length=1, max_length=2_000)
     contact_resolution_hints: list[str]
     claims_used: dict[str, list[str]]
-    warnings: list[str]
+    warnings: list[str] = Field(max_length=50)
 
 
 class GenerationProvider(Protocol):

@@ -26,6 +26,7 @@ from .config import Settings
 from .database import database_ready, make_engine, make_session_factory
 from .models import (
     Application,
+    Artifact,
     GenerationRun,
     JobScore,
     JobSource,
@@ -36,10 +37,13 @@ from .models import (
     WorkerHeartbeat,
     WorkItem,
 )
+from .security import UnsafeInput, safe_filename, validate_upload
 from .telegram import TelegramUpdateHandler
 
 
-def lease_telegram_notifications(session: Session, now: datetime) -> list[dict[str, Any]]:
+def lease_telegram_notifications(
+    session: Session, now: datetime, maximum_document_bytes: int = 10_000_000
+) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     events = session.scalars(
         select(OutboxEvent)
@@ -60,18 +64,66 @@ def lease_telegram_notifications(session: Session, now: datetime) -> list[dict[s
             event.status = "dead"
             event.last_error = "notification recipient ownership mismatch"
             continue
+        document = event.payload.get("document")
+        document_output: dict[str, Any] | None = None
+        if document is not None:
+            if not isinstance(document, dict):
+                event.status = "dead"
+                event.last_error = "invalid typed document payload"
+                continue
+            try:
+                artifact_id = uuid.UUID(str(document["artifact_id"]))
+            except (KeyError, ValueError):
+                event.status = "dead"
+                event.last_error = "invalid document artifact identifier"
+                continue
+            artifact = session.scalar(
+                select(Artifact).where(
+                    Artifact.id == artifact_id,
+                    Artifact.user_id == event.user_id,
+                    Artifact.size_bytes > 0,
+                    Artifact.mime_type.in_(
+                        [
+                            "application/pdf",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        ]
+                    ),
+                    Artifact.size_bytes <= maximum_document_bytes,
+                )
+            )
+            try:
+                filename = safe_filename(str(document.get("filename", "")))
+            except UnsafeInput:
+                filename = ""
+            expected_suffix = (
+                ".pdf" if artifact and artifact.mime_type == "application/pdf" else ".docx"
+            )
+            if (
+                artifact is None
+                or int(document.get("size_bytes", -1)) != artifact.size_bytes
+                or not filename.casefold().endswith(expected_suffix)
+            ):
+                event.status = "dead"
+                event.last_error = "document ownership, type, or size validation failed"
+                continue
+            document_output = {
+                "filename": filename[:200],
+                "mime_type": artifact.mime_type,
+                "size_bytes": artifact.size_bytes,
+            }
         event.status = "leased"
         event.lease_owner = "telegram-gateway"
         event.lease_expires_at = now + timedelta(minutes=2)
         event.attempts += 1
-        output.append(
-            {
-                "id": str(event.id),
-                "chat_id": int(event.recipient),
-                "text": str(event.payload["text"]),
-                "buttons": list(event.payload.get("buttons", [])),
-            }
-        )
+        notification: dict[str, Any] = {
+            "id": str(event.id),
+            "chat_id": int(event.recipient),
+            "text": str(event.payload["text"]),
+            "buttons": list(event.payload.get("buttons", [])),
+        }
+        if document_output:
+            notification["document"] = document_output
+        output.append(notification)
     return output
 
 
@@ -88,6 +140,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     telegram_handler = TelegramUpdateHandler(
         settings, FilesystemArtifactStorage(settings.artifact_root), trusted_gateway=True
     )
+    artifact_storage = FilesystemArtifactStorage(settings.artifact_root)
 
     def gateway_auth(authorization: Annotated[str | None, Header()] = None) -> None:
         expected = settings.shared_gateway_api_token.get_secret_value()
@@ -256,7 +309,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 select(TelegramConversation.id).where(
                     TelegramConversation.user_id == user.id,
                     TelegramConversation.chat_id == chat_id,
-                    TelegramConversation.state == "awaiting_final_cv",
+                    (
+                        TelegramConversation.state.like("setup:%")
+                        | TelegramConversation.state.in_(
+                            [
+                                "awaiting_job_metadata",
+                                "awaiting_final_cv",
+                                "awaiting_final_message",
+                                "awaiting_contact",
+                                "awaiting_follow_up",
+                            ]
+                        )
+                    ),
                     TelegramConversation.expires_at > datetime.now(UTC),
                 )
             )
@@ -298,8 +362,71 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def telegram_notifications() -> dict[str, list[dict[str, Any]]]:
         now = datetime.now(UTC)
         with factory.begin() as session:
-            output = lease_telegram_notifications(session, now)
+            output = lease_telegram_notifications(session, now, settings.max_upload_bytes)
         return {"notifications": output}
+
+    @application.get(
+        "/internal/telegram/notifications/{event_id}/document",
+        dependencies=[Depends(gateway_notification_auth)],
+    )
+    def telegram_notification_document(event_id: str) -> Response:
+        try:
+            identifier = uuid.UUID(event_id)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND) from exc
+        with factory() as session:
+            event = session.scalar(
+                select(OutboxEvent).where(
+                    OutboxEvent.id == identifier,
+                    OutboxEvent.channel == "telegram",
+                    OutboxEvent.status == "leased",
+                )
+            )
+            if event is None or not isinstance(event.payload.get("document"), dict):
+                raise HTTPException(status.HTTP_404_NOT_FOUND)
+            owner = session.get(User, event.user_id)
+            document = event.payload["document"]
+            try:
+                artifact_id = uuid.UUID(str(document["artifact_id"]))
+            except (KeyError, ValueError) as exc:
+                raise HTTPException(status.HTTP_404_NOT_FOUND) from exc
+            artifact = session.scalar(
+                select(Artifact).where(
+                    Artifact.id == artifact_id,
+                    Artifact.user_id == event.user_id,
+                    Artifact.size_bytes > 0,
+                    Artifact.mime_type.in_(
+                        [
+                            "application/pdf",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        ]
+                    ),
+                    Artifact.size_bytes <= settings.max_upload_bytes,
+                )
+            )
+            if owner is None or artifact is None or event.recipient != str(owner.telegram_user_id):
+                raise HTTPException(status.HTTP_404_NOT_FOUND)
+            content = artifact_storage.get_for_user(owner.storage_prefix, artifact.storage_key)
+            try:
+                filename = validate_upload(
+                    str(document.get("filename", "")),
+                    artifact.mime_type,
+                    len(content),
+                    settings.max_upload_bytes,
+                    content,
+                )
+            except UnsafeInput as exc:
+                raise HTTPException(status.HTTP_404_NOT_FOUND) from exc
+            if len(content) != artifact.size_bytes:
+                raise HTTPException(status.HTTP_404_NOT_FOUND)
+            return Response(
+                content=content,
+                media_type=artifact.mime_type,
+                headers={
+                    "Content-Length": str(len(content)),
+                    "X-Document-Filename": filename[:200],
+                },
+            )
 
     @application.post(
         "/internal/telegram/notifications/{event_id}/ack",

@@ -13,10 +13,11 @@ from .config import Settings
 from .domain import ingest_job, transition_job
 from .interfaces import JobSource, NormalizedJob
 from .metrics import JOBS_DEDUPLICATED, JOBS_DISCOVERED, JOBS_FILTERED, SOURCE_FAILURES
-from .models import Company, Job, JobScore, SearchFeedback, User
+from .models import Company, DiscoverySummary, Job, JobScore, SearchFeedback, User
 from .models import JobSource as JobSourceModel
+from .profiles import load_user_criteria, notification_preferences
 from .queue import put_outbox
-from .ranking import RankResult, SearchCriteria, diversify, load_criteria, rank_job
+from .ranking import RankResult, SearchCriteria, diversify, rank_job
 from .sources.registry import load_adapters
 from .states import JobStatus
 
@@ -45,18 +46,20 @@ def run_discovery(
     users = session.scalars(select(User).where(User.active.is_(True))).all()
     criteria_by_user: dict[uuid.UUID, tuple[SearchCriteria, str]] = {}
     for user in users:
-        criteria_path = (
-            settings.artifact_root / user.search_criteria_key
-            if user.search_criteria_key
-            else settings.search_criteria_path
-        )
         try:
-            criteria_by_user[user.id] = load_criteria(criteria_path)
+            criteria_by_user[user.id] = load_user_criteria(
+                session, user, settings.search_criteria_path, settings.artifact_root
+            )
         except (FileNotFoundError, ValueError):
             continue
     ranked: dict[object, list[tuple[NormalizedJob, RankResult]]] = {user.id: [] for user in users}
     persisted: dict[str, Job] = {}
-    for source in sources or discover_sources(settings):
+    selected_sources = list(sources) if sources is not None else discover_sources(settings)
+    diagnostics = {
+        user.id: {"cooldown": 0, "failed": 0, "found": 0, "filtered": 0, "queued": 0}
+        for user in users
+    }
+    for source in selected_sources:
         source_record = session.scalar(
             select(JobSourceModel).where(JobSourceModel.name == source.name)
         )
@@ -66,6 +69,8 @@ def run_discovery(
             session.flush()
         now = datetime.now(UTC)
         if source_record.cooldown_until and source_record.cooldown_until > now:
+            for values in diagnostics.values():
+                values["cooldown"] += 1
             continue
         try:
             candidates = list(source.discover())
@@ -74,10 +79,14 @@ def run_discovery(
             source_record.consecutive_failures += 1
             cooldown_hours = min(24, 2 ** (source_record.consecutive_failures - 1))
             source_record.cooldown_until = now + timedelta(hours=cooldown_hours)
+            for values in diagnostics.values():
+                values["failed"] += 1
             continue
         source_record.consecutive_failures = 0
         source_record.cooldown_until = None
         for candidate in candidates:
+            for values in diagnostics.values():
+                values["found"] += 1
             job, created = ingest_job(session, candidate)
             JOBS_DISCOVERED.labels(source=candidate.source).inc()
             if not created:
@@ -137,6 +146,7 @@ def run_discovery(
                 if result.passed:
                     ranked[user.id].append((candidate, result))
                 else:
+                    diagnostics[user.id]["filtered"] += 1
                     JOBS_FILTERED.labels(reason=result.explanation[:40]).inc()
     queued = 0
     for user in users:
@@ -155,25 +165,57 @@ def run_discovery(
                 f"Match {result.score:.0%}: {result.explanation}\n"
                 f"Gaps: {gaps}\n{candidate.original_url}"
             )
-            put_outbox(
-                session,
-                "telegram",
-                "job_recommendation",
-                str(user.telegram_user_id),
-                {
-                    "text": notification,
-                    "buttons": [
-                        ["Apply", f"apply:{job.id}"],
-                        ["Skip", f"skip:{job.id}"],
-                        ["Snooze", f"snooze:{job.id}"],
-                        ["Why recommended?", f"why:{job.id}"],
-                        ["Open job", f"open:{job.id}"],
-                    ],
-                },
-                f"daily:{criteria_version}:{job.id}:{user.id}:{index}",
-                user_id=user.id,
-            )
-            queued += 1
+            if notification_preferences(session, user).get("recommendations", True):
+                put_outbox(
+                    session,
+                    "telegram",
+                    "job_recommendation",
+                    str(user.telegram_user_id),
+                    {
+                        "text": notification,
+                        "buttons": [
+                            ["Apply", f"apply:{job.id}"],
+                            ["Skip", f"skip:{job.id}"],
+                            ["Snooze", f"snooze:{job.id}"],
+                            ["Why recommended?", f"why:{job.id}"],
+                            ["Open job", f"open:{job.id}"],
+                        ],
+                    },
+                    f"daily:{criteria_version}:{job.id}:{user.id}:{index}",
+                    user_id=user.id,
+                )
+                queued += 1
+                diagnostics[user.id]["queued"] += 1
+    for user in users:
+        values = diagnostics[user.id]
+        if user.id not in criteria_by_user:
+            outcome = "profile_incomplete"
+        elif not selected_sources:
+            outcome = "no_sources_configured"
+        elif values["queued"]:
+            outcome = "recommendations_queued"
+        elif values["failed"] == len(selected_sources):
+            outcome = "sources_failed"
+        elif values["cooldown"] == len(selected_sources):
+            outcome = "sources_in_cooldown"
+        elif values["found"] == 0:
+            outcome = "sources_returned_no_jobs"
+        elif values["filtered"]:
+            outcome = "jobs_filtered_out"
+        else:
+            outcome = "all_jobs_reviewed"
+        summary = session.get(DiscoverySummary, user.id)
+        if summary is None:
+            summary = DiscoverySummary(user_id=user.id, outcome=outcome)
+            session.add(summary)
+        summary.outcome = outcome
+        summary.sources_configured = len(selected_sources)
+        summary.sources_in_cooldown = values["cooldown"]
+        summary.sources_failed = values["failed"]
+        summary.jobs_found = values["found"]
+        summary.jobs_filtered = values["filtered"]
+        summary.recommendations_queued = values["queued"]
+        summary.ran_at = datetime.now(UTC)
     return queued
 
 

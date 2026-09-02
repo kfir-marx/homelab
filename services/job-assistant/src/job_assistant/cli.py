@@ -18,6 +18,7 @@ from .database_roles import provision_generation_role
 from .discovery import run_discovery
 from .logging import configure_logging
 from .models import User
+from .reminders import queue_due_reminders
 from .workers import run_general_worker, run_generation_worker
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
@@ -60,6 +61,15 @@ def discover() -> None:
     with factory.begin() as session:  # type: ignore[attr-defined]
         count = run_discovery(session, settings)
     typer.echo(f"queued {count} recommendation(s)")
+
+
+@app.command()
+def reminders() -> None:
+    """Queue one idempotent pass of user-owned application reminders."""
+    settings, factory = _runtime()
+    with factory.begin() as session:  # type: ignore[attr-defined]
+        count = queue_due_reminders(session)
+    typer.echo(f"queued {count} reminder(s)")
 
 
 @app.command()

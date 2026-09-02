@@ -18,6 +18,7 @@ class FakeTelegram:
         self.downloads = 0
         self.uncertain = False
         self.definite = False
+        self.sent_documents: list[tuple[int, str, str]] = []
 
     async def answer_callback(self, callback_id: str) -> None:
         self.answered.append(callback_id)
@@ -33,6 +34,21 @@ class FakeTelegram:
         self.downloads += 1
         return b"%PDF-valid", "documents/cv.pdf"
 
+    async def send_document(
+        self,
+        chat_id: int,
+        content: bytes,
+        filename: str,
+        mime_type: str,
+        caption: str,
+        buttons: list[Any],
+    ) -> None:
+        if self.uncertain:
+            raise UncertainTelegramError("timeout")
+        if self.definite:
+            raise DefiniteTelegramError("rejected")
+        self.sent_documents.append((chat_id, filename, mime_type))
+
 
 class FakeBackend:
     def __init__(self) -> None:
@@ -42,6 +58,7 @@ class FakeBackend:
         self.documents = 0
         self.events: list[dict[str, Any]] = []
         self.outcomes: list[tuple[str, str]] = []
+        self.notification_file = (b"%PDF-valid", "application/pdf", "draft.pdf")
 
     async def authorize(self, user_id: int, chat_id: int) -> bool:
         return self.authorized
@@ -64,6 +81,9 @@ class FakeBackend:
 
     async def notification_outcome(self, event_id: str, outcome: str) -> None:
         self.outcomes.append((event_id, outcome))
+
+    async def notification_document(self, event_id: str, maximum: int) -> tuple[bytes, str, str]:
+        return self.notification_file
 
 
 def settings() -> Settings:
@@ -133,6 +153,69 @@ def test_callback_is_acknowledged_and_typed_route_is_forwarded() -> None:
     asyncio.run(Gateway(settings(), telegram, backend).process(update))  # type: ignore[arg-type]
     assert telegram.answered == ["callback-1"]
     assert backend.updates == [update]
+
+
+def test_guided_callbacks_are_typed_and_bounded() -> None:
+    telegram, backend = FakeTelegram(), FakeBackend()
+    for index, data in enumerate(
+        [
+            "setup-confirm",
+            "accept-draft:11111111-1111-1111-1111-111111111111",
+            "remind-snooze:11111111-1111-1111-1111-111111111111",
+        ]
+    ):
+        update = {
+            "update_id": 20 + index,
+            "callback_query": {
+                "id": f"callback-{index}",
+                "from": {"id": 123},
+                "data": data,
+                "message": {"chat": {"id": 123, "type": "private"}},
+            },
+        }
+        asyncio.run(Gateway(settings(), telegram, backend).process(update))  # type: ignore[arg-type]
+    assert len(backend.updates) == 3
+    assert all(len(str(item["callback_query"]["data"]).encode()) <= 64 for item in backend.updates)
+
+
+def test_typed_document_notification_is_delivered_and_acked() -> None:
+    telegram, backend = FakeTelegram(), FakeBackend()
+    backend.events = [
+        {
+            "id": "event-1",
+            "chat_id": 123,
+            "text": "review",
+            "buttons": [],
+            "document": {
+                "filename": "draft.pdf",
+                "mime_type": "application/pdf",
+                "size_bytes": len(b"%PDF-valid"),
+            },
+        }
+    ]
+    asyncio.run(Gateway(settings(), telegram, backend).deliver_notifications())  # type: ignore[arg-type]
+    assert telegram.sent_documents == [(123, "draft.pdf", "application/pdf")]
+    assert backend.outcomes == [("event-1", "ack")]
+
+
+def test_uncertain_document_delivery_is_not_retried_blindly() -> None:
+    telegram, backend = FakeTelegram(), FakeBackend()
+    telegram.uncertain = True
+    backend.events = [
+        {
+            "id": "event-2",
+            "chat_id": 123,
+            "text": "review",
+            "buttons": [],
+            "document": {
+                "filename": "draft.pdf",
+                "mime_type": "application/pdf",
+                "size_bytes": len(b"%PDF-valid"),
+            },
+        }
+    ]
+    asyncio.run(Gateway(settings(), telegram, backend).deliver_notifications())  # type: ignore[arg-type]
+    assert backend.outcomes == [("event-2", "uncertain")]
 
 
 def test_invalid_callback_is_acknowledged_but_not_forwarded() -> None:

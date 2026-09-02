@@ -52,6 +52,8 @@ owner-scoped:
 - pending Telegram conversations and processed updates;
 - contacts, application contacts, delivery attempts, artifacts, generation
   runs, work items, audit/application events, and notification outbox rows.
+- confirmed search profiles, reminder preferences, setup/review conversations,
+  follow-up dates, and discovery summaries.
 
 Queries for codes, UUID callbacks, pending uploads, contacts, artifacts, and
 notifications include the authenticated internal `user_id`. Composite foreign
@@ -77,17 +79,62 @@ set and known callback verbs. It acknowledges authorized callbacks promptly,
 enforces Telegram's 64-byte callback limit, and forwards typed updates to the
 backend, which remains authoritative for workflow rules and ownership.
 
+The primary user surface is `/job_setup`, `/job_today`, and
+`/job_applications`. Setup is a private 24-hour resumable draft with Back,
+Keep, View, Reset, and Cancel controls; only Confirm Save writes the user's
+profile. Recommendation and application callbacks carry a typed verb plus an
+opaque UUID and remain below 64 bytes. Existing `/job_*` code-based commands
+remain supported as a fallback.
+
 Before any document download, the gateway calls the authenticated pending
 upload endpoint. It accepts documents only, permits PDF/DOCX, enforces the
 10 MB bound before and after download, and never downloads photos. Backend
 content validation remains authoritative.
 
+Generated PDF and DOCX review files use an authenticated, bounded pull
+contract. A leased outbox event names one artifact UUID and public filename;
+the API rechecks event state, recipient ownership, artifact ownership, MIME
+type, stored size, actual size, and storage prefix before returning bytes. The
+gateway repeats MIME/size checks and can only send that typed document to the
+event's owning chat. Neither side exposes a storage key or path, and the
+gateway has no artifact mount.
+
 Telegram update IDs are persisted for idempotency. Async notifications are
 leased from PostgreSQL. A definite Telegram failure enters bounded retry; a
 timeout or transport failure after a possible send becomes `uncertain` and is
-not automatically replayed. This prevents blind duplicate messages after a
-gateway restart. Metrics contain only outcome classes, never user identifiers
-or content.
+not automatically replayed. An expired Telegram lease also becomes
+`uncertain`, while non-Telegram leases remain retryable. This prevents blind
+duplicate messages or documents after a gateway restart. Metrics contain only
+outcome classes, never user identifiers or content.
+
+## Ranking and guided lifecycle
+
+Ranking is deterministic. Excluded titles/companies, job age, incompatible
+known location, required technologies, known seniority, known timezone
+difference, and known salary below the configured floor can exclude a job.
+Title, evidenced required/preferred technologies, freshness, location,
+seniority, language overlap, salary, preferred company, and bounded feedback
+contribute only when their required normalized data exists. Missing publication
+date, location, seniority, timezone, language, salary, or description is
+reported as unknown and omitted from the weighted denominator; it receives no
+invented penalty. A different salary currency is likewise unknown because the
+service performs no implicit currency conversion. Score explanations list only
+components that affected the score plus unknown criteria.
+
+Internal application states retain their stable command/API values. Telegram
+maps them to Drafting, Awaiting review, Ready to submit, Submitted, Interview,
+Rejected, Offer, Withdrawn, Manual action required, and Failed. Outcome
+transitions are explicit and audited. Official submission remains separate
+from outreach. Generated CV acceptance or a validated replacement, explicit
+message acceptance or replacement, a named user-verified contact, and an exact
+final approval summary are required before outreach can be queued.
+
+A daily CronJob creates owner-scoped reminders for stale generated drafts,
+ready-but-unrecorded applications, submitted applications without later
+outcomes, scheduled follow-up dates, and manual-action states. Application and
+profile switches can snooze or disable reminders. Daily idempotency keys
+deduplicate each user/application/type/window. Reminder code only writes
+Telegram outbox notifications and cannot send email or submit an application.
 
 ## Network and storage
 
@@ -119,6 +166,18 @@ UUID and storage prefix, backfills all existing rows, adds ownership foreign
 keys and uniqueness, then makes required ownership columns non-null. It also
 works on an empty database. Missing or invalid owner identity aborts before
 ownership is installed.
+
+Revision `0004_guided_workflow` adds confirmed per-user search profiles,
+notification preferences, discovery summaries, explicit CV/message review
+fields, follow-up controls, and interview/rejected/offer states. Existing rows
+receive safe nullable review fields and reminders default enabled. The schema
+keeps composite user ownership on the selected final artifact.
+
+CV-to-career-inventory onboarding is intentionally deferred. A future version
+must use the existing external-ai boundary, store extracted facts as an
+unconfirmed proposal, preserve evidence labels and the prior inventory, and
+require explicit confirmation before activation. Uploading a CV today never
+changes the authoritative career inventory.
 
 The committed career inventory remains in place. It is not used directly by
 the multi-user runtime. Before rollout, the operator copies the private runtime

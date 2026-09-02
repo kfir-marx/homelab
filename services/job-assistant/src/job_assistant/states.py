@@ -24,6 +24,9 @@ class ApplicationStatus(StrEnum):
     FINAL_MATERIAL_RECEIVED = "final_material_received"
     APPROVED = "approved"
     SUBMITTED = "submitted"
+    INTERVIEW = "interview"
+    REJECTED = "rejected"
+    OFFER = "offer"
     MANUAL_REQUIRED = "manual_required"
     FAILED = "failed"
     WITHDRAWN = "withdrawn"
@@ -87,7 +90,19 @@ APPLICATION_TRANSITIONS = {
     },
     ApplicationStatus.FAILED: {ApplicationStatus.GENERATION_QUEUED, ApplicationStatus.WITHDRAWN},
     ApplicationStatus.MANUAL_REQUIRED: {ApplicationStatus.SUBMITTED, ApplicationStatus.WITHDRAWN},
-    ApplicationStatus.SUBMITTED: set(),
+    ApplicationStatus.SUBMITTED: {
+        ApplicationStatus.INTERVIEW,
+        ApplicationStatus.REJECTED,
+        ApplicationStatus.OFFER,
+        ApplicationStatus.WITHDRAWN,
+    },
+    ApplicationStatus.INTERVIEW: {
+        ApplicationStatus.REJECTED,
+        ApplicationStatus.OFFER,
+        ApplicationStatus.WITHDRAWN,
+    },
+    ApplicationStatus.OFFER: {ApplicationStatus.WITHDRAWN},
+    ApplicationStatus.REJECTED: set(),
     ApplicationStatus.WITHDRAWN: set(),
 }
 

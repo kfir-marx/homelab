@@ -282,3 +282,47 @@ def test_notification_recipients_are_owner_scoped(session: Session) -> None:
     assert leased_event and leased_event.status == "leased"
     rejected = session.get(OutboxEvent, forged.id)
     assert rejected and rejected.status == "dead"
+
+
+def test_telegram_document_notification_cannot_cross_artifact_owner(
+    session: Session, tmp_path: Path
+) -> None:
+    owner = user(100, "10000000-0000-0000-0000-000000000000")
+    friend = user(200, "20000000-0000-0000-0000-000000000000")
+    session.add_all([owner, friend])
+    shared_job = job(session)
+    session.flush()
+    owner_app, _ = create_application(session, owner, shared_job, "test")
+    artifact = Artifact(
+        user_id=owner.id,
+        application_id=owner_app.id,
+        kind="generated_cv_pdf",
+        version=1,
+        storage_key=f"{owner.storage_prefix}/applications/cv.pdf",
+        sha256="0" * 64,
+        size_bytes=100,
+        mime_type="application/pdf",
+    )
+    session.add(artifact)
+    session.flush()
+    forged = put_outbox(
+        session,
+        "telegram",
+        "generation_ready_document",
+        str(friend.telegram_user_id),
+        {
+            "text": "must not deliver",
+            "document": {
+                "artifact_id": str(artifact.id),
+                "filename": "cv.pdf",
+                "mime_type": "application/pdf",
+                "size_bytes": 100,
+            },
+        },
+        "cross-owner-document",
+        user_id=friend.id,
+    )
+    session.flush()
+
+    assert lease_telegram_notifications(session, datetime.now(UTC)) == []
+    assert forged.status == "dead"

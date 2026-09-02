@@ -67,6 +67,21 @@ class User(Base, TimestampMixin):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class UserSearchProfile(Base, TimestampMixin):
+    __tablename__ = "user_search_profiles"
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id"), primary_key=True, nullable=False
+    )
+    criteria: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    notification_preferences: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
 class JobSource(Base, TimestampMixin):
     __tablename__ = "job_sources"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -194,10 +209,17 @@ class Application(Base, TimestampMixin):
         ForeignKeyConstraint(
             ["approved_contact_id", "user_id"], ["contacts.id", "contacts.user_id"]
         ),
+        ForeignKeyConstraint(
+            ["final_cv_artifact_id", "user_id"],
+            ["artifacts.id", "artifacts.user_id"],
+            name="fk_applications_final_cv_artifact",
+            use_alter=True,
+        ),
         UniqueConstraint("human_code"),
         CheckConstraint(
             "status IN ('selected','generation_queued','generating','review_ready',"
-            "'final_material_received','approved','submitted','manual_required','failed','withdrawn')",
+            "'final_material_received','approved','submitted','interview','rejected','offer',"
+            "'manual_required','failed','withdrawn')",
             name="ck_applications_status",
         ),
         CheckConstraint(
@@ -218,6 +240,13 @@ class Application(Base, TimestampMixin):
         String(40), default=OutreachStatus.NO_CONTACT.value, nullable=False
     )
     final_message: Mapped[str | None] = mapped_column(Text)
+    draft_message: Mapped[str | None] = mapped_column(Text)
+    final_subject: Mapped[str | None] = mapped_column(String(500))
+    final_cv_artifact_id: Mapped[uuid.UUID | None] = mapped_column()
+    cv_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    message_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reminders_disabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     approved_contact_id: Mapped[uuid.UUID | None] = mapped_column()
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     job: Mapped[Job] = relationship()
@@ -299,6 +328,7 @@ class Artifact(Base):
     __tablename__ = "artifacts"
     __table_args__ = (
         UniqueConstraint("application_id", "kind", "version"),
+        UniqueConstraint("id", "user_id"),
         ForeignKeyConstraint(
             ["application_id", "user_id"], ["applications.id", "applications.user_id"]
         ),
@@ -501,3 +531,20 @@ class UserJobState(Base, TimestampMixin):
         String(30), default=JobStatus.DISCOVERED.value, nullable=False
     )
     snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DiscoverySummary(Base):
+    __tablename__ = "discovery_summaries"
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id"), primary_key=True, nullable=False
+    )
+    outcome: Mapped[str] = mapped_column(String(50), nullable=False)
+    sources_configured: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sources_in_cooldown: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sources_failed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    jobs_found: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    jobs_filtered: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    recommendations_queued: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    ran_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )

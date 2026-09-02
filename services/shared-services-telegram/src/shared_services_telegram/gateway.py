@@ -31,10 +31,16 @@ JOB_COMMANDS = {
     "/job_submitted",
     "/job_reopen",
     "/job_help",
+    "/job_setup",
+    "/job_today",
+    "/job_applications",
 }
 JOB_CALLBACK = re.compile(
-    r"^(apply|skip|snooze|why|open|verify-contact|confirm|cancel):"
-    r"[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,36}$"
+    r"^(?:setup-(?:confirm|back|keep|reset|view|cancel)|"
+    r"(?:apply|skip|snooze|why|open|next|detail|verify-contact|confirm|cancel|manual|"
+    r"accept-draft|upload-revision|accept-message|edit-message|add-contact|choose-contact|final-review|"
+    r"submitted|interview|rejected|offer|withdrawn|follow-up|reminder-off|remind-snooze):"
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,36})$"
 )
 GATEWAY_HELP = (
     "Shared services:\n"
@@ -213,11 +219,31 @@ class Gateway:
         for event in events:
             event_id = str(event["id"])
             try:
-                await self.telegram.send_message(
-                    int(event["chat_id"]),
-                    str(event["text"]),
-                    list(event.get("buttons", [])),
-                )
+                document = event.get("document")
+                if isinstance(document, dict):
+                    content, mime_type, filename = await self.job_assistant.notification_document(
+                        event_id, self.settings.max_file_bytes
+                    )
+                    if (
+                        mime_type != str(document.get("mime_type"))
+                        or filename != str(document.get("filename"))
+                        or len(content) != int(document.get("size_bytes", -1))
+                    ):
+                        raise DefiniteTelegramError("typed_document_mismatch")
+                    await self.telegram.send_document(
+                        int(event["chat_id"]),
+                        content,
+                        filename,
+                        mime_type,
+                        str(event["text"]),
+                        list(event.get("buttons", [])),
+                    )
+                else:
+                    await self.telegram.send_message(
+                        int(event["chat_id"]),
+                        str(event["text"]),
+                        list(event.get("buttons", [])),
+                    )
             except UncertainTelegramError:
                 await self.job_assistant.notification_outcome(event_id, "uncertain")
                 DELIVERIES.labels(outcome="uncertain").inc()

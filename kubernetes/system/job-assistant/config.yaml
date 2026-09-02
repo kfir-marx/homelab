@@ -17,6 +17,7 @@ data:
     seniority: [mid, senior]
     israel_locations: [Israel, Tel Aviv, Haifa, Jerusalem]
     fully_remote: true
+    # Missing normalized timezone data is unknown and is not penalized.
     acceptable_timezone_difference_hours: 4
     required_technologies: [Kubernetes, Terraform, Linux]
     preferred_technologies: [Ansible, Argo CD, AWS, Python]
@@ -24,6 +25,7 @@ data:
     preferred_companies: []
     minimum_match_threshold: 0.65
     maximum_job_age_days: 30
+    # Missing normalized language/salary data is unknown and is not penalized.
     language_preferences: [English, Hebrew]
     minimum_salary: null
     salary_currency: null

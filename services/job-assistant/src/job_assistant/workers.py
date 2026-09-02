@@ -373,6 +373,7 @@ def _prepare_review(
             "generated_cv_pdf": (render_pdf(result), "application/pdf", ".pdf"),
         }
         artifact_keys: list[str] = []
+        generated_artifacts: list[Artifact] = []
         for kind, (content, mime_type, suffix) in rendered.items():
             key = user_storage_key(
                 user.storage_prefix,
@@ -389,22 +390,26 @@ def _prepare_review(
                 )
             )
             if existing:
+                generated_artifacts.append(existing)
                 continue
             stored = storage.put(key, content, mime_type)
-            session.add(
-                Artifact(
-                    user_id=user.id,
-                    application_id=application.id,
-                    kind=kind,
-                    version=1,
-                    storage_key=stored.key,
-                    sha256=stored.sha256,
-                    size_bytes=stored.size_bytes,
-                    mime_type=stored.mime_type,
-                )
+            artifact = Artifact(
+                user_id=user.id,
+                application_id=application.id,
+                kind=kind,
+                version=1,
+                storage_key=stored.key,
+                sha256=stored.sha256,
+                size_bytes=stored.size_bytes,
+                mime_type=stored.mime_type,
             )
+            session.add(artifact)
+            session.flush()
+            generated_artifacts.append(artifact)
         if application.status == ApplicationStatus.GENERATING.value:
             transition_application(session, application, ApplicationStatus.REVIEW_READY, "worker")
+        application.draft_message = result.recruiter_message
+        application.final_subject = f"Regarding the open role — {application.human_code}"
         score = session.scalar(
             select(JobScore)
             .where(
@@ -440,20 +445,61 @@ def _prepare_review(
                 if user.review_email
                 else "Review email is not configured; artifacts remain stored."
             )
+            explanation = score.explanation if score else "Not scored"
+            gaps = ", ".join(item[:100] for item in result.unsupported_requirements[:5])
+            warnings = ", ".join(item[:100] for item in result.warnings[:5])
+            gaps = gaps or "none identified"
+            warnings = warnings or "none"
+            review_buttons = [
+                ["Accept Draft", f"accept-draft:{application.id}"],
+                ["Upload Revision", f"upload-revision:{application.id}"],
+                ["Edit Message", f"edit-message:{application.id}"],
+                ["Manual", f"manual:{application.id}"],
+            ]
             put_outbox(
                 session,
                 "telegram",
-                "generation_ready",
+                "generation_ready_summary",
                 str(chat_id),
                 {
                     "text": (
-                        f"Application {application.human_code} is ready for review. "
-                        f"{email_note} Use /job_final {application.human_code} when ready."
-                    )
+                        f"Application {application.human_code} is ready for review.\n"
+                        f"Match: {explanation[:700]}\nGaps: {gaps}\nWarnings: {warnings}\n"
+                        f"Recruiter draft:\n{result.recruiter_message}\n\n{email_note}"
+                    ),
+                    "buttons": review_buttons,
                 },
-                f"generation-ready:{application.id}:v1",
+                f"generation-ready:{application.id}:summary:v1",
                 user_id=user.id,
             )
+            for artifact in generated_artifacts:
+                if artifact.mime_type not in {
+                    "application/pdf",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                }:
+                    continue
+                extension = ".pdf" if artifact.mime_type == "application/pdf" else ".docx"
+                put_outbox(
+                    session,
+                    "telegram",
+                    "generation_ready_document",
+                    str(chat_id),
+                    {
+                        "text": (
+                            f"Application {application.human_code} "
+                            f"{extension[1:].upper()} draft. Review details were sent separately."
+                        ),
+                        "buttons": review_buttons,
+                        "document": {
+                            "artifact_id": str(artifact.id),
+                            "filename": f"job-{application.human_code}-draft{extension}",
+                            "mime_type": artifact.mime_type,
+                            "size_bytes": artifact.size_bytes,
+                        },
+                    },
+                    f"generation-ready:{application.id}:{artifact.kind}:v1",
+                    user_id=user.id,
+                )
 
 
 def _send_recruiter_once(
@@ -555,20 +601,22 @@ def _send_recruiter_once(
         )
         session.add(created_attempt)
         final_cv = session.scalar(
-            select(Artifact)
-            .where(Artifact.application_id == application.id, Artifact.kind == "final_cv")
-            .order_by(Artifact.version.desc())
-            .limit(1)
+            select(Artifact).where(
+                Artifact.id == application.final_cv_artifact_id,
+                Artifact.application_id == application.id,
+                Artifact.user_id == application.user_id,
+            )
         )
         if not final_cv:
             raise RuntimeError("approved final CV is missing")
         recipient, message, code = contact.email, application.final_message, application.human_code
+        subject = application.final_subject or f"Regarding the open role — {code}"
         artifact_path = storage.path_for_user(user.storage_prefix, final_cv.storage_key)
     assert recipient and message
     provider_id = smtp.send(
         Delivery(
             recipient,
-            f"Regarding the open role — {code}",
+            subject,
             message,
             (artifact_path,),
             event.idempotency_key,

@@ -17,7 +17,7 @@ spec:
     matchExpressions:
       - key: component
         operator: In
-        values: [api, worker, generation-broker, discovery, migrate, backup]
+        values: [api, worker, generation-broker, discovery, reminders, migrate, backup]
   policyTypes: [Egress]
   egress:
     - to:
@@ -45,7 +45,7 @@ spec:
             matchExpressions:
               - key: component
                 operator: In
-                values: [api, worker, generation-broker, discovery, migrate, backup]
+                values: [api, worker, generation-broker, discovery, reminders, migrate, backup]
       ports:
         - port: 5432
 ---

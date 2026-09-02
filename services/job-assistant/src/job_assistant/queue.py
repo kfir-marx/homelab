@@ -87,9 +87,13 @@ def recover_stale_work(session: Session) -> int:
 
 def recover_stale_outbox(session: Session) -> int:
     now = datetime.now(UTC)
-    result = session.execute(
+    retryable = session.execute(
         update(OutboxEvent)
-        .where(OutboxEvent.status == "leased", OutboxEvent.lease_expires_at < now)
+        .where(
+            OutboxEvent.status == "leased",
+            OutboxEvent.lease_expires_at < now,
+            OutboxEvent.channel != "telegram",
+        )
         .values(
             status="retry",
             lease_owner=None,
@@ -97,7 +101,21 @@ def recover_stale_outbox(session: Session) -> int:
             available_at=now,
         )
     )
-    return int(getattr(result, "rowcount", 0) or 0)
+    uncertain = session.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.status == "leased",
+            OutboxEvent.lease_expires_at < now,
+            OutboxEvent.channel == "telegram",
+        )
+        .values(
+            status="uncertain",
+            lease_owner=None,
+            lease_expires_at=None,
+            last_error="gateway lease expired; Telegram delivery outcome is uncertain",
+        )
+    )
+    return int(getattr(retryable, "rowcount", 0) or 0) + int(getattr(uncertain, "rowcount", 0) or 0)
 
 
 def put_outbox(

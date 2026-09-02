@@ -88,6 +88,46 @@ class TelegramClient:
                 payload["reply_markup"] = {"inline_keyboard": keyboard}
         await self.call("sendMessage", payload)
 
+    async def send_document(
+        self,
+        chat_id: int,
+        content: bytes,
+        filename: str,
+        mime_type: str,
+        caption: str,
+        buttons: list[list[str]] | list[tuple[str, str]],
+    ) -> None:
+        if mime_type not in {
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }:
+            raise DefiniteTelegramError("document_type_rejected")
+        keyboard = []
+        for button in buttons:
+            label, callback = str(button[0]), str(button[1])
+            if len(callback.encode()) <= 64:
+                keyboard.append([{"text": label[:64], "callback_data": callback}])
+        data: dict[str, str] = {"chat_id": str(chat_id), "caption": caption[:1024]}
+        if keyboard:
+            data["reply_markup"] = json.dumps({"inline_keyboard": keyboard})
+        try:
+            response = await self._api.post(
+                "/sendDocument",
+                data=data,
+                files={"document": (filename[:200], content, mime_type)},
+                timeout=self._files.timeout,
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise UncertainTelegramError(type(exc).__name__) from exc
+        if response.status_code >= 500 or response.status_code == 429:
+            raise DefiniteTelegramError(f"telegram_{response.status_code}")
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise DefiniteTelegramError("telegram_invalid_response") from exc
+        if not response.is_success or not body.get("ok"):
+            raise DefiniteTelegramError(f"telegram_{response.status_code}")
+
     async def download(self, file_id: str, maximum: int) -> tuple[bytes, str]:
         metadata = await self.call("getFile", {"file_id": file_id})
         path = str(metadata.get("file_path", ""))
@@ -175,6 +215,36 @@ class JobAssistantClient:
         )
         response.raise_for_status()
         return list(response.json().get("notifications", []))
+
+    async def notification_document(self, event_id: str, maximum: int) -> tuple[bytes, str, str]:
+        try:
+            async with self._client.stream(
+                "GET",
+                f"/internal/telegram/notifications/{event_id}/document",
+                headers=self._notification_headers,
+            ) as response:
+                response.raise_for_status()
+                mime_type = response.headers.get("content-type", "").partition(";")[0]
+                filename = response.headers.get("x-document-filename", "")
+                chunks = bytearray()
+                async for chunk in response.aiter_bytes():
+                    chunks.extend(chunk)
+                    if len(chunks) > maximum:
+                        raise DefiniteTelegramError("backend_document_too_large")
+        except DefiniteTelegramError:
+            raise
+        except httpx.HTTPError as exc:
+            raise DefiniteTelegramError("backend_document_unavailable") from exc
+        if (
+            mime_type
+            not in {
+                "application/pdf",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            }
+            or not filename
+        ):
+            raise DefiniteTelegramError("backend_document_rejected")
+        return bytes(chunks), mime_type, filename
 
     async def notification_outcome(self, event_id: str, outcome: str) -> None:
         response = await self._client.post(
