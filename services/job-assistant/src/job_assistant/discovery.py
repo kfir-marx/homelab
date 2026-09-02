@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 
@@ -12,10 +13,10 @@ from .config import Settings
 from .domain import ingest_job, transition_job
 from .interfaces import JobSource, NormalizedJob
 from .metrics import JOBS_DEDUPLICATED, JOBS_DISCOVERED, JOBS_FILTERED, SOURCE_FAILURES
-from .models import Company, Job, JobScore, SearchFeedback
+from .models import Company, Job, JobScore, SearchFeedback, User
 from .models import JobSource as JobSourceModel
 from .queue import put_outbox
-from .ranking import RankResult, diversify, load_criteria, rank_job
+from .ranking import RankResult, SearchCriteria, diversify, load_criteria, rank_job
 from .sources.registry import load_adapters
 from .states import JobStatus
 
@@ -41,33 +42,19 @@ def discover_sources(settings: Settings) -> list[JobSource]:
 def run_discovery(
     session: Session, settings: Settings, sources: Iterable[JobSource] | None = None
 ) -> int:
-    criteria, criteria_version = load_criteria(settings.search_criteria_path)
-    technologies: set[str] = set()
-    try:
-        inventory = load_inventory(settings.career_inventory_path)
-        technologies = {
-            technology
-            for experience in inventory.experiences
-            for fact in experience.responsibilities + experience.achievements
-            for technology in fact.technologies
-        } | {
-            technology
-            for project in inventory.projects
-            for fact in project.facts
-            for technology in fact.technologies
-        }
-    except FileNotFoundError:
-        pass
-    feedback_rows = (
-        session.execute(
-            select(SearchFeedback.action, Job.title, Company.name)
-            .join(Job, SearchFeedback.job_id == Job.id)
-            .outerjoin(Company, Job.company_id == Company.id)
+    users = session.scalars(select(User).where(User.active.is_(True))).all()
+    criteria_by_user: dict[uuid.UUID, tuple[SearchCriteria, str]] = {}
+    for user in users:
+        criteria_path = (
+            settings.artifact_root / user.search_criteria_key
+            if user.search_criteria_key
+            else settings.search_criteria_path
         )
-        .tuples()
-        .all()
-    )
-    ranked: list[tuple[NormalizedJob, RankResult]] = []
+        try:
+            criteria_by_user[user.id] = load_criteria(criteria_path)
+        except (FileNotFoundError, ValueError):
+            continue
+    ranked: dict[object, list[tuple[NormalizedJob, RankResult]]] = {user.id: [] for user in users}
     persisted: dict[str, Job] = {}
     for source in sources or discover_sources(settings):
         source_record = session.scalar(
@@ -96,53 +83,85 @@ def run_discovery(
             if not created:
                 JOBS_DEDUPLICATED.labels(source=candidate.source).inc()
                 continue
-            result = rank_job(
-                candidate,
-                criteria,
-                technologies,
-                feedback_adjustment=_feedback_adjustment(candidate, feedback_rows),
-            )
-            session.add(
-                JobScore(
-                    job_id=job.id,
-                    criteria_version=criteria_version,
-                    score=result.score,
-                    passed_hard_filters=result.passed,
-                    explanation=result.explanation,
-                    gaps=list(result.gaps),
-                    components=result.components,
+            persisted[candidate.canonical_url] = job
+            for user in users:
+                selected_criteria = criteria_by_user.get(user.id)
+                if selected_criteria is None:
+                    continue
+                criteria, criteria_version = selected_criteria
+                technologies: set[str] = set()
+                try:
+                    inventory = load_inventory(settings.artifact_root / user.career_inventory_key)
+                    technologies = {
+                        technology
+                        for experience in inventory.experiences
+                        for fact in experience.responsibilities + experience.achievements
+                        for technology in fact.technologies
+                    } | {
+                        technology
+                        for project in inventory.projects
+                        for fact in project.facts
+                        for technology in fact.technologies
+                    }
+                    user.inventory_valid = True
+                except (FileNotFoundError, ValueError):
+                    user.inventory_valid = False
+                feedback_rows = (
+                    session.execute(
+                        select(SearchFeedback.action, Job.title, Company.name)
+                        .join(Job, SearchFeedback.job_id == Job.id)
+                        .outerjoin(Company, Job.company_id == Company.id)
+                        .where(SearchFeedback.user_id == user.id)
+                    )
+                    .tuples()
+                    .all()
                 )
+                result = rank_job(
+                    candidate,
+                    criteria,
+                    technologies,
+                    feedback_adjustment=_feedback_adjustment(candidate, feedback_rows),
+                )
+                session.add(
+                    JobScore(
+                        user_id=user.id,
+                        job_id=job.id,
+                        criteria_version=criteria_version,
+                        score=result.score,
+                        passed_hard_filters=result.passed,
+                        explanation=result.explanation,
+                        gaps=list(result.gaps),
+                        components=result.components,
+                    )
+                )
+                if result.passed:
+                    ranked[user.id].append((candidate, result))
+                else:
+                    JOBS_FILTERED.labels(reason=result.explanation[:40]).inc()
+    queued = 0
+    for user in users:
+        selected_criteria = criteria_by_user.get(user.id)
+        if selected_criteria is None:
+            continue
+        _, criteria_version = selected_criteria
+        for index, (candidate, result) in enumerate(diversify(ranked[user.id], 5)):
+            job = persisted[candidate.canonical_url]
+            transition_job(session, user, job, JobStatus.SHORTLISTED, "discovery")
+            location = candidate.location or "Location unspecified"
+            workplace = candidate.workplace_type or "workplace unspecified"
+            gaps = ", ".join(result.gaps) if result.gaps else "none identified"
+            notification = (
+                f"{candidate.company} — {candidate.title}\n{location} / {workplace}\n"
+                f"Match {result.score:.0%}: {result.explanation}\n"
+                f"Gaps: {gaps}\n{candidate.original_url}"
             )
-            if result.passed:
-                ranked.append((candidate, result))
-                persisted[candidate.canonical_url] = job
-            else:
-                JOBS_FILTERED.labels(reason=result.explanation[:40]).inc()
-    selected = diversify(ranked, 5)
-    if not selected:
-        return 0
-    allowed_chat_ids = sorted(settings.telegram_allowed_user_ids)
-    if not allowed_chat_ids:
-        return 0
-    for index, (candidate, result) in enumerate(selected):
-        job = persisted[candidate.canonical_url]
-        transition_job(session, job, JobStatus.SHORTLISTED, "discovery")
-        location = candidate.location or "Location unspecified"
-        workplace = candidate.workplace_type or "workplace unspecified"
-        gaps = ", ".join(result.gaps) if result.gaps else "none identified"
-        text = (
-            f"{candidate.company} — {candidate.title}\n{location} / {workplace}\n"
-            f"Match {result.score:.0%}: {result.explanation}\n"
-            f"Gaps: {gaps}\n{candidate.original_url}"
-        )
-        for chat_id in allowed_chat_ids:
             put_outbox(
                 session,
                 "telegram",
                 "job_recommendation",
-                str(chat_id),
+                str(user.telegram_user_id),
                 {
-                    "text": text,
+                    "text": notification,
                     "buttons": [
                         ["Apply", f"apply:{job.id}"],
                         ["Skip", f"skip:{job.id}"],
@@ -151,9 +170,11 @@ def run_discovery(
                         ["Open job", f"open:{job.id}"],
                     ],
                 },
-                f"daily:{criteria_version}:{job.id}:{chat_id}:{index}",
+                f"daily:{criteria_version}:{job.id}:{user.id}:{index}",
+                user_id=user.id,
             )
-    return len(selected)
+            queued += 1
+    return queued
 
 
 def _feedback_adjustment(

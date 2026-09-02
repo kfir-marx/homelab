@@ -43,11 +43,6 @@ spec:
                     secretKeyRef:
                       name: job-assistant-secrets
                       key: DATABASE_URL
-                - name: JOB_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS
-                  valueFrom:
-                    secretKeyRef:
-                      name: job-assistant-secrets
-                      key: TELEGRAM_ALLOWED_USER_IDS
                 - name: JOB_ASSISTANT_IMAP_HOST
                   valueFrom:
                     secretKeyRef:

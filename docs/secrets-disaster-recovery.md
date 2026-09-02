@@ -36,6 +36,13 @@ it preserves the router's long-lived node identity even if the reusable auth
 key later expires. Refresh its encrypted snapshot after enrollment or any
 identity change.
 
+The shared-services Telegram token is recoverable only as
+`shared-services-telegram/shared-services-telegram-secrets`. Restore it into
+that namespace only. Job Assistant stores only matching scoped update/file and
+notification tokens; homelab-assistant and external-ai must never receive the
+shared bot token. After rotation, capture both matching namespace Secrets in
+the same recovery update without printing their values.
+
 ## Install tools
 
 The controller needs `sops`, `age`/`age-keygen`, `jq`, and `kubectl`. Install

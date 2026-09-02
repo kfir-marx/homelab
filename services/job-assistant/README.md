@@ -2,17 +2,19 @@
 
 Personal, human-approved job discovery and application workflow service.
 
-The service exposes a private authenticated adapter for a future dedicated
-job-assistant Telegram gateway. No gateway is currently deployed; the private
-homelab-assistant bot does not route job commands. The service does not poll
-Telegram or hold a bot token. Typed replies preserve the existing commands,
+The service exposes a private authenticated adapter for the separate
+shared-services Telegram gateway. The private homelab-assistant bot does not
+route job commands. Job Assistant does not poll Telegram or hold a bot token.
+Typed replies preserve the existing commands,
 callbacks, pending conversations, final-CV upload validation, contact
 verification, approval, and submission/outreach separation.
 
 Generation inputs are sanitized and submitted idempotently to external-ai with
 the required JSON Schema. Returned claims are rejected unless every referenced
-career-inventory ID exists. Job state, queues, outbox events, artifacts, and
-audit history remain in PostgreSQL and retained storage.
+career-inventory ID exists. Public catalog data may be shared; applications,
+recommendations, profiles, conversations, contacts, artifacts, generation,
+delivery, events, and notifications are scoped to an immutable enrolled user.
+State remains in PostgreSQL and retained storage.
 
 Runtime roles:
 

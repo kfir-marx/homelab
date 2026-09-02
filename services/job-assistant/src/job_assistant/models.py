@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
@@ -40,6 +41,30 @@ class TimestampMixin:
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
+
+
+class User(Base, TimestampMixin):
+    __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("telegram_user_id > 0", name="ck_users_telegram_id_positive"),
+        UniqueConstraint("storage_prefix"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_owner: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(300))
+    username: Mapped[str | None] = mapped_column(String(100))
+    generation_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    automated_delivery_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    inventory_valid: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    storage_prefix: Mapped[str] = mapped_column(String(36), nullable=False)
+    career_inventory_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    cv_template_key: Mapped[str | None] = mapped_column(String(200))
+    review_email: Mapped[str | None] = mapped_column(String(500))
+    smtp_from: Mapped[str | None] = mapped_column(String(500))
+    search_criteria_key: Mapped[str | None] = mapped_column(String(200))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class JobSource(Base, TimestampMixin):
@@ -146,8 +171,9 @@ class JobDuplicateCandidate(Base):
 
 class JobScore(Base):
     __tablename__ = "job_scores"
-    __table_args__ = (UniqueConstraint("job_id", "criteria_version"),)
+    __table_args__ = (UniqueConstraint("user_id", "job_id", "criteria_version"),)
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), nullable=False)
     criteria_version: Mapped[str] = mapped_column(String(64), nullable=False)
     score: Mapped[float] = mapped_column(Float, nullable=False)
@@ -163,7 +189,11 @@ class JobScore(Base):
 class Application(Base, TimestampMixin):
     __tablename__ = "applications"
     __table_args__ = (
-        UniqueConstraint("job_id"),
+        UniqueConstraint("user_id", "job_id"),
+        UniqueConstraint("id", "user_id"),
+        ForeignKeyConstraint(
+            ["approved_contact_id", "user_id"], ["contacts.id", "contacts.user_id"]
+        ),
         UniqueConstraint("human_code"),
         CheckConstraint(
             "status IN ('selected','generation_queued','generating','review_ready',"
@@ -178,6 +208,7 @@ class Application(Base, TimestampMixin):
         ),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), nullable=False)
     human_code: Mapped[str] = mapped_column(String(8), nullable=False)
     status: Mapped[str] = mapped_column(
@@ -187,9 +218,10 @@ class Application(Base, TimestampMixin):
         String(40), default=OutreachStatus.NO_CONTACT.value, nullable=False
     )
     final_message: Mapped[str | None] = mapped_column(Text)
-    approved_contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id"))
+    approved_contact_id: Mapped[uuid.UUID | None] = mapped_column()
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     job: Mapped[Job] = relationship()
+    user: Mapped[User] = relationship()
 
 
 class ApplicationEvent(Base):
@@ -198,9 +230,13 @@ class ApplicationEvent(Base):
         CheckConstraint(
             "application_id IS NOT NULL OR job_id IS NOT NULL", name="ck_event_has_aggregate_id"
         ),
+        ForeignKeyConstraint(
+            ["application_id", "user_id"], ["applications.id", "applications.user_id"]
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    application_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("applications.id"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    application_id: Mapped[uuid.UUID | None] = mapped_column()
     job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id"))
     aggregate: Mapped[str] = mapped_column(String(30), nullable=False)
     from_state: Mapped[str | None] = mapped_column(String(40))
@@ -222,8 +258,10 @@ class Contact(Base, TimestampMixin):
             "verification_status IN ('unverified','verified','rejected','stale')",
             name="ck_contacts_verification",
         ),
+        UniqueConstraint("id", "user_id"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     company_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("companies.id"))
     name: Mapped[str] = mapped_column(String(300), nullable=False)
     role: Mapped[str | None] = mapped_column(String(300))
@@ -240,10 +278,17 @@ class Contact(Base, TimestampMixin):
 
 class ApplicationContact(Base):
     __tablename__ = "application_contacts"
-    __table_args__ = (UniqueConstraint("application_id", "contact_id"),)
+    __table_args__ = (
+        UniqueConstraint("application_id", "contact_id"),
+        ForeignKeyConstraint(
+            ["application_id", "user_id"], ["applications.id", "applications.user_id"]
+        ),
+        ForeignKeyConstraint(["contact_id", "user_id"], ["contacts.id", "contacts.user_id"]),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("applications.id"), nullable=False)
-    contact_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("contacts.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    application_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    contact_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     selected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -252,9 +297,15 @@ class ApplicationContact(Base):
 
 class Artifact(Base):
     __tablename__ = "artifacts"
-    __table_args__ = (UniqueConstraint("application_id", "kind", "version"),)
+    __table_args__ = (
+        UniqueConstraint("application_id", "kind", "version"),
+        ForeignKeyConstraint(
+            ["application_id", "user_id"], ["applications.id", "applications.user_id"]
+        ),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("applications.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    application_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     kind: Mapped[str] = mapped_column(String(50), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     storage_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -269,9 +320,15 @@ class Artifact(Base):
 
 class GenerationRun(Base):
     __tablename__ = "generation_runs"
-    __table_args__ = (UniqueConstraint("application_id", "idempotency_key"),)
+    __table_args__ = (
+        UniqueConstraint("application_id", "idempotency_key"),
+        ForeignKeyConstraint(
+            ["application_id", "user_id"], ["applications.id", "applications.user_id"]
+        ),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    application_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("applications.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    application_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     provider: Mapped[str] = mapped_column(String(100), nullable=False)
     external_job_id: Mapped[str | None] = mapped_column(String(40), index=True)
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -294,9 +351,14 @@ class WorkItem(Base, TimestampMixin):
         CheckConstraint(
             "status IN ('pending','leased','completed','retry','dead')", name="ck_work_status"
         ),
+        CheckConstraint(
+            "queue <> 'generation' OR user_id IS NOT NULL",
+            name="ck_generation_work_has_user",
+        ),
         Index("ix_work_claim", "queue", "status", "available_at"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     queue: Mapped[str] = mapped_column(String(100), nullable=False)
     kind: Mapped[str] = mapped_column(String(100), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
@@ -316,9 +378,14 @@ class OutboxEvent(Base, TimestampMixin):
     __tablename__ = "outbox_events"
     __table_args__ = (
         UniqueConstraint("idempotency_key"),
+        CheckConstraint(
+            "channel <> 'telegram' OR user_id IS NOT NULL",
+            name="ck_telegram_outbox_has_user",
+        ),
         Index("ix_outbox_pending", "status", "available_at"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     channel: Mapped[str] = mapped_column(String(30), nullable=False)
     event_type: Mapped[str] = mapped_column(String(100), nullable=False)
     recipient: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -338,12 +405,18 @@ class OutboxEvent(Base, TimestampMixin):
 
 class TelegramConversation(Base, TimestampMixin):
     __tablename__ = "telegram_conversations"
-    __table_args__ = (UniqueConstraint("chat_id", "user_id"),)
+    __table_args__ = (
+        UniqueConstraint("user_id"),
+        ForeignKeyConstraint(
+            ["application_id", "user_id"], ["applications.id", "applications.user_id"]
+        ),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     state: Mapped[str] = mapped_column(String(100), nullable=False)
-    application_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("applications.id"))
+    application_id: Mapped[uuid.UUID | None] = mapped_column()
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -351,6 +424,7 @@ class TelegramConversation(Base, TimestampMixin):
 class TelegramUpdate(Base):
     __tablename__ = "telegram_updates"
     update_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     processed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
@@ -359,10 +433,17 @@ class TelegramUpdate(Base):
 
 class DeliveryAttempt(Base):
     __tablename__ = "delivery_attempts"
-    __table_args__ = (UniqueConstraint("idempotency_key"),)
+    __table_args__ = (
+        UniqueConstraint("idempotency_key"),
+        ForeignKeyConstraint(
+            ["application_id", "user_id"], ["applications.id", "applications.user_id"]
+        ),
+        ForeignKeyConstraint(["contact_id", "user_id"], ["contacts.id", "contacts.user_id"]),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    application_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("applications.id"))
-    contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    application_id: Mapped[uuid.UUID | None] = mapped_column()
+    contact_id: Mapped[uuid.UUID | None] = mapped_column()
     channel: Mapped[str] = mapped_column(String(30), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(300), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -375,9 +456,16 @@ class DeliveryAttempt(Base):
 
 class SearchFeedback(Base):
     __tablename__ = "search_feedback"
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id", "action"),
+        ForeignKeyConstraint(
+            ["application_id", "user_id"], ["applications.id", "applications.user_id"]
+        ),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), nullable=False)
-    application_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("applications.id"))
+    application_id: Mapped[uuid.UUID | None] = mapped_column()
     action: Mapped[str] = mapped_column(String(50), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
@@ -395,3 +483,21 @@ class WorkerHeartbeat(Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSON, default=dict, nullable=False
     )
+
+
+class UserJobState(Base, TimestampMixin):
+    __tablename__ = "user_job_states"
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id"),
+        CheckConstraint(
+            "status IN ('discovered','shortlisted','skipped','snoozed','expired','reopened')",
+            name="ck_user_job_states_status",
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(30), default=JobStatus.DISCOVERED.value, nullable=False
+    )
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

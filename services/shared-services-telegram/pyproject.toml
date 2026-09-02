@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "homelab-shared-services-telegram"
+version = "0.1.0"
+description = "Typed, friend-shareable Telegram gateway for explicitly registered services"
+requires-python = ">=3.14.6"
+dependencies = [
+  "fastapi>=0.141.1,<1",
+  "httpx>=0.28.1,<1",
+  "prometheus-client>=0.26.0,<1",
+  "pydantic>=2.13.4,<3",
+  "pydantic-settings>=2.15.0,<3",
+  "uvicorn>=0.52.4,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=2.3.1,<3",
+  "pytest>=9.1.1,<10",
+  "PyYAML>=6.0.3,<7",
+  "respx>=0.23.1,<1",
+  "ruff>=0.16.4,<1",
+  "types-PyYAML>=6.0.12.20250915,<7",
+]
+
+[project.scripts]
+shared-services-telegram = "shared_services_telegram.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shared_services_telegram"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers --disable-warnings"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]

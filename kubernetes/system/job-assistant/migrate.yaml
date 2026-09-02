@@ -42,6 +42,11 @@ spec:
                 secretKeyRef:
                   name: job-assistant-codex-db
                   key: DATABASE_URL
+            - name: JOB_ASSISTANT_OWNER_TELEGRAM_USER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: job-assistant-secrets
+                  key: OWNER_TELEGRAM_USER_ID
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

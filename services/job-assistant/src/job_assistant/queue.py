@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
@@ -16,6 +17,7 @@ def enqueue_work(
     payload: dict[str, object],
     idempotency_key: str,
     max_attempts: int = 5,
+    user_id: uuid.UUID | None = None,
 ) -> WorkItem:
     existing = session.scalar(select(WorkItem).where(WorkItem.idempotency_key == idempotency_key))
     if existing:
@@ -26,6 +28,7 @@ def enqueue_work(
         payload=payload,
         idempotency_key=idempotency_key,
         max_attempts=max_attempts,
+        user_id=user_id,
     )
     session.add(item)
     session.flush()
@@ -104,6 +107,7 @@ def put_outbox(
     recipient: str,
     payload: dict[str, object],
     idempotency_key: str,
+    user_id: uuid.UUID | None = None,
 ) -> OutboxEvent:
     existing = session.scalar(
         select(OutboxEvent).where(OutboxEvent.idempotency_key == idempotency_key)
@@ -116,6 +120,7 @@ def put_outbox(
         recipient=recipient,
         payload=payload,
         idempotency_key=idempotency_key,
+        user_id=user_id,
     )
     session.add(event)
     session.flush()

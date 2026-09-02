@@ -63,11 +63,16 @@ JOB_TRANSITIONS = {
 }
 
 APPLICATION_TRANSITIONS = {
-    ApplicationStatus.SELECTED: {ApplicationStatus.GENERATION_QUEUED, ApplicationStatus.WITHDRAWN},
+    ApplicationStatus.SELECTED: {
+        ApplicationStatus.GENERATION_QUEUED,
+        ApplicationStatus.MANUAL_REQUIRED,
+        ApplicationStatus.WITHDRAWN,
+    },
     ApplicationStatus.GENERATION_QUEUED: {ApplicationStatus.GENERATING, ApplicationStatus.FAILED},
     ApplicationStatus.GENERATING: {ApplicationStatus.REVIEW_READY, ApplicationStatus.FAILED},
     ApplicationStatus.REVIEW_READY: {
         ApplicationStatus.FINAL_MATERIAL_RECEIVED,
+        ApplicationStatus.MANUAL_REQUIRED,
         ApplicationStatus.WITHDRAWN,
     },
     ApplicationStatus.FINAL_MATERIAL_RECEIVED: {

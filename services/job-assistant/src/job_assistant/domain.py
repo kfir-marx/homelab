@@ -15,6 +15,8 @@ from .models import (
     JobDuplicateCandidate,
     JobSourceOccurrence,
     SearchFeedback,
+    User,
+    UserJobState,
 )
 from .models import (
     JobSource as JobSourceModel,
@@ -132,12 +134,25 @@ def _record_suspected_duplicates(session: Session, job: Job, candidate: Normaliz
             )
 
 
-def transition_job(session: Session, job: Job, target: JobStatus, actor: str) -> None:
-    current = JobStatus(job.status)
+def get_user_job_state(session: Session, user: User, job: Job) -> UserJobState:
+    state = session.scalar(
+        select(UserJobState).where(UserJobState.user_id == user.id, UserJobState.job_id == job.id)
+    )
+    if state is None:
+        state = UserJobState(user_id=user.id, job_id=job.id)
+        session.add(state)
+        session.flush()
+    return state
+
+
+def transition_job(session: Session, user: User, job: Job, target: JobStatus, actor: str) -> None:
+    state = get_user_job_state(session, user, job)
+    current = JobStatus(state.status)
     ensure_transition(current, target, JOB_TRANSITIONS)
-    job.status = target.value
+    state.status = target.value
     session.add(
         ApplicationEvent(
+            user_id=user.id,
             job_id=job.id,
             aggregate="job",
             from_state=current.value,
@@ -147,8 +162,12 @@ def transition_job(session: Session, job: Job, target: JobStatus, actor: str) ->
     )
 
 
-def create_application(session: Session, job: Job, actor: str) -> tuple[Application, bool]:
-    existing = session.scalar(select(Application).where(Application.job_id == job.id))
+def create_application(
+    session: Session, user: User, job: Job, actor: str
+) -> tuple[Application, bool]:
+    existing = session.scalar(
+        select(Application).where(Application.user_id == user.id, Application.job_id == job.id)
+    )
     if existing:
         return existing, False
     code = generate_human_code(
@@ -157,11 +176,12 @@ def create_application(session: Session, job: Job, actor: str) -> tuple[Applicat
             is not None
         )
     )
-    application = Application(job_id=job.id, human_code=code)
+    application = Application(user_id=user.id, job_id=job.id, human_code=code)
     session.add(application)
     session.flush()
     session.add(
         ApplicationEvent(
+            user_id=user.id,
             application_id=application.id,
             job_id=job.id,
             aggregate="application",
@@ -192,6 +212,7 @@ def queue_application_generation(
             "notification_chat_id": notification_chat_id,
         },
         f"generate:{application.id}:v1",
+        user_id=application.user_id,
     )
 
 
@@ -207,6 +228,7 @@ def transition_application(
     application.status = target.value
     session.add(
         ApplicationEvent(
+            user_id=application.user_id,
             application_id=application.id,
             job_id=application.job_id,
             aggregate="application",
@@ -230,6 +252,7 @@ def transition_outreach(
     application.outreach_status = target.value
     session.add(
         ApplicationEvent(
+            user_id=application.user_id,
             application_id=application.id,
             job_id=application.job_id,
             aggregate="outreach",
@@ -241,12 +264,17 @@ def transition_outreach(
     )
 
 
-def get_application_by_code(session: Session, code: str) -> Application | None:
-    return session.scalar(select(Application).where(Application.human_code == code.upper()))
+def get_application_by_code(session: Session, user: User, code: str) -> Application | None:
+    return session.scalar(
+        select(Application).where(
+            Application.user_id == user.id, Application.human_code == code.upper()
+        )
+    )
 
 
 def record_search_feedback(
     session: Session,
+    user: User,
     job: Job,
     action: str,
     application: Application | None = None,
@@ -254,12 +282,14 @@ def record_search_feedback(
     existing = session.scalar(
         select(SearchFeedback.id).where(
             SearchFeedback.job_id == job.id,
+            SearchFeedback.user_id == user.id,
             SearchFeedback.action == action,
         )
     )
     if not existing:
         session.add(
             SearchFeedback(
+                user_id=user.id,
                 job_id=job.id,
                 application_id=application.id if application else None,
                 action=action,

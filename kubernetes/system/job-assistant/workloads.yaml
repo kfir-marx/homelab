@@ -58,16 +58,16 @@ spec:
                 secretKeyRef:
                   name: job-assistant-secrets
                   key: DATABASE_URL
-            - name: JOB_ASSISTANT_GATEWAY_API_TOKEN
+            - name: JOB_ASSISTANT_SHARED_GATEWAY_API_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: job-assistant-secrets
-                  key: GATEWAY_API_TOKEN
-            - name: JOB_ASSISTANT_GATEWAY_NOTIFICATION_TOKEN
+                  key: JOB_ASSISTANT_API_TOKEN
+            - name: JOB_ASSISTANT_SHARED_GATEWAY_NOTIFICATION_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: job-assistant-secrets
-                  key: GATEWAY_NOTIFICATION_TOKEN
+                  key: JOB_ASSISTANT_NOTIFICATION_TOKEN
           ports:
             - name: http
               containerPort: 8080
@@ -149,11 +149,6 @@ spec:
                 secretKeyRef:
                   name: job-assistant-secrets
                   key: DATABASE_URL
-            - name: JOB_ASSISTANT_TELEGRAM_ALLOWED_USER_IDS
-              valueFrom:
-                secretKeyRef:
-                  name: job-assistant-secrets
-                  key: TELEGRAM_ALLOWED_USER_IDS
             - name: JOB_ASSISTANT_SMTP_HOST
               valueFrom:
                 secretKeyRef:
@@ -174,11 +169,6 @@ spec:
                 secretKeyRef:
                   name: job-assistant-secrets
                   key: SMTP_FROM
-            - name: JOB_ASSISTANT_REVIEW_EMAIL
-              valueFrom:
-                secretKeyRef:
-                  name: job-assistant-secrets
-                  key: REVIEW_EMAIL
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

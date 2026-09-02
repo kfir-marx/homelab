@@ -19,6 +19,7 @@ from fastapi import (
 )
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from .artifacts import FilesystemArtifactStorage
 from .config import Settings
@@ -31,10 +32,47 @@ from .models import (
     JobSourceOccurrence,
     OutboxEvent,
     TelegramConversation,
+    User,
     WorkerHeartbeat,
     WorkItem,
 )
 from .telegram import TelegramUpdateHandler
+
+
+def lease_telegram_notifications(session: Session, now: datetime) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    events = session.scalars(
+        select(OutboxEvent)
+        .join(User, User.id == OutboxEvent.user_id)
+        .where(
+            OutboxEvent.channel == "telegram",
+            OutboxEvent.status.in_(["pending", "retry"]),
+            OutboxEvent.available_at <= now,
+            User.active.is_(True),
+        )
+        .order_by(OutboxEvent.created_at)
+        .with_for_update(skip_locked=True)
+        .limit(20)
+    ).all()
+    for event in events:
+        owner = session.get(User, event.user_id)
+        if owner is None or event.recipient != str(owner.telegram_user_id):
+            event.status = "dead"
+            event.last_error = "notification recipient ownership mismatch"
+            continue
+        event.status = "leased"
+        event.lease_owner = "telegram-gateway"
+        event.lease_expires_at = now + timedelta(minutes=2)
+        event.attempts += 1
+        output.append(
+            {
+                "id": str(event.id),
+                "chat_id": int(event.recipient),
+                "text": str(event.payload["text"]),
+                "buttons": list(event.payload.get("buttons", [])),
+            }
+        )
+    return output
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -52,7 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     def gateway_auth(authorization: Annotated[str | None, Header()] = None) -> None:
-        expected = settings.gateway_api_token.get_secret_value()
+        expected = settings.shared_gateway_api_token.get_secret_value()
         if (
             not expected
             or not authorization
@@ -64,7 +102,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def gateway_notification_auth(
         authorization: Annotated[str | None, Header()] = None,
     ) -> None:
-        expected = settings.gateway_notification_token.get_secret_value()
+        expected = settings.shared_gateway_notification_token.get_secret_value()
         if (
             not expected
             or not authorization
@@ -206,14 +244,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/internal/telegram/pending", dependencies=[Depends(gateway_auth)])
     def telegram_pending(user_id: int, chat_id: int) -> dict[str, bool]:
         with factory() as session:
+            user = session.scalar(
+                select(User).where(
+                    User.telegram_user_id == user_id,
+                    User.active.is_(True),
+                )
+            )
+            if user is None or user_id != chat_id:
+                return {"pending": False}
             pending = session.scalar(
                 select(TelegramConversation.id).where(
-                    TelegramConversation.user_id == user_id,
+                    TelegramConversation.user_id == user.id,
                     TelegramConversation.chat_id == chat_id,
+                    TelegramConversation.state == "awaiting_final_cv",
                     TelegramConversation.expires_at > datetime.now(UTC),
                 )
             )
         return {"pending": pending is not None}
+
+    @application.get("/internal/telegram/authorize", dependencies=[Depends(gateway_auth)])
+    def telegram_authorize(user_id: int, chat_id: int) -> dict[str, bool]:
+        if user_id != chat_id:
+            return {"authorized": False}
+        with factory() as session:
+            authorized = session.scalar(
+                select(User.id).where(User.telegram_user_id == user_id, User.active.is_(True))
+            )
+        return {"authorized": authorized is not None}
 
     @application.post("/internal/telegram/update", dependencies=[Depends(gateway_auth)])
     def telegram_update(update: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -240,32 +297,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     def telegram_notifications() -> dict[str, list[dict[str, Any]]]:
         now = datetime.now(UTC)
-        output: list[dict[str, Any]] = []
         with factory.begin() as session:
-            events = session.scalars(
-                select(OutboxEvent)
-                .where(
-                    OutboxEvent.channel == "telegram",
-                    OutboxEvent.status.in_(["pending", "retry"]),
-                    OutboxEvent.available_at <= now,
-                )
-                .order_by(OutboxEvent.created_at)
-                .with_for_update(skip_locked=True)
-                .limit(20)
-            ).all()
-            for event in events:
-                event.status = "leased"
-                event.lease_owner = "telegram-gateway"
-                event.lease_expires_at = now + timedelta(minutes=2)
-                event.attempts += 1
-                output.append(
-                    {
-                        "id": str(event.id),
-                        "chat_id": int(event.recipient),
-                        "text": str(event.payload["text"]),
-                        "buttons": list(event.payload.get("buttons", [])),
-                    }
-                )
+            output = lease_telegram_notifications(session, now)
         return {"notifications": output}
 
     @application.post(
@@ -279,13 +312,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except ValueError as exc:
                 raise HTTPException(status.HTTP_404_NOT_FOUND) from exc
             event = session.get(OutboxEvent, identifier)
-            if not event or event.channel != "telegram":
+            if (
+                not event
+                or event.channel != "telegram"
+                or event.status not in {"leased", "delivered"}
+            ):
                 raise HTTPException(status.HTTP_404_NOT_FOUND)
+            if event.status == "delivered":
+                return {"status": "delivered"}
             event.status = "delivered"
             event.delivered_at = datetime.now(UTC)
             event.lease_owner = None
             event.lease_expires_at = None
         return {"status": "delivered"}
+
+    @application.post(
+        "/internal/telegram/notifications/{event_id}/uncertain",
+        dependencies=[Depends(gateway_notification_auth)],
+    )
+    def telegram_notification_uncertain(event_id: str) -> dict[str, str]:
+        with factory.begin() as session:
+            try:
+                identifier = uuid.UUID(event_id)
+            except ValueError as exc:
+                raise HTTPException(status.HTTP_404_NOT_FOUND) from exc
+            event = session.get(OutboxEvent, identifier)
+            if not event or event.channel != "telegram" or event.status != "leased":
+                raise HTTPException(status.HTTP_404_NOT_FOUND)
+            event.status = "uncertain"
+            event.last_error = "Telegram send outcome uncertain; automatic retry suppressed"
+            event.lease_owner = None
+            event.lease_expires_at = None
+        return {"status": "uncertain"}
+
+    @application.post(
+        "/internal/telegram/notifications/{event_id}/retry",
+        dependencies=[Depends(gateway_notification_auth)],
+    )
+    def telegram_notification_retry(event_id: str) -> dict[str, str]:
+        with factory.begin() as session:
+            try:
+                identifier = uuid.UUID(event_id)
+            except ValueError as exc:
+                raise HTTPException(status.HTTP_404_NOT_FOUND) from exc
+            event = session.get(OutboxEvent, identifier)
+            if not event or event.channel != "telegram" or event.status != "leased":
+                raise HTTPException(status.HTTP_404_NOT_FOUND)
+            event.lease_owner = None
+            event.lease_expires_at = None
+            if event.attempts >= event.max_attempts:
+                event.status = "dead"
+            else:
+                event.status = "retry"
+                event.available_at = datetime.now(UTC) + timedelta(
+                    seconds=min(300, 2**event.attempts * 5)
+                )
+        return {"status": event.status}
 
     return application
 

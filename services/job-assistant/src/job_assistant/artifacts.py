@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import uuid
 from io import BytesIO
 from pathlib import Path
 
@@ -36,6 +37,24 @@ class FilesystemArtifactStorage:
 
     def get(self, key: str) -> bytes:
         return self._path(key).read_bytes()
+
+    def get_for_user(self, storage_prefix: str, key: str) -> bytes:
+        return self.path_for_user(storage_prefix, key).read_bytes()
+
+    def path_for_user(self, storage_prefix: str, key: str) -> Path:
+        prefix = str(uuid.UUID(storage_prefix))
+        if not key.startswith(f"{prefix}/"):
+            raise UnsafeInput("artifact does not belong to authenticated user")
+        return self._path(key)
+
+
+def user_storage_key(storage_prefix: str, *server_parts: str) -> str:
+    """Construct a key only from a server-owned UUID prefix and fixed identifiers."""
+    prefix = str(uuid.UUID(storage_prefix))
+    for part in server_parts:
+        if not part or part in {".", ".."} or "/" in part or "\\" in part:
+            raise UnsafeInput("invalid server-owned artifact key component")
+    return "/".join((prefix, *server_parts))
 
 
 def render_markdown(result: GenerationResult) -> bytes:

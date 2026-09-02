@@ -10,7 +10,13 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .artifacts import FilesystemArtifactStorage, render_docx, render_markdown, render_pdf
+from .artifacts import (
+    FilesystemArtifactStorage,
+    render_docx,
+    render_markdown,
+    render_pdf,
+    user_storage_key,
+)
 from .career import CareerInventory
 from .config import Settings
 from .contact_policy import ContactPolicyInput, automatic_email_allowed
@@ -32,6 +38,7 @@ from .models import (
     GenerationRun,
     JobScore,
     OutboxEvent,
+    User,
     WorkerHeartbeat,
     WorkItem,
 )
@@ -77,6 +84,8 @@ def run_generation_worker(factory: sessionmaker[Session], settings: Settings) ->
                 application = session.get(Application, application_id)
                 if not application:
                     raise GenerationError("application not found", "not_found")
+                if item.user_id != application.user_id:
+                    raise GenerationError("work item ownership mismatch", "authorization")
                 if application.status == ApplicationStatus.GENERATION_QUEUED.value:
                     transition_application(
                         session, application, ApplicationStatus.GENERATING, worker_id
@@ -88,6 +97,7 @@ def run_generation_worker(factory: sessionmaker[Session], settings: Settings) ->
                 )
                 if not run:
                     run = GenerationRun(
+                        user_id=application.user_id,
                         application_id=application.id,
                         provider=provider.name,
                         idempotency_key=item.idempotency_key,
@@ -141,6 +151,7 @@ def run_generation_worker(factory: sessionmaker[Session], settings: Settings) ->
                         "notification_chat_id": item.payload.get("notification_chat_id"),
                     },
                     f"prepare-review:{application.id}:v1",
+                    user_id=application.user_id,
                 )
                 work = session.get(WorkItem, item.id)
                 assert work
@@ -157,7 +168,7 @@ def run_generation_worker(factory: sessionmaker[Session], settings: Settings) ->
             with factory.begin() as session:
                 work = session.get(WorkItem, item.id)
                 if work:
-                    fail_work(work, str(exc), getattr(exc, "retryable", False))
+                    fail_work(work, code, getattr(exc, "retryable", False))
                 run = session.scalar(
                     select(GenerationRun).where(
                         GenerationRun.idempotency_key == item.idempotency_key
@@ -175,7 +186,13 @@ def run_generation_worker(factory: sessionmaker[Session], settings: Settings) ->
                     Application, uuid.UUID(str(item.payload["application_id"]))
                 )
                 chat_id = item.payload.get("notification_chat_id")
-                if chat_id is not None and code in {"authentication", "usage_limit"}:
+                owner = session.get(User, application.user_id) if application else None
+                if (
+                    chat_id is not None
+                    and owner is not None
+                    and int(chat_id) == owner.telegram_user_id
+                    and code in {"authentication", "usage_limit"}
+                ):
                     action = (
                         "Codex authentication needs manual recovery; follow the auth runbook."
                         if code == "authentication"
@@ -188,6 +205,7 @@ def run_generation_worker(factory: sessionmaker[Session], settings: Settings) ->
                         str(chat_id),
                         {"text": f"Application generation paused. {action}"},
                         f"generation-attention:{application_id}:{code}:v1",
+                        user_id=application.user_id if application else item.user_id,
                     )
                 if (
                     application
@@ -256,14 +274,17 @@ def run_general_worker(factory: sessionmaker[Session], settings: Settings) -> No
                 application_id = uuid.UUID(str(event.payload["application_id"]))
                 with factory() as session:
                     application = session.get(Application, application_id)
-                    assert application
+                    assert application and application.user_id == event.user_id
+                    user = session.get(User, application.user_id)
+                    assert user and user.active
                     company_name = (
                         application.job.company.name
                         if application.job.company
                         else "Unknown company"
                     )
                     attachments = tuple(
-                        settings.artifact_root / str(key) for key in event.payload["artifact_keys"]
+                        storage.path_for_user(user.storage_prefix, str(key))
+                        for key in event.payload["artifact_keys"]
                     )
                     body = (
                         f"Application: {application.human_code}\n{application.job.title} at "
@@ -303,7 +324,7 @@ def run_general_worker(factory: sessionmaker[Session], settings: Settings) -> No
             with factory.begin() as session:
                 current = session.get(OutboxEvent, event.id)
                 if current:
-                    current.last_error = str(exc)[:4_000]
+                    current.last_error = type(exc).__name__
                     current.lease_owner = None
                     current.lease_expires_at = None
                     if current.attempts >= current.max_attempts:
@@ -326,14 +347,26 @@ def _prepare_review(
     with factory.begin() as session:
         application = session.get(Application, application_id)
         run = session.get(GenerationRun, run_id)
-        if not application or not run or not run.output_json:
+        if (
+            not application
+            or not run
+            or run.user_id != application.user_id
+            or event.user_id != application.user_id
+            or not run.output_json
+        ):
             raise RuntimeError("completed generation output is unavailable")
+        user = session.get(User, application.user_id)
+        if user is None or not user.active:
+            raise RuntimeError("application owner is inactive")
         result = GenerationResult.model_validate(run.output_json)
         preview = render_markdown(result).decode("utf-8")
         rendered = {
             "generated_cv_markdown": (render_markdown(result), "text/markdown", ".md"),
             "generated_cv_docx": (
-                render_docx(result, settings.cv_template_path),
+                render_docx(
+                    result,
+                    settings.artifact_root / user.cv_template_key if user.cv_template_key else None,
+                ),
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 ".docx",
             ),
@@ -341,7 +374,12 @@ def _prepare_review(
         }
         artifact_keys: list[str] = []
         for kind, (content, mime_type, suffix) in rendered.items():
-            key = f"{application.human_code}/{kind}-v1{suffix}"
+            key = user_storage_key(
+                user.storage_prefix,
+                "applications",
+                str(application.id),
+                f"{kind}-v1{suffix}",
+            )
             artifact_keys.append(key)
             existing = session.scalar(
                 select(Artifact).where(
@@ -355,6 +393,7 @@ def _prepare_review(
             stored = storage.put(key, content, mime_type)
             session.add(
                 Artifact(
+                    user_id=user.id,
                     application_id=application.id,
                     kind=kind,
                     version=1,
@@ -368,16 +407,19 @@ def _prepare_review(
             transition_application(session, application, ApplicationStatus.REVIEW_READY, "worker")
         score = session.scalar(
             select(JobScore)
-            .where(JobScore.job_id == application.job_id)
+            .where(
+                JobScore.job_id == application.job_id,
+                JobScore.user_id == application.user_id,
+            )
             .order_by(JobScore.created_at.desc())
             .limit(1)
         )
-        if settings.review_email:
+        if user.review_email:
             put_outbox(
                 session,
                 "email",
                 "review_material",
-                settings.review_email,
+                user.review_email,
                 {
                     "application_id": str(application.id),
                     "message": result.recruiter_message,
@@ -389,12 +431,13 @@ def _prepare_review(
                     "artifact_keys": artifact_keys,
                 },
                 f"review:{application.id}:v1",
+                user_id=user.id,
             )
         chat_id = event.payload.get("notification_chat_id")
-        if chat_id is not None:
+        if chat_id is not None and int(chat_id) == user.telegram_user_id:
             email_note = (
                 "Review email queued."
-                if settings.review_email
+                if user.review_email
                 else "Review email is not configured; artifacts remain stored."
             )
             put_outbox(
@@ -409,6 +452,7 @@ def _prepare_review(
                     )
                 },
                 f"generation-ready:{application.id}:v1",
+                user_id=user.id,
             )
 
 
@@ -425,7 +469,19 @@ def _send_recruiter_once(
     with factory.begin() as session:
         application = session.get(Application, application_id)
         assert application and application.approved_contact_id
-        contact = session.get(Contact, application.approved_contact_id)
+        if event.user_id != application.user_id:
+            raise RuntimeError("delivery event ownership mismatch")
+        user = session.get(User, application.user_id)
+        if user is None or not user.active or not user.automated_delivery_enabled:
+            raise RuntimeError("automated delivery is disabled for this account")
+        if not user.smtp_from or user.smtp_from != settings.smtp_from:
+            raise RuntimeError("per-user sender configuration is unavailable")
+        contact = session.scalar(
+            select(Contact).where(
+                Contact.id == application.approved_contact_id,
+                Contact.user_id == application.user_id,
+            )
+        )
         assert contact
         existing_attempt = session.scalar(
             select(DeliveryAttempt).where(DeliveryAttempt.idempotency_key == event.idempotency_key)
@@ -490,6 +546,7 @@ def _send_recruiter_once(
             _queue_manual_delivery_notice(session, settings, application, reason)
             return
         created_attempt = DeliveryAttempt(
+            user_id=application.user_id,
             application_id=application.id,
             contact_id=contact.id,
             channel="email",
@@ -506,7 +563,7 @@ def _send_recruiter_once(
         if not final_cv:
             raise RuntimeError("approved final CV is missing")
         recipient, message, code = contact.email, application.final_message, application.human_code
-        artifact_path = settings.artifact_root / final_cv.storage_key
+        artifact_path = storage.path_for_user(user.storage_prefix, final_cv.storage_key)
     assert recipient and message
     provider_id = smtp.send(
         Delivery(
@@ -531,17 +588,19 @@ def _send_recruiter_once(
 def _queue_manual_delivery_notice(
     session: Session, settings: Settings, application: Application, reason: str
 ) -> None:
-    for chat_id in settings.telegram_allowed_user_ids:
+    user = session.get(User, application.user_id)
+    if user is not None and user.active:
         put_outbox(
             session,
             "telegram",
             "manual_delivery_required",
-            str(chat_id),
+            str(user.telegram_user_id),
             {
                 "text": (
                     f"Application {application.human_code} needs manual outreach: {reason}. "
                     "No automatic retry will be attempted."
                 )
             },
-            f"manual-delivery:{application.id}:{chat_id}:v1",
+            f"manual-delivery:{application.id}:{user.id}:v1",
+            user_id=user.id,
         )

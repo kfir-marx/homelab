@@ -11,13 +11,14 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .artifacts import FilesystemArtifactStorage
+from .artifacts import FilesystemArtifactStorage, user_storage_key
 from .career import load_inventory
 from .config import Settings
 from .contact_policy import ContactPolicyInput, automatic_email_allowed
 from .domain import (
     create_application,
     get_application_by_code,
+    get_user_job_state,
     ingest_job,
     normalize_company_name,
     queue_application_generation,
@@ -39,6 +40,7 @@ from .models import (
     JobScore,
     TelegramConversation,
     TelegramUpdate,
+    User,
 )
 from .normalization import canonicalize_url, description_hash
 from .queue import put_outbox
@@ -78,13 +80,6 @@ class TelegramUpdateHandler:
         self.trusted_gateway = trusted_gateway
 
     def process(self, session: Session, update: dict[str, Any]) -> list[TelegramReply]:
-        update_id = int(update["update_id"])
-        payload_hash = hashlib.sha256(
-            json.dumps(update, sort_keys=True, default=str).encode()
-        ).digest()
-        if session.get(TelegramUpdate, update_id):
-            return []
-        session.add(TelegramUpdate(update_id=update_id, payload_hash=payload_hash))
         callback = update.get("callback_query")
         message = update.get("message") or update.get("edited_message")
         actor = callback.get("from") if callback else message.get("from") if message else None
@@ -97,16 +92,31 @@ class TelegramUpdateHandler:
         )
         if not actor or not chat:
             return []
-        user_id, chat_id = int(actor["id"]), int(chat["id"])
-        if not self.trusted_gateway and user_id not in self.settings.telegram_allowed_user_ids:
+        telegram_user_id, chat_id = int(actor["id"]), int(chat["id"])
+        if chat.get("type") not in {None, "private"} or telegram_user_id != chat_id:
             return []
+        if message and any(
+            key in message
+            for key in ("forward_origin", "forward_from", "sender_chat", "author_signature")
+        ):
+            return []
+        user = session.scalar(
+            select(User).where(User.telegram_user_id == telegram_user_id, User.active.is_(True))
+        )
+        if user is None:
+            return []
+        update_id = int(update["update_id"])
+        payload_hash = hashlib.sha256(
+            json.dumps(update, sort_keys=True, default=str).encode()
+        ).digest()
+        if session.get(TelegramUpdate, update_id):
+            return []
+        session.add(TelegramUpdate(update_id=update_id, user_id=user.id, payload_hash=payload_hash))
         if callback:
-            return self._callback(session, chat_id, user_id, str(callback.get("data", "")))
+            return self._callback(session, user, chat_id, str(callback.get("data", "")))
         assert message is not None
         conversation = session.scalar(
-            select(TelegramConversation).where(
-                TelegramConversation.chat_id == chat_id, TelegramConversation.user_id == user_id
-            )
+            select(TelegramConversation).where(TelegramConversation.user_id == user.id)
         )
         if conversation and conversation.expires_at and conversation.expires_at < datetime.now(UTC):
             session.delete(conversation)
@@ -120,6 +130,8 @@ class TelegramUpdateHandler:
             return [TelegramReply(chat_id, "Use /job_help to see available commands.")]
         command, _, argument = text.partition(" ")
         command = command.split("@", 1)[0].casefold()
+        if command.startswith("/job_"):
+            command = "/" + command.removeprefix("/job_")
         if command == "/help":
             return [TelegramReply(chat_id, HELP)]
         if command == "/add":
@@ -149,7 +161,7 @@ class TelegramUpdateHandler:
                 )
             job, created = ingest_job(session, candidate)
             if candidate.raw_metadata.get("requires_manual_completion"):
-                self._set_job_conversation(session, chat_id, user_id, job.id)
+                self._set_job_conversation(session, user, chat_id, job.id)
                 return [
                     TelegramReply(
                         chat_id,
@@ -180,22 +192,18 @@ class TelegramUpdateHandler:
         }:
             if not argument:
                 return [TelegramReply(chat_id, f"Usage: /job_{command[1:]} <application-code>")]
-            application = get_application_by_code(session, argument.strip())
+            application = get_application_by_code(session, user, argument.strip())
             if not application:
                 return [TelegramReply(chat_id, "Unknown application code.")]
             if command == "/status":
                 return [TelegramReply(chat_id, self._status(application))]
             if command == "/final":
-                self._set_conversation(
-                    session, chat_id, user_id, "awaiting_final_cv", application.id
-                )
+                self._set_conversation(session, user, chat_id, "awaiting_final_cv", application.id)
                 return [
                     TelegramReply(chat_id, "Upload the final CV as a PDF or DOCX (maximum 10 MB).")
                 ]
             if command == "/contact":
-                self._set_conversation(
-                    session, chat_id, user_id, "awaiting_contact", application.id
-                )
+                self._set_conversation(session, user, chat_id, "awaiting_contact", application.id)
                 return [
                     TelegramReply(
                         chat_id,
@@ -216,6 +224,8 @@ class TelegramUpdateHandler:
                 ]
             if command == "/manual":
                 if application.status in {
+                    ApplicationStatus.SELECTED.value,
+                    ApplicationStatus.REVIEW_READY.value,
                     ApplicationStatus.FINAL_MATERIAL_RECEIVED.value,
                     ApplicationStatus.APPROVED.value,
                 }:
@@ -223,7 +233,7 @@ class TelegramUpdateHandler:
                         session,
                         application,
                         ApplicationStatus.MANUAL_REQUIRED,
-                        f"telegram:{user_id}",
+                        f"telegram:{user.telegram_user_id}",
                     )
                 if application.outreach_status in {
                     OutreachStatus.NO_CONTACT.value,
@@ -237,7 +247,7 @@ class TelegramUpdateHandler:
                         session,
                         application,
                         OutreachStatus.MANUAL_REQUIRED,
-                        f"telegram:{user_id}",
+                        f"telegram:{user.telegram_user_id}",
                     )
                 return [
                     TelegramReply(
@@ -255,7 +265,10 @@ class TelegramUpdateHandler:
                         )
                     ]
                 transition_application(
-                    session, application, ApplicationStatus.SUBMITTED, f"telegram:{user_id}"
+                    session,
+                    application,
+                    ApplicationStatus.SUBMITTED,
+                    f"telegram:{user.telegram_user_id}",
                 )
                 return [
                     TelegramReply(
@@ -264,7 +277,8 @@ class TelegramUpdateHandler:
                     )
                 ]
             job = application.job
-            if job.status not in {
+            state = get_user_job_state(session, user, job)
+            if state.status not in {
                 JobStatus.SKIPPED.value,
                 JobStatus.SNOOZED.value,
                 JobStatus.EXPIRED.value,
@@ -274,12 +288,18 @@ class TelegramUpdateHandler:
                         chat_id, "Only skipped, snoozed, or expired jobs can be reopened."
                     )
                 ]
-            transition_job(session, job, JobStatus.REOPENED, f"telegram:{user_id}")
+            transition_job(
+                session,
+                user,
+                job,
+                JobStatus.REOPENED,
+                f"telegram:{user.telegram_user_id}",
+            )
             return [TelegramReply(chat_id, "Job reopened explicitly.")]
         return [TelegramReply(chat_id, HELP)]
 
     def _callback(
-        self, session: Session, chat_id: int, user_id: int, data: str
+        self, session: Session, user: User, chat_id: int, data: str
     ) -> list[TelegramReply]:
         action, _, raw_id = data.partition(":")
         try:
@@ -291,21 +311,43 @@ class TelegramUpdateHandler:
             if not job:
                 return [TelegramReply(chat_id, "Job no longer exists.")]
             if action == "apply":
-                application, created = create_application(session, job, f"telegram:{user_id}")
-                record_search_feedback(session, job, "apply", application)
-                if job.status in {JobStatus.DISCOVERED.value, JobStatus.REOPENED.value}:
-                    transition_job(session, job, JobStatus.SHORTLISTED, f"telegram:{user_id}")
+                application, created = create_application(
+                    session, user, job, f"telegram:{user.telegram_user_id}"
+                )
+                record_search_feedback(session, user, job, "apply", application)
+                state = get_user_job_state(session, user, job)
+                if state.status in {JobStatus.DISCOVERED.value, JobStatus.REOPENED.value}:
+                    transition_job(
+                        session,
+                        user,
+                        job,
+                        JobStatus.SHORTLISTED,
+                        f"telegram:{user.telegram_user_id}",
+                    )
                 if application.status == ApplicationStatus.SELECTED.value:
+                    if not user.generation_enabled:
+                        return [
+                            TelegramReply(
+                                chat_id,
+                                f"Application {application.human_code} selected. Generation is "
+                                "disabled for this account; manual processing remains available.",
+                            )
+                        ]
                     try:
-                        inventory = load_inventory(self.settings.career_inventory_path)
+                        inventory = load_inventory(
+                            self.settings.artifact_root / user.career_inventory_key
+                        )
                     except (FileNotFoundError, ValueError) as exc:
+                        user.inventory_valid = False
                         return [
                             TelegramReply(
                                 chat_id,
                                 f"Application {application.human_code} selected, but generation is "
-                                f"blocked until the private career inventory is valid: {exc}",
+                                "blocked until this account's private career inventory is valid "
+                                f"({type(exc).__name__}).",
                             )
                         ]
+                    user.inventory_valid = True
                     payload = build_generation_payload(
                         inventory,
                         {
@@ -319,7 +361,7 @@ class TelegramUpdateHandler:
                     queue_application_generation(
                         session,
                         application,
-                        f"telegram:{user_id}",
+                        f"telegram:{user.telegram_user_id}",
                         payload,
                         notification_chat_id=chat_id,
                     )
@@ -330,31 +372,36 @@ class TelegramUpdateHandler:
                         + ("queued." if created else "already exists."),
                     )
                 ]
-            if action == "skip" and job.status in {
+            state = get_user_job_state(session, user, job)
+            if action == "skip" and state.status in {
                 JobStatus.DISCOVERED.value,
                 JobStatus.SHORTLISTED.value,
                 JobStatus.REOPENED.value,
             }:
-                transition_job(session, job, JobStatus.SKIPPED, f"telegram:{user_id}")
-                record_search_feedback(session, job, "skip")
+                transition_job(
+                    session, user, job, JobStatus.SKIPPED, f"telegram:{user.telegram_user_id}"
+                )
+                record_search_feedback(session, user, job, "skip")
                 return [
                     TelegramReply(
                         chat_id, "Skipped. It will not be recommended again unless reopened."
                     )
                 ]
-            if action == "snooze" and job.status in {
+            if action == "snooze" and state.status in {
                 JobStatus.DISCOVERED.value,
                 JobStatus.SHORTLISTED.value,
                 JobStatus.REOPENED.value,
             }:
-                transition_job(session, job, JobStatus.SNOOZED, f"telegram:{user_id}")
-                record_search_feedback(session, job, "snooze")
-                job.snoozed_until = datetime.now(UTC) + timedelta(days=7)
+                transition_job(
+                    session, user, job, JobStatus.SNOOZED, f"telegram:{user.telegram_user_id}"
+                )
+                record_search_feedback(session, user, job, "snooze")
+                state.snoozed_until = datetime.now(UTC) + timedelta(days=7)
                 return [TelegramReply(chat_id, "Snoozed for seven days.")]
             if action == "why":
                 score = session.scalar(
                     select(JobScore)
-                    .where(JobScore.job_id == job.id)
+                    .where(JobScore.job_id == job.id, JobScore.user_id == user.id)
                     .order_by(JobScore.created_at.desc())
                 )
                 return [
@@ -365,7 +412,9 @@ class TelegramUpdateHandler:
                 ]
             if action == "open":
                 return [TelegramReply(chat_id, job.original_url)]
-        callback_application = session.get(Application, object_id)
+        callback_application = session.scalar(
+            select(Application).where(Application.id == object_id, Application.user_id == user.id)
+        )
         if not callback_application:
             return [TelegramReply(chat_id, "Application no longer exists.")]
         application = callback_application
@@ -374,8 +423,7 @@ class TelegramUpdateHandler:
         if action == "verify-contact":
             conversation = session.scalar(
                 select(TelegramConversation).where(
-                    TelegramConversation.chat_id == chat_id,
-                    TelegramConversation.user_id == user_id,
+                    TelegramConversation.user_id == user.id,
                     TelegramConversation.application_id == application.id,
                     TelegramConversation.state == "awaiting_contact_verification",
                 )
@@ -395,9 +443,8 @@ class TelegramUpdateHandler:
                         chat_id, "Email domain does not match the company's verified domain."
                     )
                 ]
-            if company and not company.domain:
-                company.domain = domain
             contact = Contact(
+                user_id=user.id,
                 company_id=company.id if company else None,
                 name="User-verified named recruiter",
                 role="Recruiter or job poster",
@@ -415,7 +462,10 @@ class TelegramUpdateHandler:
             session.flush()
             session.add(
                 ApplicationContact(
-                    application_id=application.id, contact_id=contact.id, selected=True
+                    user_id=user.id,
+                    application_id=application.id,
+                    contact_id=contact.id,
+                    selected=True,
                 )
             )
             application.approved_contact_id = contact.id
@@ -424,13 +474,19 @@ class TelegramUpdateHandler:
                     session,
                     application,
                     OutreachStatus.CONTACT_CANDIDATE_FOUND,
-                    f"telegram:{user_id}",
+                    f"telegram:{user.telegram_user_id}",
                 )
                 transition_outreach(
-                    session, application, OutreachStatus.CONTACT_VERIFIED, f"telegram:{user_id}"
+                    session,
+                    application,
+                    OutreachStatus.CONTACT_VERIFIED,
+                    f"telegram:{user.telegram_user_id}",
                 )
                 transition_outreach(
-                    session, application, OutreachStatus.DRAFTED, f"telegram:{user_id}"
+                    session,
+                    application,
+                    OutreachStatus.DRAFTED,
+                    f"telegram:{user.telegram_user_id}",
                 )
             session.delete(conversation)
             return [
@@ -441,7 +497,7 @@ class TelegramUpdateHandler:
                 )
             ]
         if action == "confirm":
-            return [self._confirm_send(session, application, chat_id, user_id)]
+            return [self._confirm_send(session, user, application, chat_id)]
         return [TelegramReply(chat_id, "Unknown action.")]
 
     def _continue_conversation(
@@ -486,7 +542,12 @@ class TelegramUpdateHandler:
                     ("Open job", f"open:{job.id}"),
                 ),
             )
-        application = session.get(Application, conversation.application_id)
+        application = session.scalar(
+            select(Application).where(
+                Application.id == conversation.application_id,
+                Application.user_id == conversation.user_id,
+            )
+        )
         if not application:
             session.delete(conversation)
             return TelegramReply(conversation.chat_id, "Application no longer exists.")
@@ -510,10 +571,16 @@ class TelegramUpdateHandler:
                 )
             )
             version = int(maximum_version or 0) + 1
-            key = f"{application.human_code}/final-cv-v{version}{Path(name).suffix.lower()}"
+            key = user_storage_key(
+                application.user.storage_prefix,
+                "applications",
+                str(application.id),
+                f"final-cv-v{version}{Path(name).suffix.lower()}",
+            )
             stored = self.artifact_storage.put(key, raw, str(document["mime_type"]))
             session.add(
                 Artifact(
+                    user_id=application.user_id,
                     application_id=application.id,
                     kind="final_cv",
                     version=version,
@@ -538,7 +605,7 @@ class TelegramUpdateHandler:
                     session,
                     application,
                     ApplicationStatus.FINAL_MATERIAL_RECEIVED,
-                    f"telegram:{conversation.user_id}",
+                    f"telegram:{conversation.telegram_user_id}",
                 )
             session.delete(conversation)
             return TelegramReply(
@@ -566,8 +633,14 @@ class TelegramUpdateHandler:
         return None
 
     def _confirm_send(
-        self, session: Session, application: Any, chat_id: int, user_id: int
+        self, session: Session, user: User, application: Any, chat_id: int
     ) -> TelegramReply:
+        if not user.automated_delivery_enabled:
+            return TelegramReply(
+                chat_id,
+                f"Automatic delivery is disabled for this account. Use /job_manual "
+                f"{application.human_code}.",
+            )
         if application.status != ApplicationStatus.FINAL_MATERIAL_RECEIVED.value:
             return TelegramReply(chat_id, "Final CV and message are not both ready.")
         if not application.approved_contact_id:
@@ -575,11 +648,16 @@ class TelegramUpdateHandler:
                 chat_id,
                 "No verified contact is selected; use /job_contact CODE or /job_manual CODE.",
             )
-        contact = session.get(Contact, application.approved_contact_id)
+        contact = session.scalar(
+            select(Contact).where(
+                Contact.id == application.approved_contact_id, Contact.user_id == user.id
+            )
+        )
         already_sent = (
             session.scalar(
                 select(DeliveryAttempt.id).where(
                     DeliveryAttempt.application_id == application.id,
+                    DeliveryAttempt.user_id == user.id,
                     DeliveryAttempt.contact_id == application.approved_contact_id,
                     DeliveryAttempt.status.in_(["sending", "sent", "delivered"]),
                 )
@@ -602,13 +680,24 @@ class TelegramUpdateHandler:
                 f"Automatic delivery blocked: {reason}. Use /job_manual {application.human_code}.",
             )
         transition_application(
-            session, application, ApplicationStatus.APPROVED, f"telegram:{user_id}"
+            session,
+            application,
+            ApplicationStatus.APPROVED,
+            f"telegram:{user.telegram_user_id}",
         )
         if application.outreach_status == OutreachStatus.DRAFTED.value:
             transition_outreach(
-                session, application, OutreachStatus.APPROVED, f"telegram:{user_id}"
+                session,
+                application,
+                OutreachStatus.APPROVED,
+                f"telegram:{user.telegram_user_id}",
             )
-            transition_outreach(session, application, OutreachStatus.QUEUED, f"telegram:{user_id}")
+            transition_outreach(
+                session,
+                application,
+                OutreachStatus.QUEUED,
+                f"telegram:{user.telegram_user_id}",
+            )
         put_outbox(
             session,
             "email",
@@ -616,6 +705,7 @@ class TelegramUpdateHandler:
             str(application.approved_contact_id),
             {"application_id": str(application.id)},
             f"outreach:{application.id}:{application.approved_contact_id}:v1",
+            user_id=user.id,
         )
         return TelegramReply(chat_id, "Approved and queued exactly once.")
 
@@ -623,20 +713,27 @@ class TelegramUpdateHandler:
     def _status(application: Any) -> str:
         return (
             f"{application.human_code}: application={application.status}; "
-            f"outreach={application.outreach_status}; job={application.job.status}"
+            f"outreach={application.outreach_status}"
         )
 
     @staticmethod
     def _set_conversation(
-        session: Session, chat_id: int, user_id: int, state: str, application_id: uuid.UUID
+        session: Session,
+        user: User,
+        chat_id: int,
+        state: str,
+        application_id: uuid.UUID,
     ) -> None:
         conversation = session.scalar(
-            select(TelegramConversation).where(
-                TelegramConversation.chat_id == chat_id, TelegramConversation.user_id == user_id
-            )
+            select(TelegramConversation).where(TelegramConversation.user_id == user.id)
         )
         if not conversation:
-            conversation = TelegramConversation(chat_id=chat_id, user_id=user_id, state=state)
+            conversation = TelegramConversation(
+                chat_id=chat_id,
+                telegram_user_id=user.telegram_user_id,
+                user_id=user.id,
+                state=state,
+            )
             session.add(conversation)
         conversation.state = state
         conversation.application_id = application_id
@@ -645,17 +742,17 @@ class TelegramUpdateHandler:
 
     @staticmethod
     def _set_job_conversation(
-        session: Session, chat_id: int, user_id: int, job_id: uuid.UUID
+        session: Session, user: User, chat_id: int, job_id: uuid.UUID
     ) -> None:
         conversation = session.scalar(
-            select(TelegramConversation).where(
-                TelegramConversation.chat_id == chat_id,
-                TelegramConversation.user_id == user_id,
-            )
+            select(TelegramConversation).where(TelegramConversation.user_id == user.id)
         )
         if not conversation:
             conversation = TelegramConversation(
-                chat_id=chat_id, user_id=user_id, state="awaiting_job_metadata"
+                chat_id=chat_id,
+                telegram_user_id=user.telegram_user_id,
+                user_id=user.id,
+                state="awaiting_job_metadata",
             )
             session.add(conversation)
         conversation.state = "awaiting_job_metadata"

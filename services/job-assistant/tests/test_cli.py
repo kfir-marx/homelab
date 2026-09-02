@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,14 +28,14 @@ def test_migrate_uses_configured_migration_root(
         "JOB_ASSISTANT_GENERATION_DATABASE_URL",
         "postgresql+psycopg://generation:test@postgres/job_assistant",
     )
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr("job_assistant.cli.subprocess.run", fake_run)
     monkeypatch.setattr(cli, "provision_generation_role", lambda *_: None)
 
     cli.migrate()
 
     assert captured["cwd"] == tmp_path
     assert captured["command"] == [
-        cli.sys.executable,
+        sys.executable,
         "-m",
         "alembic",
         "-c",

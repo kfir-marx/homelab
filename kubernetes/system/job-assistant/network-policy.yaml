@@ -64,10 +64,11 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: homelab-assistant
+              kubernetes.io/metadata.name: shared-services-telegram
           podSelector:
             matchLabels:
-              component: telegram
+              app: shared-services-telegram
+              component: gateway
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: monitoring

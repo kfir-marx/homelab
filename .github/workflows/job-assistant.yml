@@ -5,23 +5,31 @@ on:
   pull_request:
     paths:
       - "services/job-assistant/**"
+      - "services/shared-services-telegram/**"
       - "kubernetes/apps/job-assistant.yaml"
+      - "kubernetes/apps/shared-services-telegram.yaml"
       - "kubernetes/system/job-assistant/**"
+      - "kubernetes/system/shared-services-telegram/**"
       - "!kubernetes/system/job-assistant/discovery.yaml"
       - "!kubernetes/system/job-assistant/migrate.yaml"
       - "!kubernetes/system/job-assistant/workloads.yaml"
       - "docs/job-assistant-*.md"
+      - "docs/shared-services-telegram-runbook.md"
       - ".github/workflows/job-assistant.yml"
   push:
     branches: [main]
     paths:
       - "services/job-assistant/**"
+      - "services/shared-services-telegram/**"
       - "kubernetes/apps/job-assistant.yaml"
+      - "kubernetes/apps/shared-services-telegram.yaml"
       - "kubernetes/system/job-assistant/**"
+      - "kubernetes/system/shared-services-telegram/**"
       - "!kubernetes/system/job-assistant/discovery.yaml"
       - "!kubernetes/system/job-assistant/migrate.yaml"
       - "!kubernetes/system/job-assistant/workloads.yaml"
       - "docs/job-assistant-*.md"
+      - "docs/shared-services-telegram-runbook.md"
       - ".github/workflows/job-assistant.yml"
 
 permissions:
@@ -33,6 +41,7 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/kfir-marx/homelab-job-assistant
+  GATEWAY_IMAGE_NAME: ghcr.io/kfir-marx/homelab-shared-services-telegram
 
 jobs:
   changes:
@@ -59,6 +68,7 @@ jobs:
             else
               git diff --name-only "${BEFORE_SHA}" "${CURRENT_SHA}" -- \
               services/job-assistant \
+              services/shared-services-telegram \
               .github/workflows/job-assistant.yml >"${changed_file}"
               if [[ -s "${changed_file}" ]]; then
                 release=true
@@ -89,25 +99,38 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.14"
+          python-version: "3.14.6"
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.6"
           enable-cache: true
-          cache-dependency-glob: services/job-assistant/uv.lock
+          cache-dependency-glob: |
+            services/job-assistant/uv.lock
+            services/shared-services-telegram/uv.lock
       - name: Install locked dependencies
         working-directory: services/job-assistant
         run: uv sync --locked --extra dev
+      - name: Install locked gateway dependencies
+        working-directory: services/shared-services-telegram
+        run: uv sync --locked --extra dev
       - name: Ruff format
-        run: uv run --directory services/job-assistant --locked --extra dev ruff format --check .
+        run: |
+          uv run --directory services/job-assistant --locked --extra dev ruff format --check .
+          uv run --directory services/shared-services-telegram --locked --extra dev ruff format --check .
       - name: Ruff lint
-        run: uv run --directory services/job-assistant --locked --extra dev ruff check .
+        run: |
+          uv run --directory services/job-assistant --locked --extra dev ruff check .
+          uv run --directory services/shared-services-telegram --locked --extra dev ruff check .
       - name: Mypy
-        run: uv run --directory services/job-assistant --locked --extra dev mypy src
+        run: |
+          uv run --directory services/job-assistant --locked --extra dev mypy src tests
+          uv run --directory services/shared-services-telegram --locked --extra dev mypy src tests
       - name: Tests
         env:
           TEST_POSTGRES_URL: postgresql+psycopg://job_assistant_test:test-only-password@localhost:5432/job_assistant_test
-        run: uv run --directory services/job-assistant --locked --extra dev pytest --cov=job_assistant --cov-report=term-missing
+        run: |
+          uv run --directory services/job-assistant --locked --extra dev pytest --cov=job_assistant --cov-report=term-missing
+          uv run --directory services/shared-services-telegram --locked --extra dev pytest
 
   manifests:
     name: "Render manifests"
@@ -118,7 +141,9 @@ jobs:
         with:
           version: v1.33.0
       - name: Render application resources
-        run: kubectl kustomize kubernetes/system/job-assistant >/tmp/job-assistant.yaml
+        run: |
+          kubectl kustomize kubernetes/system/job-assistant >/tmp/job-assistant.yaml
+          kubectl kustomize kubernetes/system/shared-services-telegram >/tmp/shared-services-telegram.yaml
       - name: Install kubeconform
         env:
           KUBECONFORM_SHA256: c31518ddd122663b3f3aa874cfe8178cb0988de944f29c74a0b9260920d115d3
@@ -139,10 +164,12 @@ jobs:
             -strict \
             -summary \
             /tmp/job-assistant.yaml \
-            kubernetes/apps/job-assistant.yaml
+            /tmp/shared-services-telegram.yaml \
+            kubernetes/apps/job-assistant.yaml \
+            kubernetes/apps/shared-services-telegram.yaml
 
   container:
-    name: "Build and publish container"
+    name: "Build and publish ${{ matrix.name }} container"
     if: >-
       needs.python.result == 'success' &&
       needs.manifests.result == 'success' &&
@@ -152,6 +179,16 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: job-assistant
+            context: services/job-assistant
+            image: ghcr.io/kfir-marx/homelab-job-assistant
+          - name: shared-services-telegram
+            context: services/shared-services-telegram
+            image: ghcr.io/kfir-marx/homelab-shared-services-telegram
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
@@ -164,10 +201,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
-          context: services/job-assistant
+          context: ${{ matrix.context }}
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: |
-            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+            ${{ matrix.image }}:sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -204,6 +241,15 @@ jobs:
           after_count="$(grep --fixed-strings --only-matching --no-filename \
             "image: ${IMAGE_NAME}:${IMAGE_TAG}" "${manifests[@]}" | wc --lines)"
           test "${after_count}" -eq 5
+          gateway_manifest=kubernetes/system/shared-services-telegram/workload.yaml
+          gateway_before="$(grep --extended-regexp --only-matching --no-filename \
+            "image: ${GATEWAY_IMAGE_NAME}:[^[:space:]]+" "${gateway_manifest}" | wc --lines)"
+          test "${gateway_before}" -eq 1
+          sed --in-place --regexp-extended \
+            "s|(image: ${GATEWAY_IMAGE_NAME}:)[^[:space:]]+|\1${IMAGE_TAG}|" \
+            "${gateway_manifest}"
+          grep --fixed-strings --quiet \
+            "image: ${GATEWAY_IMAGE_NAME}:${IMAGE_TAG}" "${gateway_manifest}"
       - name: Create or update the release PR
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
@@ -212,6 +258,7 @@ jobs:
             kubernetes/system/job-assistant/discovery.yaml
             kubernetes/system/job-assistant/migrate.yaml
             kubernetes/system/job-assistant/workloads.yaml
+            kubernetes/system/shared-services-telegram/workload.yaml
           branch: automation/job-assistant-image
           base: main
           delete-branch: true
@@ -220,7 +267,9 @@ jobs:
           body: |
             Publish the successfully tested image from `${{ github.sha }}`.
 
-            Image: `${{ env.IMAGE_NAME }}:sha-${{ github.sha }}`
+            Images:
+            - `${{ env.IMAGE_NAME }}:sha-${{ github.sha }}`
+            - `${{ env.GATEWAY_IMAGE_NAME }}:sha-${{ github.sha }}`
 
             Merging this PR lets Argo CD run the migration hook and roll the
             Deployments through the normal GitOps reconciliation path.

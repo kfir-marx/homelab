@@ -16,6 +16,7 @@ from job_assistant.models import (
     OutboxEvent,
     TelegramConversation,
     TelegramUpdate,
+    User,
     WorkItem,
 )
 from job_assistant.queue import (
@@ -36,8 +37,8 @@ def session() -> Generator[Session, None, None]:
 
 
 def test_work_and_outbox_idempotency(session: Session) -> None:
-    first = enqueue_work(session, "generation", "generate", {}, "same")
-    second = enqueue_work(session, "generation", "generate", {}, "same")
+    first = enqueue_work(session, "test", "generate", {}, "same")
+    second = enqueue_work(session, "test", "generate", {}, "same")
     assert first.id == second.id
     first_outbox = put_outbox(session, "email", "review", "me@example.com", {}, "same-email")
     second_outbox = put_outbox(session, "email", "review", "me@example.com", {}, "same-email")
@@ -45,7 +46,7 @@ def test_work_and_outbox_idempotency(session: Session) -> None:
 
 
 def test_stale_lease_recovery(session: Session) -> None:
-    item = enqueue_work(session, "generation", "generate", {}, "stale")
+    item = enqueue_work(session, "test", "generate", {}, "stale")
     item.status = "leased"
     item.lease_owner = "dead-worker"
     item.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
@@ -56,7 +57,7 @@ def test_stale_lease_recovery(session: Session) -> None:
 
 
 def test_stale_outbox_lease_recovery(session: Session) -> None:
-    event = put_outbox(session, "telegram", "notify", "123", {}, "stale-outbox")
+    event = put_outbox(session, "test", "notify", "123", {}, "stale-outbox")
     event.status = "leased"
     event.lease_owner = "dead-worker"
     event.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
@@ -76,14 +77,23 @@ def test_duplicate_telegram_apply_creates_one_application(session: Session, tmp_
         title="DevOps Engineer",
     )
     job, _ = ingest_job(session, candidate)
+    prefix = "11111111-1111-1111-1111-111111111111"
+    inventory = Path(__file__).parents[1] / "config/career-inventory.example.yaml"
+    inventory_target = tmp_path / prefix / "private/career-inventory.yaml"
+    inventory_target.parent.mkdir(parents=True)
+    inventory_target.write_bytes(inventory.read_bytes())
+    session.add(
+        User(
+            telegram_user_id=123,
+            storage_prefix=prefix,
+            career_inventory_key=f"{prefix}/private/career-inventory.yaml",
+            generation_enabled=True,
+        )
+    )
     session.flush()
     handler = TelegramUpdateHandler(
         Settings(
-            telegram_allowed_user_ids=frozenset({123}),
             artifact_root=tmp_path,
-            career_inventory_path=(
-                Path(__file__).parents[1] / "config/career-inventory.example.yaml"
-            ),
         ),
         FilesystemArtifactStorage(tmp_path),
     )
@@ -105,7 +115,7 @@ def test_duplicate_telegram_apply_creates_one_application(session: Session, tmp_
 
 def test_invalid_telegram_user_is_silently_ignored(session: Session, tmp_path: Path) -> None:
     handler = TelegramUpdateHandler(
-        Settings(telegram_allowed_user_ids=frozenset({123}), artifact_root=tmp_path),
+        Settings(artifact_root=tmp_path),
         FilesystemArtifactStorage(tmp_path),
     )
     update = {
@@ -127,16 +137,24 @@ def test_manual_metadata_conversation_survives_and_completes(
         title="Title requires manual completion",
     )
     job, _ = ingest_job(session, candidate)
+    user = User(
+        telegram_user_id=123,
+        storage_prefix="22222222-2222-2222-2222-222222222222",
+        career_inventory_key="22222222-2222-2222-2222-222222222222/private/career-inventory.yaml",
+    )
+    session.add(user)
+    session.flush()
     conversation = TelegramConversation(
         chat_id=123,
-        user_id=123,
+        telegram_user_id=123,
+        user_id=user.id,
         state="awaiting_job_metadata",
         data={"job_id": str(job.id)},
     )
     session.add(conversation)
     session.flush()
     handler = TelegramUpdateHandler(
-        Settings(telegram_allowed_user_ids=frozenset({123}), artifact_root=tmp_path),
+        Settings(artifact_root=tmp_path),
         FilesystemArtifactStorage(tmp_path),
     )
     reply = handler._continue_conversation(

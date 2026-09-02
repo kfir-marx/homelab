@@ -1,6 +1,5 @@
 import pytest
 
-from job_assistant import human_codes
 from job_assistant.human_codes import ALPHABET, generate_human_code
 from job_assistant.states import (
     APPLICATION_TRANSITIONS,
@@ -16,7 +15,7 @@ def test_human_alphabet_excludes_ambiguous_characters() -> None:
 
 def test_human_code_retries_collision(monkeypatch: pytest.MonkeyPatch) -> None:
     choices = iter("AAAAABBBBB")
-    monkeypatch.setattr(human_codes.secrets, "choice", lambda _: next(choices))
+    monkeypatch.setattr("job_assistant.human_codes.secrets.choice", lambda _: next(choices))
     assert generate_human_code(lambda code: code == "AAAAA") == "BBBBB"
 
 

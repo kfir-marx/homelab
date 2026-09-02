@@ -1,0 +1,42 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: shared-services-telegram
+  namespace: shared-services-telegram
+  labels:
+    app: shared-services-telegram
+spec:
+  selector:
+    matchLabels:
+      app: shared-services-telegram
+      component: gateway
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shared-services-telegram
+  namespace: shared-services-telegram
+  labels:
+    app: shared-services-telegram
+spec:
+  groups:
+    - name: shared-services-telegram.rules
+      rules:
+        - alert: SharedServicesTelegramUnavailable
+          expr: up{namespace="shared-services-telegram",service="shared-services-telegram"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Shared-services Telegram gateway is unavailable
+        - alert: SharedServicesTelegramUncertainDelivery
+          expr: increase(shared_services_telegram_deliveries_total{outcome="uncertain"}[15m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: Telegram send outcome needs manual review
+
