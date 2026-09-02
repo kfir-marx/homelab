@@ -4,6 +4,11 @@ import uvicorn
 app = typer.Typer(no_args_is_help=True)
 
 
+@app.callback()
+def main() -> None:
+    """Run the FlightStay Match API."""
+
+
 @app.command()
 def serve(host: str = "0.0.0.0", port: int = 8080) -> None:  # noqa: S104
     uvicorn.run(
