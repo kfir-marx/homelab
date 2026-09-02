@@ -56,8 +56,7 @@ jobs:
         run: |
           kubectl kustomize kubernetes/system/hotel-flight-matcher >/tmp/hotel-flight-matcher.yaml
           kubectl kustomize kubernetes/system/homelab-assistant >/tmp/homelab-assistant.yaml
-          kubectl create --dry-run=client --validate=false \
-            -f kubernetes/system/cloudflared -o yaml >/tmp/cloudflared.yaml
+          kubectl kustomize kubernetes/system/cloudflared >/tmp/cloudflared.yaml
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
