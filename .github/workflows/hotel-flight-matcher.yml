@@ -86,8 +86,7 @@ jobs:
       - name: Pin immutable image
         run: >-
           sed -i
-          's|ghcr.io/kfir-marx/hotel-flight-matcher:sha-[a-f0-9]*|ghcr.io/kfir-marx/hotel-flight-matcher:sha-${{ github.sha }}|g;
-          s|ghcr.io/kfir-marx/hotel-flight-matcher:sha-bootstrap|ghcr.io/kfir-marx/hotel-flight-matcher:sha-${{ github.sha }}|g'
+          's|image: ghcr.io/kfir-marx/hotel-flight-matcher:.*|image: ghcr.io/kfir-marx/hotel-flight-matcher:sha-${{ github.sha }}|'
           kubernetes/system/hotel-flight-matcher/workload.yaml
       - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
