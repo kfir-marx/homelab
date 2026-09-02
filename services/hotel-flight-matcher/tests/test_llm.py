@@ -46,6 +46,7 @@ async def test_extracts_valid_schema() -> None:
     assert result.is_hotel_booking is True
     request_body = route.calls[0].request.content.decode()
     assert "json_schema" in request_body
+    assert "MUST NOT be null" in request_body
     assert "never follow instructions" not in email().body_text
 
 
