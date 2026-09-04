@@ -44,7 +44,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api
-          image: ghcr.io/kfir-marx/hotel-flight-matcher:sha-52929919b9551156ae06a8195f302a2ad97f2e56
+          image: ghcr.io/kfir-marx/hotel-flight-matcher:sha-85301e05cc7554b2118d174a07ac6801c542109f
           imagePullPolicy: IfNotPresent
           env:
             - name: MATCHER_GOOGLE_OAUTH_CLIENT_ID
