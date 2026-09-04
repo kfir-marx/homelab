@@ -1,6 +1,6 @@
 # Homelab — GitOps Kubernetes on Proxmox
 
-GitOps-driven Kubernetes architecture running Talos Linux on two Proxmox
+GitOps-driven Kubernetes architecture running Talos Linux on three Proxmox
 hosts. The separate Ubuntu workstation supplies critical NFS storage and keeps
 its NVIDIA GPU for local graphics. The optional Windows 11 gaming VM on
 `largegpu` shares the RTX 3080 with a Talos worker. Ansible configures
@@ -26,18 +26,18 @@ Talos, and ArgoCD owns in-cluster workloads.
     native S3 lockfile, role: assumed)
              │                                  │
              ▼                                  ▼
-┌──────────────────────────────────┐   ┌──────────────────────────────┐
-│  Proxmox VE 9 (2 hosts)          │   │  Kubernetes / Talos 1.13    │
-│                                  │   │                              │
-│  smallgpu  ── 10 TB bulk NFS     │   │  cp-1   2c / 4 GiB          │
-│            ── gpu-3 + RTX 2060   │   │  gpu-3 10c / 12 GiB / RTX2060│
-│                                  │   │                              │
-│  largegpu  ── cp-1               │   │  gpu-2 14c / 52 GiB / RTX3080│
-│            ── gpu-2 / Windows    │   │                              │
-│               runtime mutex      │   │  NFS PVs (static, RWX):     │
-│                                  │   │   bulk     → smallgpu       │
-├──────────────────────────────────┤   │   critical → Ubuntu :105    │
-│  Ubuntu 26.04 workstation        │   └──────────────────────────────┘
+┌──────────────────────────────────┐   ┌────────────────────────────────┐
+│  Proxmox VE 9 (3 hosts)          │   │  Kubernetes / Talos 1.13      │
+│                                  │   │                                │
+│  smallgpu  ── cp-2               │   │  cp-1/2/3  2c / 4 GiB each    │
+│            ── gpu-3 + RTX 2060   │   │  gpu-3    10c / 36 GiB / RTX2060│
+│            ── 10 TB bulk NFS     │   │  gpu-2    14c / 52 GiB / RTX3080│
+│  largegpu  ── cp-1               │   │                                │
+│            ── gpu-2 / Windows    │   │  NFS PVs (static, RWX):       │
+│               runtime mutex      │   │   bulk     → smallgpu         │
+│  tinygpu   ── cp-3               │   │   critical → Ubuntu :105      │
+├──────────────────────────────────┤   └────────────────────────────────┘
+│  Ubuntu 26.04 workstation        │
 │  192.168.1.105 ── 800 GB NFS     │
 │                ── GTX 1060/HDMI  │
 └──────────────────────────────────┘
@@ -48,16 +48,22 @@ Talos, and ArgoCD owns in-cluster workloads.
 | Host | Mgmt IP | Host OS / hypervisor | CPU / RAM | GPU | Primary role |
 |------|---------|----------------------|-----------|-----|--------------|
 | `ubuntu-workstation` | `192.168.1.105` on `enp7s0f1` | Ubuntu 26.04 | Intel i7-8750H, 6c/12t; 15.46 GiB | Intel UHD 630 + GTX 1060 Mobile for Ubuntu | Daily workstation and critical NFS |
-| `smallgpu` | `192.168.1.106` | Proxmox VE 9 | Ryzen 5 3600, 6c/12t; 15.55 GiB | RTX 2060 | Mixed GPU worker and 10 TB bulk NFS |
-| `largegpu` | `192.168.1.107` | Proxmox VE 9 | Ryzen 7 5800X, 8c/16t; 62.70 GiB | RTX 3080 LHR | Single control plane; Talos GPU / Windows runtime mutex |
+| `smallgpu` | `192.168.1.106` | Proxmox VE 9.1.1 | Ryzen 5 3600, 6c/12t; 46.98 GiB | RTX 2060 | `cp-2`, mixed GPU worker, and 10 TB bulk NFS |
+| `largegpu` | `192.168.1.107` | Proxmox VE 9.1.1 | Ryzen 7 5800X, 8c/16t; 62.70 GiB | RTX 3080 LHR | `cp-1`; Talos GPU / Windows runtime mutex |
+| `tinygpu` | `192.168.1.108` | Proxmox VE 9.1.1 | Intel i5-2500, 4c/4t; 11.63 GiB | None declared | `cp-3` failure domain |
 
 | Host | Fast/system disk | Additional disk | Motherboard | Virtualization |
 |------|------------------|-----------------|-------------|----------------|
 | `ubuntu-workstation` | 238.5 GB Intel NVMe | 931.5 GB Samsung 860 EVO; 800 GB ext4 LV | CFL Sienta_CFS | Intel VT-x / VT-d |
 | `smallgpu` | 476.9 GB XPG NVMe | 9.1 TB Toshiba HDD | ASUS PRIME B450M-A | AMD-V / AMD-Vi |
 | `largegpu` | 931.5 GB Samsung 980 NVMe | 1.8 TB WD HDD | ASUS TUF GAMING X570-PLUS | AMD-V / AMD-Vi |
+| `tinygpu` | 931.5 GB WDC WD10EZEX HDD | None declared | Not recorded | Intel VT-x |
 
-The fleet has 20 physical CPU cores / 40 threads and 93.71 GiB of installed RAM. These are host totals, not safe VM allocations. Capacity is unevenly distributed: 62.70 GiB is in `largegpu`, while each of the other two hosts has only about 15.5 GiB. RAM and failure-domain placement, rather than aggregate CPU, are the limiting factors.
+The fleet has 24 physical CPU cores / 44 threads and 136.77 GiB of usable RAM;
+the three Proxmox hosts contribute 18 cores / 32 threads and 121.31 GiB. These
+are host totals, not safe VM allocations. Capacity is unevenly distributed:
+`tinygpu` has only four non-hyperthreaded Sandy Bridge cores and 11.63 GiB, so
+its control-plane margin matters more than aggregate capacity.
 
 The reserved cluster VIP is `192.168.1.210` — the Talos control-plane VIP and Kubernetes API endpoint.
 
@@ -78,33 +84,34 @@ or force-mounts the disk.
 
 Each layer has a deliberately non-overlapping owner:
 
-- **Ansible owns physical host configuration:** Proxmox packages/storage/backups/NFS/VFIO on the two PVE hosts and NFS on Ubuntu. It never partitions or formats disks, changes the active workstation network profile, or reboots the workstation.
+- **Ansible owns physical host configuration:** Proxmox packages and base configuration on all three PVE hosts; storage/backups/NFS/VFIO only where inventory groups declare them; and NFS on Ubuntu. It never partitions or formats disks, changes the active workstation network profile, or reboots the workstation.
 - **Terraform/Terragrunt owns virtual infrastructure and Talos bootstrap:** Proxmox VMs, PCI attachment, Talos machine configuration, cluster bootstrap, and initial ArgoCD/application bootstrap.
 - **ArgoCD owns in-cluster resources:** applications, system controllers, and static Kubernetes PV/StorageClass declarations. Kubernetes manifests do not configure their physical NFS servers.
 
-Proxmox installation and cluster joining remain prerequisites only for
-`smallgpu` and `largegpu`. The Ubuntu workstation uses the separate
+Proxmox installation and cluster joining remain prerequisites for `smallgpu`,
+`largegpu`, and `tinygpu`. The Ubuntu workstation uses the separate
 [`configure-ubuntu-workstation.yml`](../ansible/playbooks/configure-ubuntu-workstation.yml)
 entry point. No resource should be declared in both Ansible and Terraform.
 
 ### Capacity and topology
 
-The two-host Proxmox architecture uses one **2 vCPU / 4 GiB / 50 GiB** control
-plane on the more reliable `largegpu` host. This preserves the Kubernetes API
-when `smallgpu` fails, but the cluster is not control-plane HA.
+The Proxmox architecture uses one **2 vCPU / 4 GiB / 50 GiB** control plane in
+each physical failure domain. Etcd has three voting members, so the Kubernetes
+API retains quorum after any one Proxmox host fails.
 
 The placement and resource budget are:
 
-| Host | Control plane | Workers | Availability consequence |
-|------|---------------|---------|--------------------------|
-| `smallgpu` | None | `gpu-3` RTX 2060 `10 vCPU / 12 GiB` | Losing this host removes its worker and bulk NFS, but the Kubernetes API remains on `largegpu` |
-| `largegpu` | `cp-1` | `gpu-2` RTX 3080 `14 vCPU / 52 GiB`, mutually exclusive with the 14 vCPU / 52 GiB Windows VM | `cp-1` remains running in either GPU/Windows mode; losing this host makes the API unavailable |
+| Host capacity | Declared VM CPU | Declared VM RAM | Declared VM storage | Host margin and failure consequence |
+|---|---|---|---|---|
+| `smallgpu`: 6c/12t, 46.98 GiB | `cp-2` 2 + `gpu-3` 10 vCPU | 4 + 36 GiB | `cp-2` 50 GiB; `gpu-3` 100 GiB system + 50 GiB retained media-state on `local-lvm` | 0 unallocated threads, 6.98 GiB raw RAM; ~4.4 GiB available measured after workloads recovered. Loss removes one etcd voter, one worker, and bulk NFS, while quorum remains. |
+| `largegpu`: 8c/16t, 62.70 GiB | `cp-1` 2 + either `gpu-2` or Windows 14 vCPU | 4 + either 52 GiB | `cp-1` 50 GiB plus `gpu-2` 159 + 400 GiB on `largegpu-hdd`, or Windows 700 GiB on `local-lvm` | 0 unallocated threads, 6.70 GiB raw RAM, and ~5.1 GiB currently available. Loss removes one voter and the active RTX 3080 guest, while quorum remains. |
+| `tinygpu`: 4c/4t, 11.63 GiB | `cp-3` 2 vCPU | 4 GiB | `cp-3` 50 GiB on the 794.3 GiB `local-lvm` pool | 2 unallocated cores, 7.63 GiB raw RAM, and ~6.3 GiB currently available. No application state or worker depends on this host. |
 
-A two-member control plane would not meet the requirement: etcd requires a
-majority of two, so losing either member would lose quorum. A single-member
-cluster has quorum while that one member is alive. It is not HA, but placing it
-on `largegpu` matches the preferred failure scenario and frees 4 GiB on
-`smallgpu` for applications when `gpu-2` is stopped for Windows.
+Three voters require two for quorum. One failure domain may be unavailable,
+but two simultaneous control-plane host failures make etcd and the API
+unavailable. The `tinygpu` worker proposal was deferred after live measurement:
+a 2 vCPU / 4 GiB worker would consume every physical core and reduce raw RAM
+headroom to 3.63 GiB on the oldest host. Control-plane stability takes priority.
 
 The Ubuntu workstation deliberately runs no Kubernetes VM. Its constrained
 memory remains available to the interactive desktop and NFS, while any
@@ -112,8 +119,10 @@ LAN-connected Kubernetes node can mount the critical export.
 
 ### Node ownership and permanence
 
-Only **`ubuntu-workstation`** is permanently owned hardware. `smallgpu` and
-`largegpu` are borrowed from a friend who may eventually ask for them back.
+Only **`ubuntu-workstation`** is established as permanently owned hardware.
+`smallgpu` and `largegpu` are borrowed from a friend who may eventually ask for
+them back. `tinygpu`'s permanence is not assumed; it holds no critical
+application state.
 
 Practical consequences that the rest of this document depends on:
 
@@ -129,11 +138,11 @@ Practical consequences that the rest of this document depends on:
 | `192.168.1.101–199` | Physical hosts                       |
 | `192.168.1.200–299` | VMs (role-specific static address pools) |
 
-**Why VMs live on the home subnet:** both Proxmox hosts use `vmbr0`, bridged to
+**Why VMs live on the home subnet:** all three Proxmox hosts use `vmbr0`, bridged to
 the same LAN. The Ubuntu workstation uses its physical Ethernet interface
 directly and hosts no VMs.
 
-VM specs, IPs, and PCI/USB device IDs are defined as YAML in [`terraform/deployments/<env>/config.yml`](../terraform/deployments/) and consumed via Terragrunt's hierarchical config-merging in [`root.hcl`](../terraform/deployments/root.hcl). The production YAML implements the single-control-plane topology described above.
+VM specs, IPs, and PCI/USB device IDs are defined as YAML in [`terraform/deployments/<env>/config.yml`](../terraform/deployments/) and consumed via Terragrunt's hierarchical config-merging in [`root.hcl`](../terraform/deployments/root.hcl). The production YAML implements the three-control-plane topology described above.
 
 ### Network defaults
 
@@ -144,7 +153,7 @@ VM specs, IPs, and PCI/USB device IDs are defined as YAML in [`terraform/deploym
 | Gateway          | `192.168.1.1` (home router)     |
 | Bridges          | Proxmox `vmbr0`                 |
 | DNS              | `1.1.1.1`, `8.8.8.8`            |
-| CP node IPs      | `cp-1`: `192.168.1.211/24` |
+| CP node IPs      | `cp-1`: `.211/24`; `cp-2`: `.212/24`; `cp-3`: `.213/24` |
 | Worker IPs       | GPU workers also accept ordinary workloads |
 | GPU node IPs     | `gpu-2`: `.232/24`; `gpu-3`: `.233/24` |
 
@@ -211,8 +220,10 @@ mounts the existing ext4 LV; it is not registered as Proxmox storage.
 
 | Host         | Storage name        | Type         | Size       | Purpose                                                         |
 |--------------|---------------------|--------------|------------|-----------------------------------------------------------------|
+| `smallgpu`      | `local-lvm`           | LVM-thin     | 348.8 GiB  | `cp-2` 50 GiB, `gpu-3` 100 GiB system, and 50 GiB retained media-state disks |
 | `largegpu`      | `local-lvm`           | LVM-thin     | 810 GB     | Independent Windows VM 502 disk (~700 GB) |
 | `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | Resident `cp-1`, Windows/VirtIO ISOs, then `gpu-2`'s sparse 159 GiB system disk and capped 400 GiB disposable scratch |
+| `tinygpu`       | `local-lvm`           | LVM-thin     | 794.3 GiB  | `cp-3` 50 GiB; no worker or application state |
 | `ubuntu-workstation` | `gpu1-extra`          | LVM-thin     | 912 GB     | Existing pool containing the critical-data LV |
 | `ubuntu-workstation` | `storage2-bulk` (NFS) | ext4 LV on `gpu1-extra`, NFSv4 export | 800 GB | **Critical tier** — Immich and personal data |
 | `smallgpu`      | `storage1-bulk` (NFS) | 10 TB NTFS via kernel `ntfs3`, NFSv4 export | 10 TB  | **Bulk tier** — active and mount-verified from Talos |
@@ -303,6 +314,14 @@ non-critical. Prometheus does not officially support NFS for its local TSDB, so
 corruption or loss is handled by resetting the metrics directory rather than by
 treating monitoring history as durable data.
 
+Shared RabbitMQ is likewise not placed on NFS. Its single-node `emptyDir` is a
+transient cluster transport for backpressure and dispatch; applications retain
+irreproducible job state in their own database. The `internal-llm` Application
+uses it between a cluster-wide authenticated OpenAI-compatible API and two
+workers, while the GPU-backed vLLM Service is reachable only by those workers.
+A durable RabbitMQ tier requires future local SSD volumes and replicas across
+failure domains.
+
 To consume one: create a PVC in the app's namespace with the matching `storageClassName` and pin `volumeName` to the PV name. No dynamic provisioner — PVs are static, so a typo in `storageClassName` will just leave the PVC `Pending` forever rather than silently provisioning somewhere wrong.
 
 > **Picking a tier:** if losing the data is merely inconvenient (re-download / re-rip), use `storage1-bulk-pv`. If losing it is unrecoverable (personal photos, config you don't have a backup of, etc.), use `storage2-bulk-pv`. When in doubt, critical tier — 800 GB on the permanent host is the scarce resource, but it's the one that survives a borrowed-machine return.
@@ -313,8 +332,8 @@ To consume one: create a PVC in the app's namespace with the matching `storageCl
 
 | Layer              | Tool / Version                                  | Purpose                                                  |
 |--------------------|-------------------------------------------------|----------------------------------------------------------|
-| Hypervisors        | Proxmox VE 9 on two hosts                       | Talos and Windows VM capacity                            |
-| APT repo           | `pve-no-subscription` (deb822 format)           | Enabled on both Proxmox nodes; enterprise repo disabled  |
+| Hypervisors        | Proxmox VE 9 on three hosts                     | Talos and Windows VM capacity                            |
+| APT repo           | `pve-no-subscription` (deb822 format)           | Enabled on all Proxmox nodes; enterprise repo disabled   |
 | Node OS (K8s)      | Talos Linux `v1.13.7`                           | Immutable, API-driven Linux — no SSH, no shell           |
 | Node OS (gaming)   | Windows 11 25H2 + virtio drivers (0.1.271)      | One VM, GPU-passthrough'd, manual start                  |
 | VM provisioning    | Terraform + `bpg/proxmox` ~> 0.105.0            | Creates Proxmox VMs                                      |
@@ -368,7 +387,7 @@ authentication is required.
     │   ├── merge_configs.sh              # Hierarchical YAML deep-merge
     │   ├── config.yml                    # Global defaults
     │   ├── prod/
-    │   │   ├── config.yml                # Prod VM topology for two Proxmox hosts
+    │   │   ├── config.yml                # Prod VM topology for three Proxmox hosts
     │   │   ├── homelab-cluster/
     │   │   │   └── terragrunt.hcl        # Talos/Kubernetes state
     │   │   └── windows-workstation/
@@ -475,7 +494,7 @@ Physical host networking is intentionally absent from the Terraform DAG.
 Proxmox `vmbr0` already exists. Ubuntu's direct Ethernet and NFS address are
 documented in the workstation runbook and are not VM prerequisites.
 
-**Step 3:** The `talos-cluster` module generates per-node machine configurations using `talos_machine_configuration` data sources. Each node gets a config patch with its hostname, static IP, and routes. The built-in CNI and kube-proxy are disabled, and Kubernetes is explicitly pinned to a version supported by both Talos and Cilium. GPU nodes additionally receive the `talos-gpu-patch.yaml` (module/runtime activation) and labels/taints; the NVIDIA extensions themselves are already in the GPU disk image. The module then applies configs via `talos_machine_configuration_apply`, bootstraps etcd on the first control-plane node, and retrieves the kubeconfig. It deliberately does not wait for Kubernetes node readiness because that cannot happen before Cilium exists.
+**Step 3:** The `talos-cluster` module generates per-node machine configurations using `talos_machine_configuration` data sources. Each node gets a config patch with its hostname, static IP, and routes. The built-in CNI and kube-proxy are disabled, and Kubernetes is explicitly pinned to a version supported by both Talos and Cilium. GPU nodes additionally receive the `talos-gpu-patch.yaml` (module/runtime activation) and labels/taints; the NVIDIA extensions themselves are already in the GPU disk image. The module then applies configs via `talos_machine_configuration_apply` and retrieves the kubeconfig. Its original `talos_machine_bootstrap` resource remains in state for the one-time initialization of `cp-1`; topology expansion preserves that resource and the machine secrets and must never invoke `talosctl bootstrap` again. It deliberately does not wait for Kubernetes node readiness because that cannot happen before Cilium exists.
 
 **Step 4:** A local Terraform readiness gate waits up to five minutes for the Kubernetes API VIP's TCP socket. Kubeconfig retrieval can finish just before the freshly configured control plane reboots, so this gate prevents the Helm provider from racing that short outage.
 
@@ -531,7 +550,8 @@ Manages the full Talos lifecycle:
   - *Control-plane only:* VIP configuration on `eth0`.
   - *GPU workers only:* `talos-gpu-patch.yaml` + node labels (`nvidia.com/gpu.present=true`, `homelab.dev/role=gpu-worker`). The `dedicated` field controls the hugepage allocation: 1,024 hugepages on `gpu-2` and none on mixed-role `gpu-3`.
 - **`talos_machine_configuration_apply`**: Pushes the config to each node over the Talos API.
-- **`talos_machine_bootstrap`**: Runs once on the first control-plane node to initialize etcd.
+- **`talos_machine_bootstrap`**: Ran once on `cp-1` to initialize etcd. Preserve
+  it in state; joining or replacing control planes must never bootstrap again.
 - **`talos_cluster_kubeconfig`**: Retrieves the kubeconfig after bootstrap.
 
 ### Node variable schemas
@@ -809,4 +829,4 @@ kubectl uncordon gpu-2
 - **The `largegpu` mutex is enforced at runtime, not config time.** Two VMs sharing one GPU = one runs, the other can't start. This lets you flip between them in seconds with no Terraform churn.
 - **Bulk media storage is NTFS+NFS, not Ceph/Longhorn.** The 10 TB drive on smallgpu has existing NTFS data worth preserving. Ansible safety-checks and mounts it with the kernel `ntfs3` driver, then manages its NFSv4 export.
 - **Two storage tiers are split by host permanence, not performance.** Critical data binds to `storage2-bulk-pv` on Ubuntu; reproducible bulk data binds to `storage1-bulk-pv` on borrowed `smallgpu`.
-- **VM sizing follows per-host headroom.** Production declares one `2 vCPU / 4 GiB` control plane on `largegpu` and two GPU workers. The 52 GiB RTX 3080/Windows allocation leaves room for `cp-1` in either runtime mode; `gpu-3` has 12 GiB on `smallgpu`. The Ubuntu workstation runs no Kubernetes VM.
+- **VM sizing follows per-host headroom.** Production declares three `2 vCPU / 4 GiB` control planes, one per Proxmox host, and two GPU workers. The 52 GiB RTX 3080/Windows allocation leaves room for `cp-1` in either runtime mode; `gpu-3` is 36 GiB so `cp-2` and host services retain measured headroom. `tinygpu` runs only `cp-3`; the Ubuntu workstation runs no Kubernetes VM.

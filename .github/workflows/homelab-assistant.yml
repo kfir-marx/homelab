@@ -5,7 +5,7 @@ on:
   pull_request:
     paths:
       - "services/homelab-assistant/**"
-      - "kubernetes/apps/homelab-assistant.yaml"
+      - "kubernetes/apps/internal-llm.yaml"
       - "kubernetes/system/homelab-assistant/**"
       - "ansible/roles/homelab_assistant/**"
       - "ansible/roles/homelab_vm_actuator/**"
@@ -28,7 +28,7 @@ on:
     branches: [main]
     paths:
       - "services/homelab-assistant/**"
-      - "kubernetes/apps/homelab-assistant.yaml"
+      - "kubernetes/apps/internal-llm.yaml"
       - "kubernetes/system/homelab-assistant/**"
       - "ansible/roles/homelab_assistant/**"
       - "ansible/roles/homelab_vm_actuator/**"
@@ -174,7 +174,7 @@ jobs:
             -strict \
             -summary \
             /tmp/homelab-assistant.yaml \
-            kubernetes/apps/homelab-assistant.yaml \
+            kubernetes/apps/internal-llm.yaml \
             kubernetes/system/cloudflared \
             kubernetes/system/workload-priorities/priority-classes.yaml \
             kubernetes/system/job-assistant/network-policy.yaml \

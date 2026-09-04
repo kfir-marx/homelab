@@ -8,4 +8,6 @@ resources:
   - retained-storage.yaml
   - model-storage.yaml
   - inference.yaml
+  - gateway.yaml
   - llm-network-policy.yaml
+  - monitoring.yaml

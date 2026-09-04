@@ -9,7 +9,9 @@ class Settings(BaseSettings):
 
     google_oauth_client_id: str = Field(min_length=20)
     google_tokeninfo_url: HttpUrl = HttpUrl("https://oauth2.googleapis.com/tokeninfo")
-    llm_base_url: HttpUrl = HttpUrl("http://llm.homelab-assistant.svc.cluster.local:8000/v1")
+    llm_base_url: HttpUrl = HttpUrl(
+        "http://internal-llm.homelab-assistant.svc.cluster.local:8080/v1"
+    )
     llm_api_key: str = Field(min_length=20)
     llm_model: str = "local-llm"
     flights_config_path: Path = Path("/config/flights.json")

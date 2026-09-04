@@ -244,7 +244,7 @@ Never run the old and new Telegram pollers with the same bot token.
 
 1. Merge and publish a tested immutable bridge image, then merge its image-pin
    release PR.
-2. Sync `homelab-assistant` without prune. Confirm the retained PV/PVC and
+2. Sync `internal-llm` without prune. Confirm the retained PV/PVC and
    switcher identity are healthy. Extract the switcher token and CA as above.
 3. Verify Codex is installed and authenticated as `kfir`. Do not inspect or
    export existing rollout contents.

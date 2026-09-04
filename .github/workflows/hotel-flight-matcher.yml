@@ -9,7 +9,7 @@ on:
       - kubernetes/apps/hotel-flight-matcher.yaml
       - kubernetes/system/hotel-flight-matcher/**
       - kubernetes/system/cloudflared/network-policy.yaml
-      - kubernetes/system/homelab-assistant/inference.yaml
+      - kubernetes/system/homelab-assistant/gateway.yaml
       - docs/hotel-flight-matcher-runbook.md
       - .github/workflows/hotel-flight-matcher.yml
   push:

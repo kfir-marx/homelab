@@ -1,13 +1,12 @@
-# The deterministic switcher identity, inactive retained PostgreSQL recovery
-# volume, and private GPU-backed local LLM. The Telegram Codex client itself
-# runs on ubuntu-workstation; the LLM exposes only a ClusterIP API.
+# Rename transition only. Keep this object for one root-app synchronization so
+# Argo CD removes its cascading resources finalizer while internal-llm adopts
+# the same source. Delete this manifest in the follow-up commit only after the
+# internal-llm Application is Healthy and owns the rendered resources.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: homelab-assistant
   namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
@@ -17,9 +16,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: homelab-assistant
-  # Intentionally manual for the one-time poller/database cutover. First sync
-  # without prune to issue the switcher credential, then prune only after the
-  # workstation gateway is running and rollback data has been verified.
   syncPolicy:
     syncOptions:
       - CreateNamespace=true

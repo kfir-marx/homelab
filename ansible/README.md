@@ -4,8 +4,9 @@ Ansible owns configuration of physical Proxmox hosts after they have been
 installed and joined to `HomeLab-Cluster`. It does not install Proxmox, create
 or change corosync membership, own VM declarations, or reboot a host during the
 normal configuration play. Backup automation never starts, stops, shuts down,
-or reboots a VM. On `smallgpu` and `largegpu`, it also configures each directly
-attached UPS with Network UPS Tools (NUT).
+or reboots a VM. `tinygpu` currently receives only the common Proxmox
+repository/package baseline; it has no declared storage, backup, NFS, UPS, or
+VFIO role. `smallgpu` alone currently has a declared UPS integration.
 
 The former `gpunvdgtx1060` node is no longer a Proxmox host. The separate
 `configure-ubuntu-workstation.yml` play configures its replacement Ubuntu
@@ -131,6 +132,7 @@ Useful limited runs:
 
 ```bash
 ansible-playbook playbooks/configure-proxmox.yml --check --diff --tags repositories
+ansible-playbook playbooks/verify-proxmox.yml --limit tinygpu
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nfs
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags storage
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags backup
@@ -269,7 +271,9 @@ guest autostart before deploying the second node.
 
 ## Host variables
 
-Each host file under `inventory/production/host_vars/` declares:
+Each host file under `inventory/production/host_vars/` declares only the facts
+and roles justified for that host. Depending on group membership, these may
+include:
 
 - expected hostname and any special reboot safety classification;
 - NFS backing mounts by filesystem UUID, type, mount point, and mount options;
@@ -279,9 +283,11 @@ Each host file under `inventory/production/host_vars/` declares:
   that group;
 - the host-specific IOMMU kernel parameters.
 
-To add an already-joined Proxmox node, add it to `proxmox_hosts` and the applicable
-`nfs_servers`/`nut_servers`/`vfio_hosts` inventory groups, then add a matching
-host-vars file.
+To add an already-joined Proxmox node, add it to `proxmox_hosts`, create a
+matching host-vars file with the expected hostname, and add it only to the
+`nfs_servers`/`local_storage_hosts`/`backup_hosts`/`nut_servers`/`vfio_hosts`
+groups supported by verified live hardware and intended ownership. `tinygpu`
+is deliberately in none of those optional groups.
 Record hardware facts from the live node; do not copy PCI IDs, UUIDs, or IOMMU
 groups from another machine.
 

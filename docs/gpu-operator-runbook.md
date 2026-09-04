@@ -11,7 +11,7 @@ The production cluster has two GPU workers:
 
 GPU enablement spans three independently managed layers:
 
-1. Ansible configures IOMMU and VFIO on the two Proxmox hosts.
+1. Ansible configures IOMMU and VFIO on the two GPU-bearing Proxmox hosts.
 2. Terraform passes the PCI device to the Talos VM and applies the GPU Talos
    machine configuration. Both nodes use the production open-driver image
    profile.

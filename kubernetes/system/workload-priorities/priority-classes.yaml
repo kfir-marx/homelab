@@ -116,9 +116,9 @@ description: "Priority 3: public hotel-flight matcher API"
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: homelab-assistant
+  name: internal-llm
 value: 1000250
-description: "Private local LLM and homelab-assistant compatibility"
+description: "Internal LLM gateway, queue consumers, and GPU inference"
 ---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass

@@ -1,0 +1,37 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rabbitmq
+  namespace: rabbitmq
+spec:
+  selector:
+    matchLabels:
+      app: rabbitmq
+  endpoints:
+    - port: prometheus
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rabbitmq
+  namespace: rabbitmq
+spec:
+  groups:
+    - name: rabbitmq.rules
+      rules:
+        - alert: RabbitMqDown
+          expr: up{namespace="rabbitmq",service="rabbitmq"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Shared RabbitMQ broker is unavailable
+        - alert: RabbitMqQueueBacklog
+          expr: sum(rabbitmq_queue_messages_ready) > 20
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Shared RabbitMQ queue backlog is growing

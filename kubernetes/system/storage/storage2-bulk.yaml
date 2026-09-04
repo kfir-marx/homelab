@@ -3,9 +3,9 @@
 # NFSv4 to the home LAN.
 #
 # Storage tier: CRITICAL / PERSONAL. ubuntu-workstation is the only permanent
-# host in the fleet — both Proxmox nodes (incl. smallgpu which backs
-# storage1-bulk) are borrowed hardware that may be reclaimed at any
-# time. Anything we can't afford to lose — personal cloud (Immich),
+# host in the fleet — the Proxmox failure domains hold no critical application
+# data (and smallgpu, which backs storage1-bulk, is borrowed hardware).
+# Anything we can't afford to lose — personal cloud (Immich),
 # config snapshots, important app state — should bind here, not to
 # storage1-bulk. Bulk media and reproducible data go to storage1-bulk.
 #

@@ -1,0 +1,27 @@
+# Internal OpenAI-compatible LLM gateway, RabbitMQ consumers, private vLLM
+# backend, and retained compatibility resources for the workstation assistant.
+# The existing namespace and PVC identity are preserved during this rename.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: internal-llm
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/homelab-assistant
+  destination:
+    server: https://kubernetes.default.svc
+    # Preserve the bound local-gpu-scratch PVC and existing Secret identities.
+    namespace: homelab-assistant
+  # This remains manual because the retained assistant cutover resources and
+  # local GPU PV require an operator-reviewed first synchronization.
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true

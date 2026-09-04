@@ -1,25 +1,42 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: llm-default-deny
+  name: internal-llm-default-deny
   namespace: homelab-assistant
   annotations:
-    # Establish every allow rule before isolation during the first sync.
     argocd.argoproj.io/sync-wave: "1"
 spec:
   podSelector:
-    matchLabels:
-      app: local-llm
-      component: inference
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [internal-llm, local-llm]
   policyTypes: [Ingress, Egress]
 ---
-# Any namespaced Kubernetes pod may use the API when it also has the bearer
-# key. Empty namespaceSelector means all cluster namespaces, not external/LAN
-# clients; the ClusterIP Service has no north/south entry point.
+# Any namespaced pod may use the authenticated API. There is no north/south
+# Service; the bearer token remains mandatory in addition to this boundary.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: llm-cluster-clients
+  name: internal-llm-cluster-clients
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: internal-llm
+      component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: workers-to-inference
   namespace: homelab-assistant
 spec:
   podSelector:
@@ -29,7 +46,53 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        - namespaceSelector: {}
+        - podSelector:
+            matchLabels:
+              app: internal-llm
+              component: worker
+      ports:
+        - port: 8000
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-to-rabbitmq
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: internal-llm
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rabbitmq
+          podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - port: 5672
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker-to-inference
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: internal-llm
+      component: worker
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: local-llm
+              component: inference
       ports:
         - port: 8000
           protocol: TCP
@@ -37,13 +100,14 @@ spec:
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: llm-dns-egress
+  name: internal-llm-dns-egress
   namespace: homelab-assistant
 spec:
   endpointSelector:
-    matchLabels:
-      app: local-llm
-      component: inference
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [internal-llm, local-llm]
   egress:
     - toEndpoints:
         - matchLabels:
@@ -82,24 +146,22 @@ spec:
             - port: "443"
               protocol: TCP
 ---
-# Kubelet health probes originate from node identities rather than namespaced
-# pods. They can reach only the container's HTTP port; no Service is published
-# outside the cluster.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: llm-health-probes
+  name: internal-llm-health-probes
   namespace: homelab-assistant
 spec:
   endpointSelector:
-    matchLabels:
-      app: local-llm
-      component: inference
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [internal-llm, local-llm]
   ingress:
-    - fromEntities:
-        - host
-        - remote-node
+    - fromEntities: [host, remote-node]
       toPorts:
         - ports:
             - port: "8000"
+              protocol: TCP
+            - port: "8080"
               protocol: TCP

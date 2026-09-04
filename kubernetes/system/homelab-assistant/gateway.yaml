@@ -1,0 +1,162 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: internal-llm
+  namespace: homelab-assistant
+  labels:
+    app: internal-llm
+    component: api
+spec:
+  type: ClusterIP
+  selector:
+    app: internal-llm
+    component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Compatibility alias for existing OpenAI clients. New clients should use the
+# internal-llm Service above; both endpoints reach the queued gateway.
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm
+  namespace: homelab-assistant
+spec:
+  type: ClusterIP
+  selector:
+    app: internal-llm
+    component: api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: internal-llm-api
+  namespace: homelab-assistant
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: internal-llm
+      component: api
+  template:
+    metadata:
+      labels:
+        app: internal-llm
+        component: api
+    spec:
+      priorityClassName: internal-llm
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/kfir-marx/homelab-internal-llm:sha-bootstrap
+          args: [api]
+          env:
+            - name: INTERNAL_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: LLM_API_KEY
+            - name: INTERNAL_LLM_RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: RABBITMQ_URL
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: internal-llm-worker
+  namespace: homelab-assistant
+spec:
+  # Two consumers match vLLM's max-num-seqs=2. RabbitMQ buffers excess work.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: internal-llm
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: internal-llm
+        component: worker
+    spec:
+      priorityClassName: internal-llm
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ghcr.io/kfir-marx/homelab-internal-llm:sha-bootstrap
+          args: [worker]
+          env:
+            - name: INTERNAL_LLM_RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: RABBITMQ_URL
+            - name: INTERNAL_LLM_INFERENCE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: LLM_API_KEY
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi

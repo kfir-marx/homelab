@@ -1,42 +1,45 @@
-# Local LLM API runbook
+# Internal LLM runbook
 
-## Purpose and ownership
+## Purpose and request flow
 
-Argo CD runs one private vLLM replica on `gpu-2`, the Talos GPU VM on
-`largegpu`. It restores the last known-good workload: the immutable
-`Qwen/Qwen3-8B-AWQ` model revision on the pinned vLLM `v0.26.0` image. Do not
-upgrade the image as part of recovery; `v0.27.1` was previously rolled back
-after failing to start on this node.
-
-vLLM is the API layer. It exposes the OpenAI-compatible `/v1/models`,
-`/v1/chat/completions`, and `/v1/completions` routes at:
+The Argo CD Application is named `internal-llm`. It provides a private,
+authenticated, OpenAI-compatible API for any namespaced Kubernetes workload:
 
 ```text
-http://llm.homelab-assistant.svc.cluster.local:8000/v1
+client -> internal-llm API -> RabbitMQ -> two workers -> vLLM -> worker reply -> client
 ```
 
-The served model name is `local-llm`. The Service is `ClusterIP`; there is no
-Gateway, Ingress, LoadBalancer, NodePort, Cloudflare route, or Tailscale route.
-A default-deny policy admits port 8000 from namespaced Kubernetes pods and
-node-originated health probes only. API requests require the existing
-`LLM_API_KEY` bearer value from `homelab-assistant-secrets`.
+The API supports `/v1/models`, `/v1/chat/completions`, and `/v1/completions`.
+Streaming requests are rejected because responses traverse RabbitMQ RPC. The
+two workers each prefetch one message, matching vLLM's `--max-num-seqs=2`;
+RabbitMQ buffers excess requests instead of allowing unbounded GPU contention.
+API and worker access logs are disabled and message bodies must never be logged.
 
-## Storage and availability
+New clients use:
 
-The `llm-model-cache` claim reuses the retained `gpu2-scratch-pv`. This is a
-replaceable 390 GiB cache on `gpu-2`'s separately attached scratch disk; it is
-not critical storage and it is not backed up. The fixed model revision can be
-downloaded again from the narrowly allowlisted Hugging Face endpoints.
+```text
+OPENAI_BASE_URL=http://internal-llm.homelab-assistant.svc.cluster.local:8080/v1
+OPENAI_MODEL=local-llm
+OPENAI_API_KEY=<same value as LLM_API_KEY>
+```
 
-The API is unavailable whenever `gpu-2` is stopped and Windows VM `502` owns
-the shared RTX 3080. It is also a single replica because the model requests the
-node's only GPU. The control plane remains independent of this workload.
+The namespace remains `homelab-assistant` intentionally. Renaming it would
+replace the retained local-GPU PVC identity and complicate the existing
+workstation-assistant rollback resources. The compatibility Service
+`llm.homelab-assistant.svc:8000` now targets the queued API, not vLLM directly.
+The `llm-inference` Service is private to the queue workers.
 
-The retired claim was deleted while the PV used `Retain`, so Kubernetes leaves
-`gpu2-scratch-pv` in `Released` with the previous claim reference. Inspect it;
-do not delete the PV, format the disk, change the local path, or clear any
-filesystem safety flag. After confirming no PVC currently names the volume,
-remove only the stale Kubernetes `claimRef`:
+## Inference and availability
+
+Argo CD runs one vLLM replica on `gpu-2` using the immutable
+`Qwen/Qwen3-8B-AWQ` revision and pinned vLLM `v0.26.0` image. Do not upgrade it
+during recovery; `v0.27.1` previously failed to start on this node. The API is
+unavailable whenever Talos VM `402` is stopped and Windows VM `502` owns the
+shared RTX 3080.
+
+The `llm-model-cache` claim reuses retained `gpu2-scratch-pv`. It is a
+replaceable 390 GiB cache, not critical data. If the PV is `Released`, first
+prove no PVC names it and then remove only the stale Kubernetes claim reference:
 
 ```bash
 kubectl get pvc -A --field-selector spec.volumeName=gpu2-scratch-pv
@@ -45,81 +48,67 @@ kubectl patch pv gpu2-scratch-pv --type=json \
   -p='[{"op":"remove","path":"/spec/claimRef"}]'
 ```
 
-The first command must return no claim and the second must return `Released`
-before the patch. Then let Argo recreate the same
-`homelab-assistant/llm-model-cache` identity. This is retained-PV recovery, not
-scratch-disk replacement.
+The first command must return no claim and the second must return `Released`.
+Never delete the PV, format the disk, change its local path, or clear a
+filesystem safety flag.
 
-## Client configuration
+## Secrets
 
-Configure in-cluster clients with a base URL and a separately delivered copy
-of the bearer key. Do not grant clients read access to the whole
-`homelab-assistant-secrets` Secret.
+The existing `homelab-assistant/homelab-assistant-secrets` Secret supplies:
 
-```text
-OPENAI_BASE_URL=http://llm.homelab-assistant.svc.cluster.local:8000/v1
-OPENAI_MODEL=local-llm
-OPENAI_API_KEY=<same value as LLM_API_KEY>
-```
+- `LLM_API_KEY`: client authentication and private vLLM authentication.
+- `RABBITMQ_URL`: an `amqp://` URL for a non-administrator RabbitMQ user with
+  access to the `homelab` vhost.
 
-Prefer a client-specific Secret in the consuming namespace. The API key is an
-authentication boundary between pods, while the ClusterIP and network policy
-are the network boundary. If only selected namespaces should consume the API,
-narrow `llm-cluster-clients` to their namespace labels in the same change that
-adds the first consumer.
+Deliver only `LLM_API_KEY` through a client-specific Secret in each consuming
+namespace. Do not grant consumers access to the source Secret or RabbitMQ
+credential. Before rollout, add `RABBITMQ_URL` to the encrypted recovery copy
+with `scripts/secrets.sh edit-k8s`, then restore it without printing values.
 
 ## Static verification
 
-These checks do not mutate the live cluster. `kubectl` may still use API
-discovery for registered CRDs, so verify the active context first if even
-read-only access is undesirable:
-
 ```bash
-kubectl kustomize kubernetes/system/homelab-assistant \
-  >/tmp/homelab-assistant.yaml
+uv sync --directory services/internal-llm --locked --extra dev
+uv run --directory services/internal-llm --locked --extra dev ruff format --check .
+uv run --directory services/internal-llm --locked --extra dev ruff check .
+uv run --directory services/internal-llm --locked --extra dev mypy src tests
+uv run --directory services/internal-llm --locked --extra dev pytest
+kubectl kustomize kubernetes/system/homelab-assistant >/tmp/internal-llm.yaml
 kubectl create --dry-run=client --validate=false \
-  -f kubernetes/apps/homelab-assistant.yaml -o name
+  -f kubernetes/apps/internal-llm.yaml -o name
 kubectl create --dry-run=client --validate=false \
-  -f /tmp/homelab-assistant.yaml -o name
+  -f /tmp/internal-llm.yaml -o name
 ```
 
-## Rollout and health checks
+## Rollout
 
-The `homelab-assistant` Application remains manual because it still owns
-retained cutover resources. Review its diff, synchronize it explicitly, and do
-not enable prune merely to start the model. Before syncing, confirm Talos VM
-`402` is the active side of the largegpu/Windows mutex and `gpu-2` is Ready.
+The `internal-llm` Application remains manual because it still owns retained
+assistant cutover resources. Renaming an Argo CD Application with a resource
+finalizer is a two-commit migration, not an ordinary sync. The first commit
+keeps `kubernetes/apps/homelab-assistant.yaml` as a transition object without a
+finalizer. Let the root app sync that update, sync `internal-llm` without prune,
+and confirm it has adopted the rendered resources. Only then delete the
+transition manifest in a follow-up commit; the root app can remove the old
+Application without cascading into its former resources.
 
-The active cluster currently has no `homelab-assistant-secrets` object. Restore
-its existing SOPS-encrypted recovery copy before the sync; this does not print
-the key and does not invent a replacement value:
+The initial gateway image uses `sha-bootstrap`. Merge the image-pin PR created
+by the `internal-llm` workflow before syncing. Restore both required Secrets,
+confirm VM `402` is the active side of the GPU mutex, and sync `rabbitmq` before
+`internal-llm`.
 
-```bash
-scripts/secrets.sh restore-k8s \
-  homelab-assistant/homelab-assistant-secrets
-```
-
-The restore is an explicit live mutation and prompts for the protected age
-identity and target-cluster confirmation. Run it only after checking the
-current kubectl context. Do not decrypt or copy `LLM_API_KEY` through terminal
-output.
-
-After an authorized sync, verify without displaying credentials:
+After an authorized sync:
 
 ```bash
+kubectl -n rabbitmq rollout status statefulset/rabbitmq
 kubectl -n homelab-assistant get pvc llm-model-cache
-kubectl -n homelab-assistant rollout status deployment/llm --timeout=30m
-kubectl -n homelab-assistant get pod,service -l app=local-llm
-kubectl -n homelab-assistant logs deployment/llm --tail=100
+kubectl -n homelab-assistant rollout status deployment/llm-inference --timeout=30m
+kubectl -n homelab-assistant rollout status deployment/internal-llm-api
+kubectl -n homelab-assistant rollout status deployment/internal-llm-worker
+kubectl -n homelab-assistant get service internal-llm llm llm-inference
 ```
 
-The first cold start may take substantially longer while the pinned snapshot
-downloads. The startup probe permits up to 30 minutes. A successful rollout
-requires a `Bound` cache claim, one Ready `llm` pod on `gpu-2`, and a
-`ClusterIP` `llm` Service on port 8000. Test `/v1/models` and one short chat
-completion from the intended in-cluster client, using its client-scoped Secret;
-do not print the bearer value in logs or shell history.
-
-If scheduling is pending, check that `gpu-2` is Ready and advertises one free
-`nvidia.com/gpu`. If startup fails, inspect the PVC state, model-download
-policy drops, and vLLM logs before changing resource limits or model settings.
+Test `/v1/models` and one short non-streaming chat completion from an intended
+in-cluster client. A cold model start can take up to 30 minutes. If requests
+stall, inspect RabbitMQ queue depth, worker connectivity, the vLLM health
+endpoint, `gpu-2` readiness, and its free `nvidia.com/gpu` capacity without
+printing authorization headers or request bodies.

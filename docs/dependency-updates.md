@@ -80,6 +80,7 @@ Each service is an independent uv project with its own lockfile:
 
 ```bash
 cd services/homelab-assistant && uv lock
+cd ../internal-llm && uv lock
 cd ../job-assistant && uv lock
 cd ../external-ai && uv lock
 ```

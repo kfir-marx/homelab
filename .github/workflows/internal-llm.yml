@@ -1,0 +1,100 @@
+name: internal-llm
+
+on:
+  pull_request:
+    paths:
+      - services/internal-llm/**
+      - kubernetes/apps/homelab-assistant.yaml
+      - kubernetes/apps/internal-llm.yaml
+      - kubernetes/apps/rabbitmq.yaml
+      - kubernetes/system/homelab-assistant/**
+      - kubernetes/system/rabbitmq/**
+      - kubernetes/system/workload-priorities/priority-classes.yaml
+      - docs/local-llm-runbook.md
+      - docs/rabbitmq-runbook.md
+      - docs/network-policies.md
+      - .github/workflows/internal-llm.yml
+  push:
+    branches: [main]
+    paths:
+      - services/internal-llm/**
+      - .github/workflows/internal-llm.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: internal-llm-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/kfir-marx/homelab-internal-llm
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.6"
+          enable-cache: true
+          cache-dependency-glob: services/internal-llm/uv.lock
+      - run: uv sync --directory services/internal-llm --locked --extra dev
+      - run: uv run --directory services/internal-llm --locked --extra dev ruff format --check .
+      - run: uv run --directory services/internal-llm --locked --extra dev ruff check .
+      - run: uv run --directory services/internal-llm --locked --extra dev mypy src tests
+      - run: uv run --directory services/internal-llm --locked --extra dev pytest
+      - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5
+      - name: Render manifests
+        run: |
+          kubectl kustomize kubernetes/system/homelab-assistant >/tmp/internal-llm.yaml
+          kubectl kustomize kubernetes/system/rabbitmq >/tmp/rabbitmq.yaml
+          kubectl create --dry-run=client --validate=false \
+            -f kubernetes/apps/homelab-assistant.yaml -o name
+          kubectl create --dry-run=client --validate=false \
+            -f kubernetes/apps/internal-llm.yaml -o name
+          kubectl create --dry-run=client --validate=false \
+            -f kubernetes/apps/rabbitmq.yaml -o name
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: services/internal-llm
+          push: false
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: services/internal-llm
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+      - name: Pin immutable image
+        run: >-
+          sed -i
+          's|ghcr.io/kfir-marx/homelab-internal-llm:sha-[a-f0-9]*|ghcr.io/kfir-marx/homelab-internal-llm:sha-${{ github.sha }}|g;
+          s|ghcr.io/kfir-marx/homelab-internal-llm:sha-bootstrap|ghcr.io/kfir-marx/homelab-internal-llm:sha-${{ github.sha }}|g'
+          kubernetes/system/homelab-assistant/gateway.yaml
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        with:
+          branch: automation/internal-llm-image
+          delete-branch: true
+          commit-message: "deploy(internal-llm): pin image sha-${{ github.sha }}"
+          title: "deploy(internal-llm): release sha-${{ github.sha }}"
+          body: Automated immutable image release.

@@ -1,14 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: llm
+  name: llm-inference
   namespace: homelab-assistant
   labels:
     app: local-llm
     component: inference
 spec:
-  # The OpenAI-compatible API is intentionally reachable only through cluster
-  # networking. There is no Gateway, Ingress, LoadBalancer, or NodePort.
+  # vLLM is a private backend. Cluster clients use the queued internal-llm API.
   type: ClusterIP
   selector:
     app: local-llm
@@ -21,7 +20,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: llm
+  name: llm-inference
   namespace: homelab-assistant
 spec:
   replicas: 1
@@ -37,7 +36,7 @@ spec:
         app: local-llm
         component: inference
     spec:
-      priorityClassName: homelab-assistant
+      priorityClassName: internal-llm
       enableServiceLinks: false
       automountServiceAccountToken: false
       nodeSelector:

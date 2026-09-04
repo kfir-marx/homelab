@@ -38,7 +38,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: hotel-flight-matcher-to-llm
+  name: hotel-flight-matcher-to-internal-llm
   namespace: homelab-assistant
 spec:
   podSelector:
@@ -50,10 +50,10 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app: local-llm
-              component: inference
+              app: internal-llm
+              component: api
       ports:
-        - port: 8000
+        - port: 8080
           protocol: TCP
 ---
 apiVersion: cilium.io/v2

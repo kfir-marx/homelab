@@ -2,8 +2,8 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  Production environment                                                    ║
 # ║                                                                            ║
-# ║  1 control plane + 2 GPU workers on the home LAN (192.168.1.0/24).        ║
-# ║  All Talos nodes run on the two remaining Proxmox hosts.                  ║
+# ║  3 control planes + 2 GPU workers on the home LAN (192.168.1.0/24).       ║
+# ║  Control planes span all three Proxmox failure domains.                   ║
 # ║                                                                            ║
 # ║  IP convention (matches the rest of the homelab):                          ║
 # ║    192.168.1.101–199  → physical machines (Proxmox hosts, etc.)            ║
@@ -30,9 +30,8 @@ cilium_load_balancer_ip_stop: "192.168.1.229"
 argocd_target_revision: "main"
 
 # ── Control-plane nodes ───────────────────────────────────────────────────────
-# The single control plane lives on the more reliable largegpu host. Terraform
-# migrates the existing VM in place so its single-member etcd data is retained.
-# This favors smallgpu failure tolerance and frees RAM for its application worker.
+# One control plane lives in each Proxmox failure domain. cp-1 and its existing
+# etcd data remain in place on largegpu; cp-2 and cp-3 join that cluster.
 control_plane_nodes:
   cp-1:
     proxmox_node: "largegpu"
@@ -46,10 +45,28 @@ control_plane_nodes:
     # on the host HDD.
     system_disk_datastore_id: "largegpu-hdd"
     system_disk_file_format: "qcow2"
+  cp-2:
+    proxmox_node: "smallgpu"
+    vm_id: 202
+    ip_address: "192.168.1.212/24"
+    cores: 2
+    memory_mb: 4096
+    disk_size_gb: 50
+    system_disk_datastore_id: "local-lvm"
+    system_disk_file_format: "raw"
+  cp-3:
+    proxmox_node: "tinygpu"
+    vm_id: 203
+    ip_address: "192.168.1.213/24"
+    cores: 2
+    memory_mb: 4096
+    disk_size_gb: 50
+    system_disk_datastore_id: "local-lvm"
+    system_disk_file_format: "raw"
 
 # ── General workers ───────────────────────────────────────────────────────────
-# None: gpu-3 is a mixed general+GPU worker in one VM. NFS runs on the Proxmox
-# hosts and does not require a colocated general Kubernetes worker.
+# None: gpu-3 is a mixed general+GPU worker. A tinygpu worker is deliberately
+# deferred so the old 4-core, 11.63 GiB host retains control-plane headroom.
 worker_nodes: {}
 
 # ── Proxmox GPU nodes (PCIe passthrough) ────────────────────────────────────
@@ -79,8 +96,9 @@ gpu_nodes:
         pcie: true
 
   # smallgpu: RTX 2060 at 09:00; GPU, audio, USB, and UCSI functions share
-  # IOMMU group 18 and are passed through together. This VM reserves 12 GiB,
-  # leaving ~3.5 GiB for Proxmox, QEMU overhead, and bulk NFS.
+  # IOMMU group 18 and are passed through together. This VM reserves 36 GiB;
+  # with cp-2 at 4 GiB, the host retains ~7 GiB raw and ~4.4 GiB measured
+  # headroom for Proxmox, QEMU overhead, and bulk NFS.
   # Unlike gpu-2, this node is not tainted: it also runs ordinary pods.
   # Host prerequisite verified 2026-07-22: PCI IDs 10de:1e89, 10de:10f8,
   # 10de:1ad8, and 10de:1ad9 bind to vfio-pci and /dev/vfio/18 exists.
@@ -89,7 +107,7 @@ gpu_nodes:
     vm_id: 403
     ip_address: "192.168.1.233/24"
     cores: 10
-    memory_mb: 12288
+    memory_mb: 36864
     disk_size_gb: 100
     dedicated: false
     # Live SQLite/config state for the media stack. This stays local because

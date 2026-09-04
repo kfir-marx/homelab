@@ -174,8 +174,9 @@ kubectl kustomize kubernetes/system/hotel-flight-matcher >/tmp/hotel-flight-matc
 The release workflow builds `ghcr.io/kfir-marx/hotel-flight-matcher` from
 `main` and opens an image-pin PR. Merge that PR before expecting Argo CD to make
 the Deployment healthy. The workload reuses only the `LLM_API_KEY` key from
-`homelab-assistant-secrets`; it receives no Kubernetes token and no Gmail
-credential Secret.
+`homelab-assistant-secrets` and sends non-streaming requests through the queued
+`internal-llm` API; it receives no RabbitMQ credential, Kubernetes token, or
+Gmail credential Secret.
 
 After the image pin, OAuth client ID, Secret restore, and Cloudflare route are
 ready:

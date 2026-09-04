@@ -16,12 +16,11 @@ This repository declaratively manages a homelab across three layers:
 3. Argo CD reconciles applications and cluster resources from
    `kubernetes/apps/` and `kubernetes/system/`.
 
-The production model defines one Talos control-plane VM on `largegpu` and two
-GPU-capable workers across the `smallgpu` and `largegpu` Proxmox hosts. This
-favors availability when the less reliable `smallgpu` host fails and frees its
-RAM for application workloads, but it is not control-plane HA. The separate
-Ubuntu workstation is an NFS server and desktop; it is not a Proxmox host or
-Kubernetes worker.
+The production model defines three Talos control-plane VMs, one on each of
+`largegpu`, `smallgpu`, and `tinygpu`, plus GPU-capable workers on `largegpu`
+and `smallgpu`. Etcd therefore retains quorum after one Proxmox failure-domain
+loss. The separate Ubuntu workstation is an NFS server and desktop; it is not
+a Proxmox host or Kubernetes worker.
 
 ## Source-of-truth order
 
@@ -64,12 +63,17 @@ for a single-layer change.
 - `ubuntu-workstation` holds the critical 800 GB NFS tier and must retain its
   local GTX 1060/HDMI. It must not be converted back into a hypervisor.
 - `smallgpu` and `largegpu` are borrowed hardware. Only reproducible or
-  disposable data may depend on them.
+  disposable application data may depend on them. `tinygpu` has no declared
+  storage, UPS, NFS, or VFIO role.
 - The RTX 3080 on `largegpu` is shared by Talos VM `402` and Windows VM `502`.
   They must never be started at the same time.
-- The single control plane deliberately runs on `largegpu`. Preserve its 4 GiB
-  allocation in either RTX 3080 runtime mode and do not describe this topology
-  as resilient to loss of `largegpu`.
+- Preserve the three-control-plane placement: `cp-1` on `largegpu`, `cp-2` on
+  `smallgpu`, and `cp-3` on `tinygpu`, each at 4 GiB. Preserve the existing
+  Talos machine secrets and etcd data and never run `talosctl bootstrap` again.
+  A single host loss retains etcd quorum; two control-plane host losses do not.
+- Keep `tinygpu` dedicated to `cp-3` unless a fresh live capacity review
+  justifies a worker. Its current 4-core / 11.63 GiB budget favors control-plane
+  stability.
 - Existing filesystems are adopted, validated, and mounted. Automation must not
   partition, format, force-mount, or clear filesystem safety flags.
 - Static persistent volumes use explicit storage classes and `Retain`. Critical

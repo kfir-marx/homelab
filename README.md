@@ -26,8 +26,8 @@ explicit recovery procedures, and documented trade-offs.
 
 | | |
 |---|---|
-| **Compute** | Two Proxmox VE hosts and one Ubuntu workstation |
-| **Kubernetes** | Talos Linux with one control plane and two GPU-capable workers |
+| **Compute** | Three Proxmox VE hosts and one Ubuntu workstation |
+| **Kubernetes** | Talos Linux with three control planes and two GPU-capable workers |
 | **Accelerators** | NVIDIA RTX 3080 and RTX 2060 passed through to Talos VMs |
 | **Storage** | 10 TB bulk tier, 800 GB critical-data tier, and disposable local GPU scratch |
 | **Networking** | Cilium CNI, Gateway API, LAN load-balancer IPs, Tailscale, and Cloudflare Tunnel |
@@ -47,6 +47,7 @@ flowchart TB
     subgraph Physical["Physical layer"]
         Small["smallgpu · Proxmox VE 9<br/>RTX 2060 · 10 TB bulk NFS"]
         Large["largegpu · Proxmox VE 9<br/>RTX 3080 · Windows/Talos mutex"]
+        Tiny["tinygpu · Proxmox VE 9<br/>control-plane failure domain"]
         Ubuntu["Ubuntu workstation<br/>GTX 1060 desktop · 800 GB critical NFS"]
         Assistant["Private Telegram client<br/>thread selection · deterministic ops"]
         Codex["Codex App Server<br/>local Unix socket · workstation identity"]
@@ -54,7 +55,9 @@ flowchart TB
     end
 
     subgraph Cluster["Talos Kubernetes"]
-        CP["cp-1<br/>control plane"]
+        CP1["cp-1<br/>control plane"]
+        CP2["cp-2<br/>control plane"]
+        CP3["cp-3<br/>control plane"]
         GPU2["gpu-2<br/>RTX 3080 worker"]
         GPU3["gpu-3<br/>RTX 2060 mixed worker"]
         Platform["Cilium · Gateway API · GPU Operator"]
@@ -67,15 +70,20 @@ flowchart TB
     Git --> Argo
     Ansible --> Small
     Ansible --> Large
+    Ansible --> Tiny
     Ansible --> Ubuntu
     Ubuntu --> Assistant --> Codex
     Assistant -. fixed operations .-> Actuator --> Large
     Codex -. authorized tasks .-> Platform
-    IaC --> CP
+    IaC --> CP1
+    IaC --> CP2
+    IaC --> CP3
     IaC --> GPU2
     IaC --> GPU3
     Small -. hosts .-> GPU3
-    Large -. hosts .-> CP
+    Large -. hosts .-> CP1
+    Small -. hosts .-> CP2
+    Tiny -. hosts .-> CP3
     Large -. hosts .-> GPU2
     Argo --> Platform --> Apps
     Small -. bulk storage .-> Apps
@@ -155,20 +163,18 @@ execution boundary for Terraform apply or cluster recovery.
 
 | Decision | Trade-off |
 |---|---|
-| Single control plane on `largegpu` | Keeps the API available when the less reliable `smallgpu` fails and frees its RAM for applications, but `largegpu` failure causes control-plane downtime |
+| Three control planes across three Proxmox hosts | Etcd and the API tolerate one host loss, but two simultaneous control-plane failures lose quorum |
 | Static NFS volumes | Simple and transparent data placement, but no dynamic provisioning and the server remains a dependency |
 | Borrowed GPU hosts | Adds substantial compute capacity, but only reproducible data may depend on those machines |
 | RTX 3080 shared by Talos and Windows | Maximizes hardware use, but only one VM can own the GPU at a time |
 | Public Git repository | Makes the architecture reviewable; plaintext credentials and generated access files stay out of Git, while recovery material is committed only as SOPS/age ciphertext |
 
-These constraints are documented rather than hidden. Host-failure HA still
-requires three control-plane nodes across three distinct physical hosts once
-the hardware budget supports it.
-
-When `gpu-2` is stopped for Windows, the 12 GiB `gpu-3` VM is the only worker;
-the 4 GiB formerly assigned to `cp-1` on `smallgpu` is therefore available to
-application workloads. When `smallgpu` itself is down, its worker and bulk NFS
-export are unavailable even though the API on `largegpu` remains up.
+These constraints are documented rather than hidden. `gpu-3` is sized at
+36 GiB so `smallgpu` can also host `cp-2` with measured host headroom. A
+general worker on `tinygpu` is deferred: pairing another 4 GiB VM with `cp-3`
+would consume all four old CPU cores and cut the host's control-plane margin.
+When `smallgpu` is down, its worker and bulk NFS export are unavailable, while
+`cp-1` and `cp-3` retain API and etcd quorum.
 
 ## Repository tour
 
@@ -217,7 +223,8 @@ export are unavailable even though the API on `largegpu` remains up.
 | [Job assistant runbook](docs/job-assistant-runbook.md) | Private inputs, broker migration, secrets, deployment, restore, and troubleshooting |
 | [Homelab assistant runbook](docs/homelab-assistant-runbook.md) | Workstation Codex App Server, Telegram thread UX, Unix-socket boundary, deterministic VM switching, cutover, and rollback |
 | [External AI runbook](docs/external-ai-runbook.md) | Durable broker, requester scopes, Codex authentication, rollout, and recovery |
-| [Local LLM API runbook](docs/local-llm-runbook.md) | Qwen/vLLM recovery, ClusterIP API contract, retained GPU cache, and health checks |
+| [Internal LLM runbook](docs/local-llm-runbook.md) | Queued OpenAI-compatible API, Qwen/vLLM recovery, retained GPU cache, and health checks |
+| [Shared RabbitMQ runbook](docs/rabbitmq-runbook.md) | Cluster AMQP contract, credentials, transient-storage boundary, and operations |
 | [FlightStay Match POC](docs/hotel-flight-matcher-runbook.md) | Gmail-consented Chrome extension, schema extraction, deterministic flight scoring, Cloudflare API, and store gates |
 | [GPU Operator runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, rollout, CUDA validation, and metrics |
 | [Jellyfin media stack runbook](docs/media-stack-runbook.md) | Backup restoration, storage, GPU transcoding, credential rotation, and cleanup policy |

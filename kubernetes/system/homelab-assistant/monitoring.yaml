@@ -1,0 +1,37 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: internal-llm
+  namespace: homelab-assistant
+spec:
+  selector:
+    matchLabels:
+      app: internal-llm
+      component: api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: internal-llm
+  namespace: homelab-assistant
+spec:
+  groups:
+    - name: internal-llm.rules
+      rules:
+        - alert: InternalLlmApiDown
+          expr: up{namespace="homelab-assistant",service="internal-llm"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: internal-llm API is unavailable
+        - alert: InternalLlmRequestTimeouts
+          expr: increase(internal_llm_requests_total{status="timeout"}[15m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: internal-llm requests are timing out
