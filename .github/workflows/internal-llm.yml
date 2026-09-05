@@ -4,7 +4,6 @@ on:
   pull_request:
     paths:
       - services/internal-llm/**
-      - kubernetes/apps/homelab-assistant.yaml
       - kubernetes/apps/internal-llm.yaml
       - kubernetes/apps/rabbitmq.yaml
       - kubernetes/system/homelab-assistant/**
@@ -76,7 +75,6 @@ jobs:
             -summary \
             /tmp/internal-llm.yaml \
             /tmp/rabbitmq.yaml \
-            kubernetes/apps/homelab-assistant.yaml \
             kubernetes/apps/internal-llm.yaml \
             kubernetes/apps/rabbitmq.yaml
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4

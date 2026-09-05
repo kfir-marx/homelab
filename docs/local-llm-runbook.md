@@ -82,37 +82,10 @@ kubectl create --dry-run=client --validate=false \
 
 ## Rollout
 
-The `internal-llm` Application remains manual because it still owns retained
-assistant cutover resources. Renaming an Argo CD Application with a resource
-finalizer is a two-commit migration, not an ordinary sync. The first commit
-keeps `kubernetes/apps/homelab-assistant.yaml` as a transition object without a
-finalizer. Let the root app sync that update, then sync `internal-llm` without
-prune so it adopts the rendered resources.
-
-The queued gateway rename leaves five obsolete objects that only the old
-Application tracks. The legacy `llm` Deployment also requests the only GPU and
-must not remain beside `llm-inference`. After confirming the new resources have
-the `argocd.argoproj.io/instance=internal-llm` label, delete exactly these
-obsolete objects; keep the compatibility Service named `llm`:
-
-```bash
-kubectl -n homelab-assistant get \
-  deployment/llm \
-  networkpolicy/llm-default-deny \
-  networkpolicy/llm-cluster-clients \
-  ciliumnetworkpolicy/llm-dns-egress \
-  ciliumnetworkpolicy/llm-health-probes
-kubectl -n homelab-assistant delete \
-  deployment/llm \
-  networkpolicy/llm-default-deny \
-  networkpolicy/llm-cluster-clients \
-  ciliumnetworkpolicy/llm-dns-egress \
-  ciliumnetworkpolicy/llm-health-probes
-```
-
-Sync `internal-llm` again and complete the health and API checks below. Only
-then delete the transition manifest in a follow-up commit; the root app can
-remove the old Application without cascading into the adopted resources.
+The rename from the deprecated `homelab-assistant` Application is complete.
+`internal-llm` owns the retained compatibility resources, model storage,
+gateway, workers, and private inference deployment. The Application remains
+manual because it owns retained storage and the local GPU workload.
 
 Never sync the placeholder `sha-bootstrap` image. Merge the immutable image-pin
 PR created by the `internal-llm` workflow first. Restore both required Secrets,
