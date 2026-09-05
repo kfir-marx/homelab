@@ -30,9 +30,13 @@ on:
       - "services/homelab-assistant/**"
       - "kubernetes/apps/internal-llm.yaml"
       - "kubernetes/system/homelab-assistant/**"
+      # Do not re-run after an internal-llm image-release PR updates its tag.
+      - "!kubernetes/system/homelab-assistant/gateway.yaml"
       - "ansible/roles/homelab_assistant/**"
       - "ansible/roles/homelab_vm_actuator/**"
       - "ansible/inventory/production/host_vars/ubuntu-workstation.yml"
+      # Do not re-run after this workflow's image-release PR updates its tag.
+      - "!ansible/inventory/production/host_vars/ubuntu-workstation.yml"
       - "ansible/inventory/production/host_vars/largegpu.yml"
       - "ansible/inventory/production/group_vars/all.yml"
       - "ansible/playbooks/configure-ubuntu-workstation.yml"

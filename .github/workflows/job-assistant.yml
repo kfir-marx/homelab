@@ -25,6 +25,8 @@ on:
       - "kubernetes/apps/shared-services-telegram.yaml"
       - "kubernetes/system/job-assistant/**"
       - "kubernetes/system/shared-services-telegram/**"
+      # Do not re-run after the release PR pins the gateway image tag.
+      - "!kubernetes/system/shared-services-telegram/workload.yaml"
       - "!kubernetes/system/job-assistant/discovery.yaml"
       - "!kubernetes/system/job-assistant/migrate.yaml"
       - "!kubernetes/system/job-assistant/workloads.yaml"
