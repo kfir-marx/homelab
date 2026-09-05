@@ -106,11 +106,12 @@ jobs:
           push: true
           tags: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
       - name: Pin immutable image
-        run: >-
-          sed -i
-          's|ghcr.io/kfir-marx/homelab-internal-llm:sha-[a-f0-9]*|ghcr.io/kfir-marx/homelab-internal-llm:sha-${{ github.sha }}|g;
-          s|ghcr.io/kfir-marx/homelab-internal-llm:sha-bootstrap|ghcr.io/kfir-marx/homelab-internal-llm:sha-${{ github.sha }}|g'
-          kubernetes/system/homelab-assistant/gateway.yaml
+        run: |
+          image_ref="${IMAGE_NAME}:sha-${{ github.sha }}"
+          sed -Ei \
+            "s#${IMAGE_NAME}:sha-(bootstrap|[a-f0-9]{40})#${image_ref}#g" \
+            kubernetes/system/homelab-assistant/gateway.yaml
+          test "$(grep -Fc "${image_ref}" kubernetes/system/homelab-assistant/gateway.yaml)" -eq 2
       - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           branch: automation/internal-llm-image
