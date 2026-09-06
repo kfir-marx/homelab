@@ -43,7 +43,7 @@ store its AMQP URL as `RABBITMQ_URL` in
 `homelab-assistant/homelab-assistant-secrets`. Other services receive their own
 credentials in their own namespace.
 
-Hotel Flight Matcher publishes OpenAI-compatible RPC envelopes directly to
+Tapy publishes OpenAI-compatible RPC envelopes directly to
 `internal-llm.requests` and `external-ai.requests` and consumes replies from
 server-named exclusive callback queues. Its identity needs write permission on
 both request queues and configure/read permission only for its reply queues.

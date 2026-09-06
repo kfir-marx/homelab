@@ -2,7 +2,7 @@
 
 ## Architecture and ownership
 
-Hotel Flight Matcher keeps the same runtime architecture in development and
+Tapy keeps the same runtime architecture in development and
 production: the matcher stores agents and encrypted mailbox grants in
 PostgreSQL, publishes OpenAI-compatible RPC requests through RabbitMQ, and
 tries the configured internal/external LLM queues in order. `external-ai`
@@ -13,7 +13,7 @@ Each service separates portable resources from deployment choices:
 
 | Service | Portable resources | Homelab development | Cloud production |
 |---|---|---|---|
-| Matcher | `kubernetes/system/hotel-flight-matcher/base` | `overlays/homelab` | `overlays/cloud/in-cluster` or `overlays/cloud/managed` |
+| Matcher | `kubernetes/system/tapy/base` | `overlays/homelab` | `overlays/cloud/in-cluster` or `overlays/cloud/managed` |
 | external-ai | `kubernetes/system/external-ai/base` | `overlays/homelab` | `overlays/cloud/in-cluster` or `overlays/cloud/managed` |
 | RabbitMQ | `kubernetes/system/rabbitmq/base` | `overlays/homelab` | `overlays/cloud` when not managed |
 
@@ -87,11 +87,11 @@ FQDN policy. Encode the RabbitMQ virtual host in the AMQP URL and configure
 least-privilege users for the selected request and server-named reply queues.
 
 For the supplied in-cluster overlays, the private endpoints are
-`hotel-flight-matcher-postgres.staymatch.svc.cluster.local:5432`,
+`tapy-postgres.staymatch.svc.cluster.local:5432`,
 `external-ai-postgres.external-ai.svc.cluster.local:5432`, and
 `rabbitmq.rabbitmq.svc.cluster.local:5672`. Example URL shapes (with values
 supplied out of band) are
-`postgresql+psycopg://hotel_flight_matcher:<password>@hotel-flight-matcher-postgres.staymatch.svc.cluster.local:5432/hotel_flight_matcher`
+`postgresql+psycopg://tapy:<password>@tapy-postgres.staymatch.svc.cluster.local:5432/tapy`
 and `amqp://<user>:<password>@rabbitmq.rabbitmq.svc.cluster.local:5672/<vhost>`.
 These names belong in Secrets, not in the portable base.
 
@@ -105,8 +105,8 @@ Never commit a Secret manifest with real or fabricated values.
 
 | Namespace / Secret | Required keys |
 |---|---|
-| `staymatch/hotel-flight-matcher-secrets` (cloud) | `DATABASE_URL`, `RABBITMQ_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`; add `POSTGRES_PASSWORD` for in-cluster PostgreSQL |
-| `homelab-assistant/hotel-flight-matcher-secrets` | `DATABASE_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`, `POSTGRES_PASSWORD` |
+| `staymatch/tapy-secrets` (cloud) | `DATABASE_URL`, `RABBITMQ_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`; add `POSTGRES_PASSWORD` for in-cluster PostgreSQL |
+| `homelab-assistant/tapy-secrets` | `DATABASE_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`, `POSTGRES_PASSWORD` |
 | `homelab-assistant/homelab-assistant-secrets` | `RABBITMQ_URL` (the homelab overlay preserves this existing identity) |
 | `external-ai/external-ai-secrets` | `DATABASE_URL`, `RABBITMQ_URL`, `HOMELAB_ASSISTANT_TOKEN`, `JOB_ASSISTANT_TOKEN`; `POSTGRES_PASSWORD` for in-cluster PostgreSQL; `ALIBABA_API_KEY` when Model Studio is enabled |
 | `external-ai/external-ai-codex-auth-bootstrap` | `auth.json` when Codex-backed models are enabled |
@@ -156,7 +156,7 @@ intentional 10 GiB `emptyDir` transport; it has not been moved onto NFS.
 
 After NFS directories and out-of-band Secrets exist, let the existing Argo CD
 Applications reconcile in this order: `rabbitmq`, `internal-llm`, `external-ai`,
-then `hotel-flight-matcher`. No direct manifest apply is required.
+then `tapy`. No direct manifest apply is required.
 
 ## Generic cloud deployment
 
@@ -183,7 +183,7 @@ then `hotel-flight-matcher`. No direct manifest apply is required.
    names, `volumeName` bindings, NFS paths, and PV reclaim policies are
    unchanged, so Argo updates the existing objects rather than replacing data.
 4. Inspect rendered homelab overlays before allowing prune. Confirm
-   `hotel-flight-matcher-postgres-pv`, `external-ai-postgres-pv`, and
+   `tapy-postgres-pv`, `external-ai-postgres-pv`, and
    `external-ai-codex-home-pv` still render as hard-bound `Retain` volumes.
 5. Reconcile one Application at a time in the order above and test readiness
    and fallback. Keep backups until OAuth refresh, Codex refresh, restart, and

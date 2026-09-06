@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tapy-postgres
+spec:
+  podSelector:
+    matchLabels: {app: tapy, component: postgres}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: tapy, component: api}
+      ports: [{port: 5432, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tapy-to-postgres
+spec:
+  podSelector:
+    matchLabels: {app: tapy, component: api}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app: tapy, component: postgres}
+      ports: [{port: 5432, protocol: TCP}]

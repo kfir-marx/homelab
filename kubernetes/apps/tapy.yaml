@@ -1,0 +1,33 @@
+# Public OAuth/API backend. The only public path is the remotely managed
+# Cloudflare Tunnel hostname; the origin Service remains ClusterIP-only.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tapy
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kfir-marx/homelab.git
+    targetRevision: main
+    path: kubernetes/system/tapy/overlays/homelab
+  destination:
+    server: https://kubernetes.default.svc
+    # Reuse the local LLM namespace and its scoped RabbitMQ identity. Matcher
+    # OAuth/database secrets remain in a dedicated Secret owned out of band.
+    namespace: homelab-assistant
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: tapy-secrets
+      jsonPointers: [/data]

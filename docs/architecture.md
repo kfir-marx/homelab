@@ -247,9 +247,9 @@ path. Both exports must be mountable from the Talos nodes.
 | `homelab-assistant-postgres-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/homelab-assistant/postgres` | 5 Gi | **Retained recovery** — inactive legacy PostgreSQL binding preserved through migration and rollback |
 | `gpu2-scratch-pv` | `local-gpu-scratch` | `gpu-2:/var/mnt/gpu-scratch` | 390 Gi | **Scratch** — replaceable local-LLM weights and caches; unavailable in Windows mode |
 | `external-ai-*-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/external-ai/*` | 1–5 Gi | **Critical** — durable external job queue and retained ChatGPT-managed Codex authentication |
-| `hotel-flight-matcher-postgres-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/hotel-flight-matcher/postgres` | 5 Gi | **Critical** — agent identities, encrypted mailbox grants, and processed-message metadata |
+| `tapy-postgres-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/tapy/postgres` | 5 Gi | **Critical** — agent identities, encrypted mailbox grants, and processed-message metadata |
 
-Hotel Flight Matcher, external-ai, and RabbitMQ are organized as portable
+Tapy, external-ai, and RabbitMQ are organized as portable
 Kustomize bases with homelab and cloud overlays. Homelab-specific NFS bindings,
 Cloudflare access, and the public `547600.xyz` name exist only in homelab
 overlays. Cloud overlays use standard Ingress, configurable dynamic retained

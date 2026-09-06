@@ -1,0 +1,10 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tapy-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  podSelector:
+    matchLabels: {app: tapy, component: api}
+  policyTypes: [Ingress, Egress]

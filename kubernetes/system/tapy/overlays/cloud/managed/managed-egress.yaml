@@ -1,0 +1,16 @@
+# Replace both example.invalid names with the hosts from DATABASE_URL and
+# RABBITMQ_URL. Cilium resolves them without broad Internet egress.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tapy-managed-dependencies
+spec:
+  endpointSelector:
+    matchLabels: {app: tapy, component: api}
+  egress:
+    - toFQDNs: [{matchName: postgres.example.invalid}]
+      toPorts:
+        - ports: [{port: "5432", protocol: TCP}]
+    - toFQDNs: [{matchName: rabbitmq.example.invalid}]
+      toPorts:
+        - ports: [{port: "5671", protocol: TCP}]

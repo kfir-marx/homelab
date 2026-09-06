@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: hotel-flight-matcher-postgres
-spec:
-  storageClassName: nfs-storage2
-  volumeName: hotel-flight-matcher-postgres-pv

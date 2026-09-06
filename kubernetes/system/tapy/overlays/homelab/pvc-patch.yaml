@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tapy-postgres
+spec:
+  storageClassName: nfs-storage2
+  volumeName: tapy-postgres-pv

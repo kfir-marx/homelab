@@ -64,7 +64,7 @@ spec:
               kubernetes.io/metadata.name: homelab-assistant
           podSelector:
             matchLabels:
-              app: hotel-flight-matcher
+              app: tapy
               component: api
       ports:
         - port: 8080

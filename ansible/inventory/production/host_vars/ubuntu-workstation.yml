@@ -45,7 +45,7 @@ nfs_server_directories:
     owner: "10001"
     group: "10001"
     mode: "0700"
-  - path: /mnt/storage2-bulk/hotel-flight-matcher/postgres
+  - path: /mnt/storage2-bulk/tapy/postgres
     mount_point: /mnt/storage2-bulk
     owner: "999"
     group: "999"

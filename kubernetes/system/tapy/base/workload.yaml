@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tapy
+  labels:
+    app: tapy
+    component: api
+spec:
+  type: ClusterIP
+  selector:
+    app: tapy
+    component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tapy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tapy
+      component: api
+  template:
+    metadata:
+      labels:
+        app: tapy
+        component: api
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/kfir-marx/tapy:sha-85301e05cc7554b2118d174a07ac6801c542109f
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MATCHER_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: DATABASE_URL}
+            - name: MATCHER_RABBITMQ_URL
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: RABBITMQ_URL}
+            - name: MATCHER_OAUTH_TOKEN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: OAUTH_TOKEN_ENCRYPTION_KEY}
+            - name: MATCHER_GOOGLE_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: GOOGLE_OAUTH_CLIENT_SECRET}
+            - name: MATCHER_MICROSOFT_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: MICROSOFT_OAUTH_CLIENT_SECRET}
+            - name: MATCHER_GOOGLE_OAUTH_CLIENT_ID
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: GOOGLE_OAUTH_CLIENT_ID}
+            - name: MATCHER_MICROSOFT_OAUTH_CLIENT_ID
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: MICROSOFT_OAUTH_CLIENT_ID}
+            - name: MATCHER_MICROSOFT_TENANT
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: MICROSOFT_TENANT}
+            - name: MATCHER_PUBLIC_BASE_URL
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: PUBLIC_BASE_URL}
+            - name: MATCHER_GOOGLE_OAUTH_REDIRECT_URI
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: GOOGLE_OAUTH_REDIRECT_URI}
+            - name: MATCHER_MICROSOFT_OAUTH_REDIRECT_URI
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: MICROSOFT_OAUTH_REDIRECT_URI}
+            - name: MATCHER_LLM_ORDER
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: LLM_ORDER}
+            - name: MATCHER_INTERNAL_LLM_QUEUE
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: INTERNAL_LLM_QUEUE}
+            - name: MATCHER_INTERNAL_LLM_MODEL
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: INTERNAL_LLM_MODEL}
+            - name: MATCHER_EXTERNAL_AI_QUEUE
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: EXTERNAL_AI_QUEUE}
+            - name: MATCHER_EXTERNAL_AI_MODEL
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: EXTERNAL_AI_MODEL}
+            - name: MATCHER_REQUEST_TIMEOUT_SECONDS
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: REQUEST_TIMEOUT_SECONDS}
+            - name: MATCHER_MATCH_THRESHOLD
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: MATCH_THRESHOLD}
+            - name: MATCHER_MAXIMUM_MESSAGES_PER_SCAN
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: MAXIMUM_MESSAGES_PER_SCAN}
+            - name: MATCHER_GMAIL_QUERY
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: GMAIL_QUERY}
+            - name: MATCHER_FLIGHTS_CONFIG_PATH
+              value: /config/flights.json
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet: {path: /health/live, port: http}
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          volumeMounts:
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap:
+            name: tapy
+            items: [{key: flights.json, path: flights.json}]
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}

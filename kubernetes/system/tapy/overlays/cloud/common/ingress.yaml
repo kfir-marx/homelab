@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tapy
+spec:
+  ingressClassName: REPLACE_WITH_INGRESS_CLASS
+  tls:
+    - hosts: [staymatch.example.invalid]
+      secretName: REPLACE_WITH_TLS_SECRET
+  rules:
+    - host: staymatch.example.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tapy
+                port: {name: http}

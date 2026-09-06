@@ -1,0 +1,68 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared-to-tapy
+spec:
+  podSelector:
+    matchLabels: {app: tapy, component: api}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: cloudflared}
+          podSelector:
+            matchLabels: {app: cloudflared}
+      ports: [{port: 8080, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tapy-to-rabbitmq
+spec:
+  podSelector:
+    matchLabels: {app: tapy, component: api}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: rabbitmq}
+          podSelector:
+            matchLabels: {app: rabbitmq}
+      ports: [{port: 5672, protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tapy-external-egress
+spec:
+  endpointSelector:
+    matchLabels: {app: tapy, component: api}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports: [{port: "53", protocol: ANY}]
+          rules:
+            dns: [{matchPattern: "*"}]
+    - toFQDNs:
+        - {matchName: accounts.google.com}
+        - {matchName: oauth2.googleapis.com}
+        - {matchName: gmail.googleapis.com}
+        - {matchName: login.microsoftonline.com}
+        - {matchName: graph.microsoft.com}
+      toPorts:
+        - ports: [{port: "443", protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tapy-health-probes
+spec:
+  endpointSelector:
+    matchLabels: {app: tapy, component: api}
+  ingress:
+    - fromEntities: [host, remote-node]
+      toPorts:
+        - ports: [{port: "8080", protocol: TCP}]

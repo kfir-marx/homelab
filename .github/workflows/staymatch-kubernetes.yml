@@ -3,10 +3,10 @@ name: staymatch portable Kubernetes
 on:
   pull_request:
     paths:
-      - kubernetes/system/hotel-flight-matcher/**
+      - kubernetes/system/tapy/**
       - kubernetes/system/external-ai/**
       - kubernetes/system/rabbitmq/**
-      - kubernetes/apps/hotel-flight-matcher.yaml
+      - kubernetes/apps/tapy.yaml
       - kubernetes/apps/external-ai.yaml
       - kubernetes/apps/rabbitmq.yaml
       - kubernetes/apps/cloud/**
@@ -26,9 +26,9 @@ jobs:
         run: |
           set -euo pipefail
           overlays=(
-            kubernetes/system/hotel-flight-matcher/overlays/homelab
-            kubernetes/system/hotel-flight-matcher/overlays/cloud/in-cluster
-            kubernetes/system/hotel-flight-matcher/overlays/cloud/managed
+            kubernetes/system/tapy/overlays/homelab
+            kubernetes/system/tapy/overlays/cloud/in-cluster
+            kubernetes/system/tapy/overlays/cloud/managed
             kubernetes/system/external-ai/overlays/homelab
             kubernetes/system/external-ai/overlays/cloud/in-cluster
             kubernetes/system/external-ai/overlays/cloud/managed
@@ -60,7 +60,7 @@ jobs:
             -strict \
             -summary \
             "${RUNNER_TEMP}"/kubernetes-system-*.yaml \
-            kubernetes/apps/hotel-flight-matcher.yaml \
+            kubernetes/apps/tapy.yaml \
             kubernetes/apps/external-ai.yaml \
             kubernetes/apps/rabbitmq.yaml \
             kubernetes/apps/cloud/in-cluster \

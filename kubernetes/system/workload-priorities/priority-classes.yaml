@@ -109,9 +109,9 @@ description: "Priority 3: job-assistant"
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: homelab-hotel-flight-matcher
+  name: homelab-tapy
 value: 1000275
-description: "Priority 3: public hotel-flight matcher API"
+description: "Priority 3: public Tapy API"
 ---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
