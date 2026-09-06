@@ -74,6 +74,8 @@ spec:
                 secretKeyRef:
                   name: homelab-assistant-secrets
                   key: RABBITMQ_URL
+            - name: INTERNAL_LLM_REQUEST_QUEUE
+              value: internal-llm.requests
           ports:
             - name: http
               containerPort: 8080
@@ -143,6 +145,10 @@ spec:
                 secretKeyRef:
                   name: homelab-assistant-secrets
                   key: RABBITMQ_URL
+            - name: INTERNAL_LLM_REQUEST_QUEUE
+              value: internal-llm.requests
+            - name: INTERNAL_LLM_INFERENCE_BASE_URL
+              value: http://llm-inference.homelab-assistant.svc.cluster.local:8000/v1
             - name: INTERNAL_LLM_INFERENCE_API_KEY
               valueFrom:
                 secretKeyRef:

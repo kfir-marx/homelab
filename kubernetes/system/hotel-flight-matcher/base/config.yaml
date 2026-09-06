@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hotel-flight-matcher
+data:
+  GOOGLE_OAUTH_CLIENT_ID: ""
+  MICROSOFT_OAUTH_CLIENT_ID: ""
+  MICROSOFT_TENANT: common
+  PUBLIC_BASE_URL: http://localhost:8080
+  GOOGLE_OAUTH_REDIRECT_URI: ""
+  MICROSOFT_OAUTH_REDIRECT_URI: ""
+  LLM_ORDER: internal-llm,external-ai
+  INTERNAL_LLM_QUEUE: internal-llm.requests
+  INTERNAL_LLM_MODEL: local-llm
+  EXTERNAL_AI_QUEUE: external-ai.requests
+  EXTERNAL_AI_MODEL: alibaba:qwen-plus
+  REQUEST_TIMEOUT_SECONDS: "120"
+  MATCH_THRESHOLD: "0.90"
+  MAXIMUM_MESSAGES_PER_SCAN: "20"
+  GMAIL_QUERY: newer_than:365d
+  flights.json: |
+    {"version":1,"flights":[]}

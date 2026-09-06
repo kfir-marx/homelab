@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-controller-to-hotel-flight-matcher
+spec:
+  podSelector:
+    matchLabels: {app: hotel-flight-matcher, component: api}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {networking.staymatch.io/ingress: "true"}
+          podSelector:
+            matchLabels: {networking.staymatch.io/controller: "true"}
+      ports: [{port: 8080, protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hotel-flight-matcher-public-egress
+spec:
+  endpointSelector:
+    matchLabels: {app: hotel-flight-matcher, component: api}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports: [{port: "53", protocol: ANY}]
+          rules:
+            dns: [{matchPattern: "*"}]
+    - toFQDNs:
+        - {matchName: accounts.google.com}
+        - {matchName: oauth2.googleapis.com}
+        - {matchName: gmail.googleapis.com}
+        - {matchName: login.microsoftonline.com}
+        - {matchName: graph.microsoft.com}
+      toPorts:
+        - ports: [{port: "443", protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hotel-flight-matcher-health-probes
+spec:
+  endpointSelector:
+    matchLabels: {app: hotel-flight-matcher, component: api}
+  ingress:
+    - fromEntities: [host, remote-node]
+      toPorts:
+        - ports: [{port: "8080", protocol: TCP}]

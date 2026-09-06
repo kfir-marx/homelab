@@ -29,6 +29,7 @@ def parse_request(raw: bytes) -> tuple[str, str, dict[str, Any] | None]:
 
 
 async def run(settings: Settings) -> None:
+    settings.require_worker_dependencies()
     connection = await aio_pika.connect_robust(settings.rabbitmq_url.get_secret_value())
     channel = await connection.channel(publisher_confirms=True)
     await channel.set_qos(prefetch_count=settings.worker_prefetch)

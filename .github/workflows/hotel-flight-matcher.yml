@@ -47,7 +47,9 @@ jobs:
       - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5
       - name: Render manifests
         run: |
-          kubectl kustomize kubernetes/system/hotel-flight-matcher >/tmp/hotel-flight-matcher.yaml
+          kubectl kustomize kubernetes/system/hotel-flight-matcher/overlays/homelab >/tmp/hotel-flight-matcher.yaml
+          kubectl kustomize kubernetes/system/hotel-flight-matcher/overlays/cloud/in-cluster >/tmp/hotel-flight-matcher-cloud-in-cluster.yaml
+          kubectl kustomize kubernetes/system/hotel-flight-matcher/overlays/cloud/managed >/tmp/hotel-flight-matcher-cloud-managed.yaml
           kubectl kustomize kubernetes/system/homelab-assistant >/tmp/homelab-assistant.yaml
           kubectl kustomize kubernetes/system/cloudflared >/tmp/cloudflared.yaml
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
@@ -80,7 +82,7 @@ jobs:
         run: >-
           sed -i
           's|image: ghcr.io/kfir-marx/hotel-flight-matcher:.*|image: ghcr.io/kfir-marx/hotel-flight-matcher:sha-${{ github.sha }}|'
-          kubernetes/system/hotel-flight-matcher/workload.yaml
+          kubernetes/system/hotel-flight-matcher/base/workload.yaml
       - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           branch: automation/hotel-flight-matcher-image

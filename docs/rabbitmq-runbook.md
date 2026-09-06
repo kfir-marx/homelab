@@ -1,5 +1,9 @@
 # Shared RabbitMQ runbook
 
+The portable base, retained cloud PVC variant, managed broker option, and
+cross-service configuration matrix are documented in
+[`staymatch-kubernetes-portability.md`](staymatch-kubernetes-portability.md).
+
 ## Contract
 
 The `rabbitmq` Argo CD Application is the cluster-wide AMQP 0-9-1 transport.
@@ -22,9 +26,12 @@ semantics and advises against NFS for its node database. Treat RabbitMQ as a
 shared backpressure and delivery mechanism, not the source of truth. A service
 that cannot recreate work must keep its job state in its own retained database.
 
-Do not move `/var/lib/rabbitmq` onto either NFS tier. Durable RabbitMQ service
-requires a future storage/topology project with local SSD volumes and multiple
-nodes placed across failure domains.
+Do not move `/var/lib/rabbitmq` onto either homelab NFS tier. Durable homelab
+RabbitMQ requires a future storage/topology project with local SSD volumes and
+multiple nodes placed across failure domains. This limitation is specific to
+`overlays/homelab`: the cloud overlay uses a dynamically provisioned retained
+claim, and production may instead omit the Application and use a managed AMQP
+endpoint from `RABBITMQ_URL`.
 
 ## Bootstrap secrets and users
 

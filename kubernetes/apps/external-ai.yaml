@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/kfir-marx/homelab.git
     targetRevision: main
-    path: kubernetes/system/external-ai
+    path: kubernetes/system/external-ai/overlays/homelab
   destination:
     server: https://kubernetes.default.svc
     namespace: external-ai

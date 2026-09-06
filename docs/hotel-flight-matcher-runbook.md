@@ -1,5 +1,9 @@
 # Hotel Flight Matcher backend
 
+Portable homelab/cloud topology, cloud prerequisites, configuration matrices,
+deployment order, and migration steps are documented in
+[`staymatch-kubernetes-portability.md`](staymatch-kubernetes-portability.md).
+
 ## Runtime design
 
 The service is a backend-only proof of concept. It does not require a browser
@@ -46,8 +50,9 @@ the eventual frontend's login/session system before a public multi-user launch.
 
 The database retains agent identities, encrypted provider refresh tokens,
 mailbox identity, processed provider message IDs, and small match summaries.
-It never retains access tokens or message bodies. The PostgreSQL PV is hard
-bound to the permanent critical NFS tier with `Retain`.
+It never retains access tokens or message bodies. In the homelab overlay the
+PostgreSQL PV is hard bound to the permanent critical NFS tier with `Retain`;
+cloud uses either a dynamically provisioned retained PVC or managed PostgreSQL.
 
 ## OAuth registration
 
@@ -82,7 +87,8 @@ hostname because the provider and future frontend must reach it directly.
 
 ## Configuration and secrets
 
-The ConfigMap owns `LLM_ORDER`, both queue model names, `MATCH_THRESHOLD`, scan
+The ConfigMap owns `LLM_ORDER`, both queue names and model names,
+`MICROSOFT_TENANT`, optional explicit redirect URIs, `MATCH_THRESHOLD`, scan
 limit, Gmail query, public URL, and non-secret OAuth client IDs. The matcher
 uses the `internal-llm.requests` and `external-ai.requests` durable queues
 directly; it receives RabbitMQ credentials, not either LLM's HTTP credential.
@@ -118,6 +124,8 @@ uv run --directory services/hotel-flight-matcher --locked --extra dev ruff check
 uv run --directory services/hotel-flight-matcher --locked --extra dev mypy src tests
 uv run --directory services/hotel-flight-matcher --locked --extra dev pytest
 kubectl kustomize kubernetes/system/hotel-flight-matcher >/tmp/hotel-flight-matcher.yaml
+kubectl kustomize kubernetes/system/hotel-flight-matcher/overlays/cloud/in-cluster >/tmp/hotel-flight-matcher-cloud.yaml
+kubectl kustomize kubernetes/system/hotel-flight-matcher/overlays/cloud/managed >/tmp/hotel-flight-matcher-managed.yaml
 ```
 
 An authorized rollout must converge the workstation directory first, then

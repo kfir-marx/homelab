@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hotel-flight-matcher
+spec:
+  template:
+    spec:
+      priorityClassName: homelab-hotel-flight-matcher
+      containers:
+        - name: api
+          env:
+            - name: MATCHER_RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: homelab-assistant-secrets
+                  key: RABBITMQ_URL

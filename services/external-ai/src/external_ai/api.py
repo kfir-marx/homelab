@@ -82,14 +82,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/health/ready")
-    def ready(response: Response) -> dict[str, str]:
+    def ready(response: Response) -> dict[str, object]:
         try:
             with engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
         except Exception:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-            return {"status": "not-ready"}
-        return {"status": "ready"}
+            return {"status": "not-ready", "dependencies": {"database": "unavailable"}}
+        return {"status": "ready", "dependencies": {"database": "ready"}}
 
     @app.post("/v1/jobs", response_model=JobResponse, status_code=202)
     def create_job(body: SubmitRequest, actor: str = Depends(requester)) -> JobResponse:

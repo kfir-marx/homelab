@@ -144,6 +144,12 @@ class BookingExtractor:
     def ready(self) -> bool:
         return all(self._endpoints[name].ready for name in self._order)
 
+    @property
+    def readiness(self) -> dict[str, str]:
+        return {
+            name: "ready" if self._endpoints[name].ready else "unavailable" for name in self._order
+        }
+
     async def connect(self) -> None:
         connected: list[RpcEndpoint] = []
         try:

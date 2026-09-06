@@ -89,6 +89,8 @@ def create_app(
     flight_repository: FlightRepository | None = None,
 ) -> FastAPI:
     resolved = settings or Settings()
+    if extractor is None:
+        resolved.require_rabbitmq()
     engine = make_engine(resolved)
     initialize(engine)
     factory = make_factory(engine)
@@ -165,17 +167,26 @@ def create_app(
         return {"status": "ok"}
 
     @app.get("/health/ready", include_in_schema=False)
-    async def ready(response: Response) -> dict[str, str]:
+    async def ready(response: Response) -> dict[str, object]:
+        dependencies: dict[str, object] = {
+            "database": "ready",
+            "rabbitmq": "ready" if configured_extractor.ready else "unavailable",
+        }
         try:
             with engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
         except Exception:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-            return {"status": "not-ready", "database": "unavailable"}
+            dependencies["database"] = "unavailable"
+        if isinstance(configured_extractor, BookingExtractor):
+            dependencies["llm_backends"] = configured_extractor.readiness
         if not configured_extractor.ready:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-            return {"status": "not-ready", "rabbitmq": "unavailable"}
-        return {"status": "ready"}
+        ready_status = response.status_code != status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "status": "ready" if ready_status else "not-ready",
+            "dependencies": dependencies,
+        }
 
     @app.post("/v1/agents", response_model=AgentCreated, status_code=201)
     async def create_agent() -> AgentCreated:

@@ -1,0 +1,59 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: external-ai-api-clients
+spec:
+  podSelector:
+    matchLabels: {app: external-ai, component: api}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {access.external-ai.io/enabled: "true"}
+      ports: [{port: 8080, protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: external-ai-dns-egress
+spec:
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports: [{port: "53", protocol: ANY}]
+          rules:
+            dns: [{matchPattern: "*"}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: external-ai-model-egress
+spec:
+  endpointSelector:
+    matchLabels: {app: external-ai, component: worker}
+  egress:
+    - toFQDNs:
+        - {matchName: api.openai.com}
+        - {matchName: auth.openai.com}
+        - {matchName: chatgpt.com}
+        - {matchPattern: "*.chatgpt.com"}
+        - {matchName: dashscope-intl.aliyuncs.com}
+        - {matchPattern: "*.maas.aliyuncs.com"}
+      toPorts:
+        - ports: [{port: "443", protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: external-ai-health-probes
+spec:
+  endpointSelector:
+    matchLabels: {app: external-ai, component: api}
+  ingress:
+    - fromEntities: [host, remote-node]
+      toPorts:
+        - ports: [{port: "8080", protocol: TCP}]

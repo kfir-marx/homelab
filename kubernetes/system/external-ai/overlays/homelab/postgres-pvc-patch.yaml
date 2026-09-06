@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: external-ai-postgres
+spec:
+  storageClassName: nfs-storage2
+  volumeName: external-ai-postgres-pv

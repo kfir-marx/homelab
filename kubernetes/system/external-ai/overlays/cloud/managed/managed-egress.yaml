@@ -1,0 +1,16 @@
+# Replace both example.invalid names and ports with the hosts from DATABASE_URL
+# and RABBITMQ_URL before deploying this overlay.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: external-ai-managed-dependencies
+spec:
+  endpointSelector:
+    matchLabels: {app: external-ai}
+  egress:
+    - toFQDNs: [{matchName: postgres.example.invalid}]
+      toPorts:
+        - ports: [{port: "5432", protocol: TCP}]
+    - toFQDNs: [{matchName: rabbitmq.example.invalid}]
+      toPorts:
+        - ports: [{port: "5671", protocol: TCP}]

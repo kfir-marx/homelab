@@ -18,7 +18,7 @@ on:
       - "kubernetes/system/media/network-policy.yaml"
       - "kubernetes/system/workload-priorities/priority-classes.yaml"
       - "kubernetes/system/job-assistant/network-policy.yaml"
-      - "kubernetes/system/external-ai/network-policy.yaml"
+      - "kubernetes/system/external-ai/overlays/homelab/network-policy.yaml"
       - "docs/homelab-assistant-runbook.md"
       - "docs/media-stack-runbook.md"
       - "docs/network-policies.md"
@@ -45,7 +45,7 @@ on:
       - "kubernetes/system/media/network-policy.yaml"
       - "kubernetes/system/workload-priorities/priority-classes.yaml"
       - "kubernetes/system/job-assistant/network-policy.yaml"
-      - "kubernetes/system/external-ai/network-policy.yaml"
+      - "kubernetes/system/external-ai/overlays/homelab/network-policy.yaml"
       - "docs/homelab-assistant-runbook.md"
       - "docs/media-stack-runbook.md"
       - "docs/network-policies.md"
@@ -182,7 +182,7 @@ jobs:
             kubernetes/system/cloudflared \
             kubernetes/system/workload-priorities/priority-classes.yaml \
             kubernetes/system/job-assistant/network-policy.yaml \
-            kubernetes/system/external-ai/network-policy.yaml \
+            kubernetes/system/external-ai/overlays/homelab/network-policy.yaml \
             /tmp/media.yaml
 
   ansible:

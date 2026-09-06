@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: external-ai
+data:
+  REQUEST_QUEUE: external-ai.requests
+  RPC_TIMEOUT_SECONDS: "300"
+  DEFAULT_TIMEOUT_SECONDS: "600"
+  MAXIMUM_TIMEOUT_SECONDS: "1200"
+  MAXIMUM_PROMPT_BYTES: "512000"
+  POLL_SECONDS: "2"
+  ALIBABA_BASE_URL: https://dashscope-intl.aliyuncs.com/compatible-mode/v1

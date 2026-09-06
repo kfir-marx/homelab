@@ -10,7 +10,7 @@ spec:
   source:
     repoURL: https://github.com/kfir-marx/homelab.git
     targetRevision: main
-    path: kubernetes/system/rabbitmq
+    path: kubernetes/system/rabbitmq/overlays/homelab
   destination:
     server: https://kubernetes.default.svc
     namespace: rabbitmq

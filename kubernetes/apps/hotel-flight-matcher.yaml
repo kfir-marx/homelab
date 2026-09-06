@@ -12,7 +12,7 @@ spec:
   source:
     repoURL: https://github.com/kfir-marx/homelab.git
     targetRevision: main
-    path: kubernetes/system/hotel-flight-matcher
+    path: kubernetes/system/hotel-flight-matcher/overlays/homelab
   destination:
     server: https://kubernetes.default.svc
     # Reuse the local LLM namespace and its scoped RabbitMQ identity. Matcher

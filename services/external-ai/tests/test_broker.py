@@ -243,7 +243,7 @@ def test_retry_reuses_the_durable_job(tmp_path: Path, monkeypatch: pytest.Monkey
 
 def test_worker_manifest_has_no_client_or_cluster_credentials() -> None:
     repository = Path(__file__).resolve().parents[3]
-    manifest = (repository / "kubernetes/system/external-ai/workloads.yaml").read_text()
+    manifest = (repository / "kubernetes/system/external-ai/base/workloads.yaml").read_text()
     worker = manifest.split("name: external-ai-worker", 1)[1]
     assert "replicas: 1" in worker
     worker = worker.split("volumes:", 1)[0]

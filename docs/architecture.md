@@ -249,6 +249,13 @@ path. Both exports must be mountable from the Talos nodes.
 | `external-ai-*-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/external-ai/*` | 1–5 Gi | **Critical** — durable external job queue and retained ChatGPT-managed Codex authentication |
 | `hotel-flight-matcher-postgres-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/hotel-flight-matcher/postgres` | 5 Gi | **Critical** — agent identities, encrypted mailbox grants, and processed-message metadata |
 
+Hotel Flight Matcher, external-ai, and RabbitMQ are organized as portable
+Kustomize bases with homelab and cloud overlays. Homelab-specific NFS bindings,
+Cloudflare access, and the public `547600.xyz` name exist only in homelab
+overlays. Cloud overlays use standard Ingress, configurable dynamic retained
+PVCs, or externally managed PostgreSQL/RabbitMQ URLs. See
+[`staymatch-kubernetes-portability.md`](staymatch-kubernetes-portability.md).
+
 Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests. On the NTFS-backed bulk tier, Ansible also exports each PV child path explicitly with its own stable `fsid`; Talos mounts those child paths directly, and the parent NTFS export alone does not reliably serve a fresh child-path mount after an NFS restart.
 
 Applications that need hard binding and independent retention declare smaller

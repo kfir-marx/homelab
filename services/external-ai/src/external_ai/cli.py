@@ -22,6 +22,7 @@ def api() -> None:
 @app.command()
 def worker() -> None:
     settings = Settings()
+    settings.require_worker_dependencies()
     engine = make_engine(settings)
     initialize(engine)
     asyncio.run(run(make_factory(engine), settings))

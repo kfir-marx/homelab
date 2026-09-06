@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
+from hotel_flight_matcher.config import Settings
 from hotel_flight_matcher.llm import BookingExtractor, RpcResponse
 from hotel_flight_matcher.models import EmailForAnalysis
 
@@ -87,3 +89,19 @@ async def test_invalid_first_output_uses_fallback() -> None:
         {"internal-llm": "local-llm", "external-ai": "alibaba:qwen-plus"},
     )
     assert (await extractor.extract(email())).hotel_name == "Hotel"
+
+
+def test_external_only_configuration_builds_one_rpc_endpoint() -> None:
+    configured = Settings(
+        rabbitmq_url=SecretStr("amqps://example.invalid/vhost"),
+        llm_order=("external-ai",),
+        external_ai_queue="production.external-ai.requests",
+        external_ai_model="alibaba:qwen-plus",
+    )
+    extractor = BookingExtractor.from_settings(configured)
+    assert extractor.readiness == {"external-ai": "unavailable"}
+
+
+def test_rabbitmq_is_required_for_runtime_extractor() -> None:
+    with pytest.raises(ValueError, match="MATCHER_RABBITMQ_URL"):
+        Settings().require_rabbitmq()

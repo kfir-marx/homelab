@@ -1,5 +1,9 @@
 # external-ai deployment, authentication, and recovery
 
+Portable storage/database/RabbitMQ variants and generic cloud deployment are
+documented in
+[`staymatch-kubernetes-portability.md`](staymatch-kubernetes-portability.md).
+
 ## Service boundary
 
 external-ai is a ClusterIP-only authenticated broker. The API accepts only two
@@ -46,7 +50,8 @@ reply queues. `external-ai-codex-auth-bootstrap` requires only `auth.json`.
 Create and capture these manually; no plaintext or fabricated encrypted snapshot
 belongs in Git.
 
-Set `ALIBABA_BASE_URL` in `kubernetes/system/external-ai/config.yaml` to the
+Set `ALIBABA_BASE_URL` in `kubernetes/system/external-ai/base/config.yaml` or
+an environment overlay to the
 workspace-specific regional Model Studio compatible-mode base URL when issued.
 The legacy international endpoint is the initial default. Network policy also
 permits workspace endpoints under `*.maas.aliyuncs.com`.
@@ -80,6 +85,8 @@ ruff check services/external-ai
 mypy services/external-ai/src services/external-ai/tests
 pytest services/external-ai
 kubectl kustomize kubernetes/system/external-ai >/tmp/external-ai.yaml
+kubectl kustomize kubernetes/system/external-ai/overlays/cloud/in-cluster >/tmp/external-ai-cloud.yaml
+kubectl kustomize kubernetes/system/external-ai/overlays/cloud/managed >/tmp/external-ai-managed.yaml
 scripts/secrets.sh check
 ```
 

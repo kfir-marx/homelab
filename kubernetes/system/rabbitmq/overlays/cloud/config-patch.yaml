@@ -1,0 +1,6 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq
+data:
+  DEFAULT_VHOST: REPLACE_WITH_VHOST

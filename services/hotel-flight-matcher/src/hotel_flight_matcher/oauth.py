@@ -79,7 +79,7 @@ class OAuthService:
                     expires_at=expires,
                 )
             )
-        redirect_uri = f"{self._settings.public_base_url.rstrip('/')}/v1/oauth/{provider}/callback"
+        redirect_uri = self._settings.oauth_redirect_uri(provider)
         if provider == "gmail":
             query = urlencode(
                 {
@@ -194,7 +194,7 @@ class OAuthService:
             raise OAuthError(f"could not refresh {mailbox.provider} authorization") from exc
 
     async def _exchange(self, provider: Provider, code: str) -> OAuthTokens:
-        redirect_uri = f"{self._settings.public_base_url.rstrip('/')}/v1/oauth/{provider}/callback"
+        redirect_uri = self._settings.oauth_redirect_uri(provider)
         if provider == "gmail":
             url = "https://oauth2.googleapis.com/token"
             data = {
