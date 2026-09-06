@@ -2,7 +2,7 @@
 
 The portable base, retained cloud PVC variant, managed broker option, and
 cross-service configuration matrix are documented in
-[`staymatch-kubernetes-portability.md`](staymatch-kubernetes-portability.md).
+[`tapy-kubernetes-portability.md`](tapy-kubernetes-portability.md).
 
 ## Contract
 

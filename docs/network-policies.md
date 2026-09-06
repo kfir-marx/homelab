@@ -9,7 +9,7 @@ Kubernetes `NetworkPolicy` resources express portable pod-to-pod rules;
 - the Kubernetes API, nodes, and hosts have reserved Cilium identities;
 - public CIDR rules must exclude private and cluster address space.
 
-The Staymatch cloud overlays retain this split: standard NetworkPolicy selects
+The Tapy cloud overlays retain this split: standard NetworkPolicy selects
 Ingress, PostgreSQL, and in-cluster RabbitMQ pods, while Cilium FQDN policy
 restricts OAuth, mail, model-provider, and managed database/broker endpoints.
 Cloud operators must patch the checked-in `example.invalid` names and label the
@@ -44,7 +44,7 @@ apply step is required.
 | `homelab-assistant/internal-llm` | Namespaced cluster pods and node health probes to queued API TCP/8080; workers alone reach private vLLM TCP/8000 | RabbitMQ TCP/5672, private vLLM for workers, cluster DNS, and pinned-model Hugging Face HTTPS only |
 | `rabbitmq/rabbitmq` | Namespaced cluster pods to AMQP TCP/5672; Prometheus to TCP/15692; management TCP/15672 denied | Cluster DNS only |
 | `homelab-assistant/tapy` | Cloudflared and node health probes to TCP/8080 | PostgreSQL, RabbitMQ, cluster DNS, Google OAuth/Gmail, and Microsoft OAuth/Graph HTTPS |
-| `staymatch/tapy` (cloud) | Selected Ingress controller and node health probes to TCP/8080 | Selected PostgreSQL/RabbitMQ endpoints, cluster DNS, Google OAuth/Gmail, and Microsoft OAuth/Graph HTTPS |
+| `tapy/tapy` (cloud) | Selected Ingress controller and node health probes to TCP/8080 | Selected PostgreSQL/RabbitMQ endpoints, cluster DNS, Google OAuth/Gmail, and Microsoft OAuth/Graph HTTPS |
 | `immich/redis` | Server to TCP/6379 | None |
 | `media` | Same-namespace application traffic; Gateway to each web UI; Cloudflared to Jellyfin TCP/8096 and Seerr TCP/5055; LAN/world peers to qBittorrent TCP/UDP 51413 | Cluster DNS; public-only TCP 80/443 for metadata, indexers, subtitle providers, and trackers; qBittorrent additionally reaches public TCP/UDP peers |
 | `tailscale-router` | Public/LAN UDP 41641 (pinned in the Deployment) | Not isolated; see the Cilium Gateway hairpin exception below |

@@ -254,7 +254,7 @@ Kustomize bases with homelab and cloud overlays. Homelab-specific NFS bindings,
 Cloudflare access, and the public `547600.xyz` name exist only in homelab
 overlays. Cloud overlays use standard Ingress, configurable dynamic retained
 PVCs, or externally managed PostgreSQL/RabbitMQ URLs. See
-[`staymatch-kubernetes-portability.md`](staymatch-kubernetes-portability.md).
+[`tapy-kubernetes-portability.md`](tapy-kubernetes-portability.md).
 
 Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests. On the NTFS-backed bulk tier, Ansible also exports each PV child path explicitly with its own stable `fsid`; Talos mounts those child paths directly, and the parent NTFS export alone does not reliably serve a fresh child-path mount after an NFS restart.
 

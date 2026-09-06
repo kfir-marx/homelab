@@ -2,7 +2,7 @@
 
 Portable homelab/cloud topology, cloud prerequisites, configuration matrices,
 deployment order, and migration steps are documented in
-[`staymatch-kubernetes-portability.md`](staymatch-kubernetes-portability.md).
+[`tapy-kubernetes-portability.md`](tapy-kubernetes-portability.md).
 
 ## Runtime design
 
@@ -60,7 +60,7 @@ For Google, create a Web application OAuth client, enable the Gmail API, and
 register this exact redirect URI:
 
 ```text
-https://staymatch.547600.xyz/v1/oauth/gmail/callback
+https://tapy.547600.xyz/v1/oauth/gmail/callback
 ```
 
 The only Google API scope is
@@ -73,7 +73,7 @@ For Microsoft, register a confidential web application that accepts personal
 Microsoft and organizational accounts, then register:
 
 ```text
-https://staymatch.547600.xyz/v1/oauth/outlook/callback
+https://tapy.547600.xyz/v1/oauth/outlook/callback
 ```
 
 Grant delegated `User.Read` and `Mail.Read`; `offline_access` is requested in
@@ -117,10 +117,13 @@ filesystem itself. Also add `RABBITMQ_URL` and `ALIBABA_API_KEY` to
 
 The rename changes the Argo CD Application, Kubernetes workload and storage
 object names, Secret name, container image repository, PostgreSQL database and
-role, and retained NFS directory together. Before the first sync, publish the
+role, retained NFS directory, public hostname, cloud namespace, and cloud
+network-policy labels together. Before the first sync, publish the
 `ghcr.io/kfir-marx/tapy` image, create and capture `tapy-secrets` while
 preserving the existing OAuth encryption key, and complete an authorized
 host-side PostgreSQL data migration into `/mnt/storage2-bulk/tapy/postgres`.
+Provision `tapy.547600.xyz` in DNS and the Cloudflare Tunnel, and update the
+Google and Microsoft OAuth registrations to use the Tapy callback URLs.
 Keep the superseded retained volume and application resources until the Tapy
 API, mailbox grants, and processed-message history have been verified.
 

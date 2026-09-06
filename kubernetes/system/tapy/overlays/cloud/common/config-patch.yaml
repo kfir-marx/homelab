@@ -6,9 +6,9 @@ data:
   GOOGLE_OAUTH_CLIENT_ID: REPLACE_WITH_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com
   MICROSOFT_OAUTH_CLIENT_ID: REPLACE_WITH_MICROSOFT_APPLICATION_CLIENT_ID
   MICROSOFT_TENANT: common
-  PUBLIC_BASE_URL: https://staymatch.example.invalid
-  GOOGLE_OAUTH_REDIRECT_URI: https://staymatch.example.invalid/v1/oauth/gmail/callback
-  MICROSOFT_OAUTH_REDIRECT_URI: https://staymatch.example.invalid/v1/oauth/outlook/callback
+  PUBLIC_BASE_URL: https://tapy.example.invalid
+  GOOGLE_OAUTH_REDIRECT_URI: https://tapy.example.invalid/v1/oauth/gmail/callback
+  MICROSOFT_OAUTH_REDIRECT_URI: https://tapy.example.invalid/v1/oauth/outlook/callback
   LLM_ORDER: internal-llm,external-ai
   INTERNAL_LLM_QUEUE: internal-llm.requests
   INTERNAL_LLM_MODEL: REPLACE_WITH_INTERNAL_MODEL

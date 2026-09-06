@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: staymatch-tapy
+  name: tapy
   namespace: argocd
 spec:
   project: default
@@ -11,7 +11,7 @@ spec:
     path: kubernetes/system/tapy/overlays/cloud/managed
   destination:
     server: https://kubernetes.default.svc
-    namespace: staymatch
+    namespace: tapy
   syncPolicy:
     automated: {prune: true, selfHeal: true}
     syncOptions: [CreateNamespace=false, PruneLast=true]

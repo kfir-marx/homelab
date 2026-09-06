@@ -9,9 +9,9 @@ spec:
   ingress:
     - from:
         - namespaceSelector:
-            matchLabels: {networking.staymatch.io/ingress: "true"}
+            matchLabels: {networking.tapy.io/ingress: "true"}
           podSelector:
-            matchLabels: {networking.staymatch.io/controller: "true"}
+            matchLabels: {networking.tapy.io/controller: "true"}
       ports: [{port: 8080, protocol: TCP}]
 ---
 apiVersion: cilium.io/v2

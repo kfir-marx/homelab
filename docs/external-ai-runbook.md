@@ -2,7 +2,7 @@
 
 Portable storage/database/RabbitMQ variants and generic cloud deployment are
 documented in
-[`staymatch-kubernetes-portability.md`](staymatch-kubernetes-portability.md).
+[`tapy-kubernetes-portability.md`](tapy-kubernetes-portability.md).
 
 ## Service boundary
 

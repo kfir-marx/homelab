@@ -1,4 +1,4 @@
-# Staymatch portable Kubernetes deployment
+# Tapy portable Kubernetes deployment
 
 ## Architecture and ownership
 
@@ -62,8 +62,8 @@ overlay that uses it as a resource.
 For cloud, replace every `REPLACE_WITH_*` and `*.example.invalid` value before
 deployment. Set the matcher Ingress `ingressClassName`, rule/TLS hostname, and
 TLS Secret together. Label the selected controller namespace with
-`networking.staymatch.io/ingress=true` and its controller pods with
-`networking.staymatch.io/controller=true`, or patch the policy selectors. The
+`networking.tapy.io/ingress=true` and its controller pods with
+`networking.tapy.io/controller=true`, or patch the policy selectors. The
 public DNS name must resolve to that controller.
 
 Set `PUBLIC_BASE_URL`, `GOOGLE_OAUTH_REDIRECT_URI`, and
@@ -87,11 +87,11 @@ FQDN policy. Encode the RabbitMQ virtual host in the AMQP URL and configure
 least-privilege users for the selected request and server-named reply queues.
 
 For the supplied in-cluster overlays, the private endpoints are
-`tapy-postgres.staymatch.svc.cluster.local:5432`,
+`tapy-postgres.tapy.svc.cluster.local:5432`,
 `external-ai-postgres.external-ai.svc.cluster.local:5432`, and
 `rabbitmq.rabbitmq.svc.cluster.local:5672`. Example URL shapes (with values
 supplied out of band) are
-`postgresql+psycopg://tapy:<password>@tapy-postgres.staymatch.svc.cluster.local:5432/tapy`
+`postgresql+psycopg://tapy:<password>@tapy-postgres.tapy.svc.cluster.local:5432/tapy`
 and `amqp://<user>:<password>@rabbitmq.rabbitmq.svc.cluster.local:5672/<vhost>`.
 These names belong in Secrets, not in the portable base.
 
@@ -105,7 +105,7 @@ Never commit a Secret manifest with real or fabricated values.
 
 | Namespace / Secret | Required keys |
 |---|---|
-| `staymatch/tapy-secrets` (cloud) | `DATABASE_URL`, `RABBITMQ_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`; add `POSTGRES_PASSWORD` for in-cluster PostgreSQL |
+| `tapy/tapy-secrets` (cloud) | `DATABASE_URL`, `RABBITMQ_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`; add `POSTGRES_PASSWORD` for in-cluster PostgreSQL |
 | `homelab-assistant/tapy-secrets` | `DATABASE_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`, `POSTGRES_PASSWORD` |
 | `homelab-assistant/homelab-assistant-secrets` | `RABBITMQ_URL` (the homelab overlay preserves this existing identity) |
 | `external-ai/external-ai-secrets` | `DATABASE_URL`, `RABBITMQ_URL`, `HOMELAB_ASSISTANT_TOKEN`, `JOB_ASSISTANT_TOKEN`; `POSTGRES_PASSWORD` for in-cluster PostgreSQL; `ALIBABA_API_KEY` when Model Studio is enabled |
@@ -148,8 +148,10 @@ managed broker; no application code change is required.
 
 ## Homelab deployment
 
-The existing public URL remains `https://staymatch.547600.xyz`. Cloudflare
-Tunnel access exists only in the homelab overlay. PostgreSQL and external-ai
+The renamed public URL is `https://tapy.547600.xyz`. Update its DNS and
+Cloudflare Tunnel route before switching traffic, and register the new callback
+URLs with both OAuth providers. Cloudflare Tunnel access exists only in the
+homelab overlay. PostgreSQL and external-ai
 Codex state remain hard-bound to the same static `nfs-storage2` PV names,
 workstation IP and paths, with reclaim policy `Retain`. RabbitMQ remains the
 intentional 10 GiB `emptyDir` transport; it has not been moved onto NFS.
@@ -178,14 +180,17 @@ then `tapy`. No direct manifest apply is required.
 
 1. Take application-consistent PostgreSQL backups and preserve Codex auth
    state; do not delete any PVC or PV.
-2. Confirm existing NFS exports and the three existing Secret identities.
-3. Merge the layout and Argo path updates. Resource names, namespaces, claim
-   names, `volumeName` bindings, NFS paths, and PV reclaim policies are
-   unchanged, so Argo updates the existing objects rather than replacing data.
-4. Inspect rendered homelab overlays before allowing prune. Confirm
+2. Confirm existing NFS exports and Secret identities, then provision the
+   renamed Tapy Secret and retained NFS path as described in the Tapy runbook.
+3. Update the Cloudflare Tunnel/DNS route and both OAuth registrations for
+   `tapy.547600.xyz` before switching traffic.
+4. Merge the layout and Argo path updates. The Tapy resource, storage, image,
+   database, and Secret identities change as part of the rename; preserve and
+   migrate the old data before allowing Argo to prune superseded resources.
+5. Inspect rendered homelab overlays before allowing prune. Confirm
    `tapy-postgres-pv`, `external-ai-postgres-pv`, and
    `external-ai-codex-home-pv` still render as hard-bound `Retain` volumes.
-5. Reconcile one Application at a time in the order above and test readiness
+6. Reconcile one Application at a time in the order above and test readiness
    and fallback. Keep backups until OAuth refresh, Codex refresh, restart, and
    recovery checks pass.
 

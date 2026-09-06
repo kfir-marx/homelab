@@ -5,10 +5,10 @@ metadata:
 spec:
   ingressClassName: REPLACE_WITH_INGRESS_CLASS
   tls:
-    - hosts: [staymatch.example.invalid]
+    - hosts: [tapy.example.invalid]
       secretName: REPLACE_WITH_TLS_SECRET
   rules:
-    - host: staymatch.example.invalid
+    - host: tapy.example.invalid
       http:
         paths:
           - path: /

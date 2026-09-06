@@ -1,4 +1,4 @@
-name: staymatch portable Kubernetes
+name: tapy portable Kubernetes
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ on:
       - kubernetes/apps/external-ai.yaml
       - kubernetes/apps/rabbitmq.yaml
       - kubernetes/apps/cloud/**
-      - .github/workflows/staymatch-kubernetes.yml
+      - .github/workflows/tapy-kubernetes.yml
 
 permissions:
   contents: read
