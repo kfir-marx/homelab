@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
+from typing import Protocol
 
 from .models import (
     Flight,
@@ -16,6 +18,21 @@ from .models import (
 
 def load_flights(path: Path) -> FlightConfiguration:
     return FlightConfiguration.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+class FlightRepository(Protocol):
+    """Boundary for replacing static configuration with per-agent storage later."""
+
+    def for_agent(self, agent_id: str) -> Sequence[Flight]: ...
+
+
+class ConfigFlightRepository:
+    def __init__(self, configuration: FlightConfiguration) -> None:
+        self.configuration = configuration
+
+    def for_agent(self, agent_id: str) -> Sequence[Flight]:
+        del agent_id
+        return self.configuration.flights
 
 
 def _normalized(value: str | None) -> str:
@@ -65,31 +82,30 @@ def _date_score(booking: HotelBooking, flight: Flight) -> tuple[float, str]:
 
 
 def score_booking(
-    booking: HotelBooking, configuration: FlightConfiguration, threshold: float
+    booking: HotelBooking, flights: Sequence[Flight], threshold: float
 ) -> list[FlightMatch]:
     matches: list[FlightMatch] = []
-    for flight in configuration.flights:
+    for flight in flights:
         location, location_reason = _location_score(booking, flight)
         dates, date_reason = _date_score(booking, flight)
         probability = 0.0
-        if booking.is_hotel_booking and booking.booking_status != "cancelled":
-            probability = booking.confidence * (0.60 * location + 0.40 * dates)
+        if booking.is_hotel_booking_confirmation and booking.booking_status != "cancelled":
+            probability = 0.60 * location + 0.40 * dates
         probability = round(max(0.0, min(1.0, probability)), 4)
         matches.append(
             FlightMatch(
                 flight_id=flight.id,
                 flight_label=flight.label,
-                probability=probability,
-                related=probability >= threshold,
+                score=probability,
+                related=probability > threshold,
                 components=ScoreComponents(
-                    booking_confidence=booking.confidence,
                     location=location,
                     dates=dates,
                 ),
                 explanation=f"{location_reason}; {date_reason}",
             )
         )
-    return sorted(matches, key=lambda match: match.probability, reverse=True)
+    return sorted(matches, key=lambda match: match.score, reverse=True)
 
 
 def serialize_schema() -> str:

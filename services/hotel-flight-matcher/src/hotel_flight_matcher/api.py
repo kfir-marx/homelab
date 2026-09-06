@@ -1,44 +1,66 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
+from typing import Annotated, Protocol, cast
 
 import httpx
 import structlog
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
+from sqlalchemy import select, text
 from starlette.responses import Response
 
-from .auth import AuthenticatedUser, GoogleTokenValidator, PerUserRateLimiter
+from .auth import bearer_token
 from .config import Settings
-from .flights import load_flights, score_booking
+from .database import (
+    Agent,
+    MailboxConnection,
+    ProcessedMessage,
+    initialize,
+    make_engine,
+    make_factory,
+    new_agent,
+    token_hash,
+)
+from .flights import ConfigFlightRepository, FlightRepository, load_flights, score_booking
 from .llm import BookingExtractor, ExtractionError
-from .models import AnalysisResponse, EmailForAnalysis, FlightConfiguration
+from .mailboxes import MailboxError, MailboxReader, readers
+from .models import (
+    AgentCreated,
+    AgentView,
+    AnalysisResponse,
+    AuthorizationUrl,
+    EmailForAnalysis,
+    FlightMatch,
+    HotelBooking,
+    Provider,
+    ScanRequest,
+    ScanResult,
+)
+from .oauth import OAuthError, OAuthService
 
 logger = structlog.get_logger()
 
 HOME_PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>FlightStay Match</title><main><h1>FlightStay Match</h1>
-<p>A proof of concept that finds hotel confirmations related to your flights.</p>
-<p>The Chrome extension reads Gmail only after your consent, sends bounded message text
-over HTTPS for private inference, never sends attachments, and does not retain email content.</p>
-<p><a href=/privacy>Privacy policy</a> · <a href=/terms>Terms</a></p></main></html>"""
+<p>A backend that finds hotel confirmations related to configured flights.</p>
+<p>Users connect Gmail or Outlook directly through the provider's official consent flow.
+No browser extension is required.</p><p><a href=/privacy>Privacy policy</a> ·
+<a href=/terms>Terms</a></p></main></html>"""
 
 PRIVACY_PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>FlightStay Match Privacy Policy</title><main><h1>Privacy Policy</h1>
-<p>FlightStay Match requests read-only Gmail access only when a user starts a scan.</p>
-<p>The extension reads message headers and bounded message text, but not attachments. It sends
-that data and a short-lived Google access token over HTTPS to the FlightStay Match service solely
-to identify hotel bookings and compare them with configured flights.</p>
-<p>Email content, Google tokens, and extracted bookings are processed transiently and are not
-persisted by the service. They are not used for advertising, sold, or read by humans except with
-the user's explicit consent for support or when legally/security required.</p>
-<p>Use of Google user data complies with the Chrome Web Store User Data Policy, including its
-Limited Use requirements. Disconnecting in the extension clears its cached Chrome session;
-users can revoke the app's grant completely in their Google Account. Contact:
-kfir.marx@gmail.com.</p></main></html>"""
+<p>FlightStay Match requests delegated read-only Gmail or Outlook mail access only after the
+user starts the provider's official OAuth consent flow. Long-lived authorization is encrypted at
+rest. The service reads bounded message text, but not attachments, solely to identify hotel
+booking confirmations and compare them with configured flights.</p>
+<p>Email bodies are processed transiently and are not persisted. The service stores agent,
+mailbox, processed-message, and match metadata needed for reliable repeated scans. Email data is
+not sold or used for advertising. Users can revoke the grant through Google Account or Microsoft
+Account connected-app settings. Contact: kfir.marx@gmail.com.</p></main></html>"""
 
 TERMS_PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
@@ -48,36 +70,52 @@ directly with the provider. This service does not make, change, or cancel reserv
 </main></html>"""
 
 
-def _bearer_token(authorization: str | None) -> str:
-    if not authorization:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Google authorization is required")
-    scheme, separator, value = authorization.partition(" ")
-    if separator != " " or scheme.casefold() != "bearer" or not value.strip():
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid authorization header")
-    return value.strip()
+class Extractor(Protocol):
+    @property
+    def ready(self) -> bool: ...
+
+    async def extract(self, email: EmailForAnalysis) -> HotelBooking: ...
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def _best(matches: list[FlightMatch]) -> FlightMatch | None:
+    return matches[0] if matches else None
+
+
+def create_app(
+    settings: Settings | None = None,
+    *,
+    extractor: Extractor | None = None,
+    mailbox_readers: Mapping[Provider, MailboxReader] | None = None,
+    flight_repository: FlightRepository | None = None,
+) -> FastAPI:
     resolved = settings or Settings()
+    engine = make_engine(resolved)
+    initialize(engine)
+    factory = make_factory(engine)
+    configured_extractor = extractor or BookingExtractor.from_settings(resolved)
+    configured_flights = flight_repository or ConfigFlightRepository(
+        load_flights(resolved.flights_config_path)
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         client = httpx.AsyncClient(timeout=resolved.request_timeout_seconds)
         app.state.http_client = client
-        app.state.flights = load_flights(resolved.flights_config_path)
-        app.state.validator = GoogleTokenValidator(
-            client, str(resolved.google_tokeninfo_url), resolved.google_oauth_client_id
-        )
-        app.state.extractor = BookingExtractor(
-            client, str(resolved.llm_base_url), resolved.llm_api_key, resolved.llm_model
-        )
-        app.state.rate_limiter = PerUserRateLimiter(resolved.per_user_requests_per_minute)
+        app.state.oauth = OAuthService(resolved, factory, client)
+        app.state.mailbox_readers = mailbox_readers or readers(client, resolved.gmail_query)
+        if extractor is None:
+            assert isinstance(configured_extractor, BookingExtractor)
+            await configured_extractor.connect()
         yield
+        if extractor is None:
+            assert isinstance(configured_extractor, BookingExtractor)
+            await configured_extractor.close()
         await client.aclose()
+        engine.dispose()
 
     app = FastAPI(
         title="FlightStay Match",
-        version="0.1.0",
+        version="0.2.0",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -98,13 +136,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Frame-Options"] = "DENY"
         return response
 
-    async def authenticate(
-        request: Request, authorization: str | None = Header(default=None)
-    ) -> AuthenticatedUser:
-        validator: GoogleTokenValidator = request.app.state.validator
-        user = await validator.validate(_bearer_token(authorization))
-        request.app.state.rate_limiter.check(user.subject)
-        return user
+    def authenticate(authorization: Annotated[str | None, Header()] = None) -> Agent:
+        supplied = bearer_token(authorization)
+        if not supplied:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "agent bearer token is required")
+        with factory() as session:
+            agent = session.scalar(
+                select(Agent).where(Agent.access_token_hash == token_hash(supplied))
+            )
+            if not agent:
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid agent bearer token")
+            return agent
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def home() -> str:
@@ -123,31 +165,162 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/health/ready", include_in_schema=False)
-    async def ready(request: Request) -> dict[str, str]:
-        flights: FlightConfiguration = request.app.state.flights
-        return {"status": "ready", "flight_config_version": str(flights.version)}
-
-    @app.post("/v1/analyze", response_model=AnalysisResponse)
-    async def analyze(
-        email: EmailForAnalysis,
-        request: Request,
-        user: AuthenticatedUser = Depends(authenticate),  # noqa: B008
-    ) -> AnalysisResponse:
-        del user
+    async def ready(response: Response) -> dict[str, str]:
         try:
-            booking = await request.app.state.extractor.extract(email)
-        except ExtractionError as exc:
-            logger.warning("hotel_extraction_failed", message_id_length=len(email.message_id))
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "private model unavailable") from exc
-        flights: FlightConfiguration = request.app.state.flights
-        matches = score_booking(booking, flights, resolved.related_threshold)
-        best = matches[0] if matches else None
-        return AnalysisResponse(
-            message_id=email.message_id,
-            booking=booking,
-            matches=matches,
-            best_flight_id=best.flight_id if best else None,
-            best_probability=best.probability if best else 0,
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+        except Exception:
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {"status": "not-ready", "database": "unavailable"}
+        if not configured_extractor.ready:
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {"status": "not-ready", "rabbitmq": "unavailable"}
+        return {"status": "ready"}
+
+    @app.post("/v1/agents", response_model=AgentCreated, status_code=201)
+    async def create_agent() -> AgentCreated:
+        with factory.begin() as session:
+            agent, token = new_agent(session)
+            return AgentCreated(agent_id=agent.id, access_token=token)
+
+    @app.get("/v1/agents/me", response_model=AgentView)
+    async def get_agent(agent: Agent = Depends(authenticate)) -> AgentView:  # noqa: B008
+        with factory() as session:
+            providers = session.scalars(
+                select(MailboxConnection.provider).where(MailboxConnection.agent_id == agent.id)
+            ).all()
+        return AgentView(
+            agent_id=agent.id,
+            connected_mailboxes=[cast(Provider, provider) for provider in providers],
+        )
+
+    @app.post(
+        "/v1/mailboxes/{provider}/authorization",
+        response_model=AuthorizationUrl,
+    )
+    async def authorize_mailbox(
+        provider: Provider,
+        request: Request,
+        agent: Agent = Depends(authenticate),  # noqa: B008
+    ) -> AuthorizationUrl:
+        try:
+            url = request.app.state.oauth.authorization_url(agent.id, provider)
+        except OAuthError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        return AuthorizationUrl(authorization_url=url)
+
+    @app.get("/v1/oauth/{provider}/callback", response_class=HTMLResponse)
+    async def oauth_callback(
+        provider: Provider,
+        request: Request,
+        state: str = Query(min_length=20, max_length=200),
+        code: str = Query(min_length=1, max_length=4096),
+    ) -> str:
+        try:
+            mailbox = await request.app.state.oauth.complete(provider, state, code)
+        except OAuthError as exc:
+            logger.warning("mailbox_oauth_failed", provider=provider)
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        return (
+            "<!doctype html><title>Mailbox connected</title><h1>Mailbox connected</h1>"
+            f"<p>{mailbox.provider.title()} access was granted. You may close this window.</p>"
+        )
+
+    @app.post("/v1/scans", response_model=ScanResult)
+    async def scan_mailbox(
+        body: ScanRequest,
+        request: Request,
+        agent: Agent = Depends(authenticate),  # noqa: B008
+    ) -> ScanResult:
+        with factory() as session:
+            mailbox = session.scalar(
+                select(MailboxConnection).where(
+                    MailboxConnection.agent_id == agent.id,
+                    MailboxConnection.provider == body.provider,
+                )
+            )
+        if not mailbox:
+            raise HTTPException(status.HTTP_409_CONFLICT, "mailbox is not connected")
+        limit = min(
+            body.maximum_messages or resolved.maximum_messages_per_scan,
+            resolved.maximum_messages_per_scan,
+        )
+        try:
+            access_token = await request.app.state.oauth.access_token(mailbox)
+            messages = await request.app.state.mailbox_readers[body.provider].messages(
+                access_token, limit
+            )
+        except (OAuthError, MailboxError) as exc:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+        results: list[AnalysisResponse] = []
+        skipped = 0
+        confirmations = 0
+        matched = 0
+        flights = configured_flights.for_agent(agent.id)
+        for email in messages:
+            with factory() as session:
+                seen = session.scalar(
+                    select(ProcessedMessage.id).where(
+                        ProcessedMessage.mailbox_id == mailbox.id,
+                        ProcessedMessage.provider_message_id == email.message_id,
+                    )
+                )
+            if seen:
+                skipped += 1
+                continue
+            try:
+                booking = await configured_extractor.extract(email)
+            except ExtractionError as exc:
+                logger.warning("hotel_extraction_failed", provider=body.provider)
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "all LLM backends failed") from exc
+            matches = score_booking(booking, flights, resolved.match_threshold)
+            best = _best(matches)
+            analysis = AnalysisResponse(
+                message_id=email.message_id,
+                booking=booking,
+                matches=matches,
+                best_flight_id=best.flight_id if best else None,
+                best_score=best.score if best else 0,
+            )
+            results.append(analysis)
+            is_confirmation = booking.is_hotel_booking_confirmation
+            confirmations += int(is_confirmation)
+            is_match = bool(best and best.related)
+            matched += int(is_match)
+            if is_match and best:
+                flight = next(item for item in flights if item.id == best.flight_id)
+                print(  # noqa: T201 - this is the iteration-one function-call boundary
+                    "found hotel booking "
+                    f"{booking.model_dump(mode='json')} matching flight details "
+                    f"{flight.model_dump(mode='json')}",
+                    flush=True,
+                )
+            with factory.begin() as session:
+                session.add(
+                    ProcessedMessage(
+                        mailbox_id=mailbox.id,
+                        provider_message_id=email.message_id,
+                        outcome="matched"
+                        if is_match
+                        else "confirmation"
+                        if is_confirmation
+                        else "other",
+                        best_score=str(best.score) if best else None,
+                        result_summary={
+                            "is_hotel_booking_confirmation": is_confirmation,
+                            "matched_flight_id": best.flight_id if is_match and best else None,
+                        },
+                    )
+                )
+        return ScanResult(
+            provider=body.provider,
+            messages_seen=len(messages),
+            messages_skipped=skipped,
+            messages_analyzed=len(results),
+            confirmations_found=confirmations,
+            matches_found=matched,
+            results=results,
         )
 
     return app

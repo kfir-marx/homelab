@@ -1,4 +1,4 @@
-# Public Chrome-extension backend. The only public path is the remotely managed
+# Public OAuth/API backend. The only public path is the remotely managed
 # Cloudflare Tunnel hostname; the origin Service remains ClusterIP-only.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -15,8 +15,8 @@ spec:
     path: kubernetes/system/hotel-flight-matcher
   destination:
     server: https://kubernetes.default.svc
-    # Reuse the local LLM's namespace so only the API key, not the whole Secret,
-    # is projected into this Deployment. Resources remain owned by this app.
+    # Reuse the local LLM namespace and its scoped RabbitMQ identity. Matcher
+    # OAuth/database secrets remain in a dedicated Secret owned out of band.
     namespace: homelab-assistant
   syncPolicy:
     automated:
@@ -26,3 +26,8 @@ spec:
       - CreateNamespace=false
       - ServerSideApply=true
       - SkipDryRunOnMissingResource=true
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: hotel-flight-matcher-secrets
+      jsonPointers: [/data]

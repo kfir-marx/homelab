@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: external-ai
+  namespace: external-ai
+data:
+  # Replace with the workspace-specific regional URL when Model Studio issues it.
+  ALIBABA_BASE_URL: https://dashscope-intl.aliyuncs.com/compatible-mode/v1

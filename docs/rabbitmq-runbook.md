@@ -36,6 +36,15 @@ store its AMQP URL as `RABBITMQ_URL` in
 `homelab-assistant/homelab-assistant-secrets`. Other services receive their own
 credentials in their own namespace.
 
+Hotel Flight Matcher publishes OpenAI-compatible RPC envelopes directly to
+`internal-llm.requests` and `external-ai.requests` and consumes replies from
+server-named exclusive callback queues. Its identity needs write permission on
+both request queues and configure/read permission only for its reply queues.
+The external-ai worker identity consumes `external-ai.requests` and publishes
+to callback queues. Both identities must use the same application vhost as the
+internal-llm queue (currently `homelab`). Keep these permissions narrower than
+the RabbitMQ bootstrap administrator.
+
 Credentials configured through `RABBITMQ_DEFAULT_*` take effect only against a
 blank node. With transient storage every recreated Pod is blank, so keep the
 encrypted bootstrap values stable. Rotate application credentials through the

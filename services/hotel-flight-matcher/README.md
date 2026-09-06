@@ -1,9 +1,12 @@
 # Hotel Flight Matcher
 
-A stateless API that validates a Chrome extension's Google OAuth token, asks a
-private vLLM endpoint to extract a bounded hotel-booking schema from one email,
-and deterministically scores the booking against configured flights.
+A durable backend that creates application agents, connects Gmail and Outlook
+through their official delegated OAuth APIs, reads bounded message bodies, and
+extracts a strict hotel-confirmation schema through RabbitMQ. Internal and
+external LLM workers are attempted in configurable order with fallback; only
+deterministic code scores a booking against flights.
 
-The service does not access Gmail itself, fetch attachments, persist messages,
-or let model output determine the final match score. See
-`../../docs/hotel-flight-matcher-runbook.md` for deployment and privacy gates.
+Raw mail bodies are never persisted. Agent identities, encrypted refresh
+tokens, processed-message IDs, and match metadata are stored in PostgreSQL.
+See `../../docs/hotel-flight-matcher-runbook.md` for the API and deployment
+contract.

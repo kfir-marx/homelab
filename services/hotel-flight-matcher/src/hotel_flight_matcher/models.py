@@ -49,8 +49,8 @@ class FlightConfiguration(StrictModel):
 
 
 class EmailForAnalysis(StrictModel):
-    message_id: str = Field(min_length=1, max_length=128)
-    thread_id: str | None = Field(default=None, max_length=128)
+    message_id: str = Field(min_length=1, max_length=512)
+    thread_id: str | None = Field(default=None, max_length=512)
     subject: str = Field(default="", max_length=500)
     sender: str = Field(default="", max_length=500)
     sent_at: str | None = Field(default=None, max_length=100)
@@ -61,7 +61,9 @@ BookingStatus = Literal["confirmed", "cancelled", "modified", "unknown"]
 
 
 class HotelBooking(StrictModel):
-    is_hotel_booking: bool
+    """The only facts an LLM is allowed to decide or extract."""
+
+    is_hotel_booking_confirmation: bool
     booking_status: BookingStatus = "unknown"
     hotel_name: str | None = Field(default=None, max_length=200)
     city: str | None = Field(default=None, max_length=100)
@@ -70,17 +72,9 @@ class HotelBooking(StrictModel):
     check_out_date: date | None = None
     guest_name: str | None = Field(default=None, max_length=150)
     confirmation_number: str | None = Field(default=None, max_length=100)
-    confidence: float = Field(ge=0, le=1)
-    evidence: list[str] = Field(default_factory=list, max_length=5)
-
-    @field_validator("evidence")
-    @classmethod
-    def bound_evidence(cls, values: list[str]) -> list[str]:
-        return [" ".join(value.split())[:240] for value in values if value.strip()]
 
 
 class ScoreComponents(StrictModel):
-    booking_confidence: float = Field(ge=0, le=1)
     location: float = Field(ge=0, le=1)
     dates: float = Field(ge=0, le=1)
 
@@ -88,7 +82,7 @@ class ScoreComponents(StrictModel):
 class FlightMatch(StrictModel):
     flight_id: str
     flight_label: str
-    probability: float = Field(ge=0, le=1)
+    score: float = Field(ge=0, le=1)
     related: bool
     components: ScoreComponents
     explanation: str
@@ -99,4 +93,36 @@ class AnalysisResponse(StrictModel):
     booking: HotelBooking
     matches: list[FlightMatch]
     best_flight_id: str | None
-    best_probability: float = Field(ge=0, le=1)
+    best_score: float = Field(ge=0, le=1)
+
+
+Provider = Literal["gmail", "outlook"]
+
+
+class AgentCreated(StrictModel):
+    agent_id: str
+    access_token: str
+
+
+class AgentView(StrictModel):
+    agent_id: str
+    connected_mailboxes: list[Provider]
+
+
+class AuthorizationUrl(StrictModel):
+    authorization_url: str
+
+
+class ScanRequest(StrictModel):
+    provider: Provider
+    maximum_messages: int | None = Field(default=None, ge=1, le=100)
+
+
+class ScanResult(StrictModel):
+    provider: Provider
+    messages_seen: int
+    messages_skipped: int
+    messages_analyzed: int
+    confirmations_found: int
+    matches_found: int
+    results: list[AnalysisResponse]

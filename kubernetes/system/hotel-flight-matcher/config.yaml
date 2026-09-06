@@ -4,9 +4,15 @@ metadata:
   name: hotel-flight-matcher
   namespace: homelab-assistant
 data:
-  # Replace this after the Chrome Web Store assigns the stable extension ID and
-  # the matching "Chrome Extension" OAuth client is created in Google Cloud.
-  GOOGLE_OAUTH_CLIENT_ID: REPLACE_WITH_CHROME_EXTENSION_CLIENT_ID.apps.googleusercontent.com
+  GOOGLE_OAUTH_CLIENT_ID: REPLACE_WITH_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com
+  MICROSOFT_OAUTH_CLIENT_ID: REPLACE_WITH_MICROSOFT_APPLICATION_CLIENT_ID
+  PUBLIC_BASE_URL: https://staymatch.547600.xyz
+  LLM_ORDER: internal-llm,external-ai
+  INTERNAL_LLM_MODEL: local-llm
+  EXTERNAL_AI_MODEL: alibaba:qwen-plus
+  MATCH_THRESHOLD: "0.90"
+  MAXIMUM_MESSAGES_PER_SCAN: "20"
+  GMAIL_QUERY: newer_than:365d
   flights.json: |
     {
       "version": 1,

@@ -3,5 +3,7 @@ kind: Kustomization
 
 resources:
   - config.yaml
+  - storage.yaml
+  - postgres.yaml
   - workload.yaml
   - network-policy.yaml

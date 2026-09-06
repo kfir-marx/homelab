@@ -4,11 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "homelab-external-ai"
-version = "0.1.0"
-description = "Private durable broker for serialized ephemeral Codex executions"
+version = "0.2.0"
+description = "Durable and RabbitMQ broker for Codex and Alibaba Model Studio"
 requires-python = ">=3.14.7"
 dependencies = [
+  "aio-pika>=9.5.8,<10",
   "fastapi>=0.141.1,<1",
+  "httpx>=0.28.1,<1",
   "prometheus-client>=0.26.0,<1",
   "psycopg[binary]>=3.3.4,<4",
   "pydantic>=2.13.4,<3",

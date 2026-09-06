@@ -143,6 +143,21 @@ spec:
                 secretKeyRef:
                   name: external-ai-secrets
                   key: DATABASE_URL
+            - name: EXTERNAL_AI_RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: external-ai-secrets
+                  key: RABBITMQ_URL
+            - name: EXTERNAL_AI_ALIBABA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: external-ai-secrets
+                  key: ALIBABA_API_KEY
+            - name: EXTERNAL_AI_ALIBABA_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: external-ai
+                  key: ALIBABA_BASE_URL
             - name: EXTERNAL_AI_CODEX_HOME
               value: /var/lib/codex
             - name: EXTERNAL_AI_WORK_ROOT

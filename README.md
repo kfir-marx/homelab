@@ -225,7 +225,7 @@ When `smallgpu` is down, its worker and bulk NFS export are unavailable, while
 | [External AI runbook](docs/external-ai-runbook.md) | Durable broker, requester scopes, Codex authentication, rollout, and recovery |
 | [Internal LLM runbook](docs/local-llm-runbook.md) | Queued OpenAI-compatible API, Qwen/vLLM recovery, retained GPU cache, and health checks |
 | [Shared RabbitMQ runbook](docs/rabbitmq-runbook.md) | Cluster AMQP contract, credentials, transient-storage boundary, and operations |
-| [FlightStay Match POC](docs/hotel-flight-matcher-runbook.md) | Gmail-consented Chrome extension, schema extraction, deterministic flight scoring, Cloudflare API, and store gates |
+| [FlightStay Match POC](docs/hotel-flight-matcher-runbook.md) | Server-side Gmail/Outlook consent, RabbitMQ LLM fallback, durable agents, and deterministic flight scoring |
 | [GPU Operator runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, rollout, CUDA validation, and metrics |
 | [Jellyfin media stack runbook](docs/media-stack-runbook.md) | Backup restoration, storage, GPU transcoding, credential rotation, and cleanup policy |
 | [Ubuntu workstation runbook](docs/ubuntu-workstation-runbook.md) | Critical NFS service and local NVIDIA/HDMI recovery |

@@ -4,8 +4,6 @@ on:
   pull_request:
     paths:
       - services/hotel-flight-matcher/**
-      - extensions/flightstay-match/**
-      - scripts/package-flightstay-extension.sh
       - kubernetes/apps/hotel-flight-matcher.yaml
       - kubernetes/system/hotel-flight-matcher/**
       - kubernetes/system/cloudflared/network-policy.yaml
@@ -46,11 +44,6 @@ jobs:
       - run: uv run --directory services/hotel-flight-matcher --locked --extra dev ruff check .
       - run: uv run --directory services/hotel-flight-matcher --locked --extra dev mypy src tests
       - run: uv run --directory services/hotel-flight-matcher --locked --extra dev pytest
-      - name: Test extension modules
-        working-directory: extensions/flightstay-match
-        run: node --test tests/*.test.js
-      - name: Validate extension manifest
-        run: python -m json.tool extensions/flightstay-match/manifest.json >/dev/null
       - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5
       - name: Render manifests
         run: |

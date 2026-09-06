@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from sqlalchemy.orm import Session, sessionmaker
 
 from .broker import claim_fair
@@ -75,6 +76,8 @@ def command_for(job: Job, schema_path: Path | None, result_path: Path) -> list[s
 
 
 def execute(job: Job, settings: Settings) -> tuple[str, dict[str, Any]]:
+    if job.model.startswith("alibaba:"):
+        return _execute_alibaba(job, settings)
     settings.codex_home.mkdir(parents=True, exist_ok=True, mode=0o700)
     settings.work_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="run-", dir=settings.work_root) as temporary:
@@ -109,6 +112,49 @@ def execute(job: Job, settings: Settings) -> tuple[str, dict[str, Any]]:
         if not result_path.is_file():
             raise ExecutionFailure("missing_output", False)
         return result_path.read_text(encoding="utf-8"), usage
+
+
+def _execute_alibaba(job: Job, settings: Settings) -> tuple[str, dict[str, Any]]:
+    api_key = settings.alibaba_api_key.get_secret_value()
+    if not api_key:
+        raise ExecutionFailure("authentication", False)
+    messages: list[dict[str, str]] = []
+    if job.output_schema:
+        messages.append(
+            {
+                "role": "system",
+                "content": "Return only JSON conforming to this schema: "
+                + json.dumps(job.output_schema, separators=(",", ":")),
+            }
+        )
+    messages.append({"role": "user", "content": job.prompt})
+    request: dict[str, Any] = {
+        "model": job.model.removeprefix("alibaba:"),
+        "messages": messages,
+        "stream": False,
+    }
+    if job.output_schema:
+        request["response_format"] = {"type": "json_object"}
+    try:
+        response = httpx.post(
+            f"{settings.alibaba_base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json=request,
+            timeout=job.timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        content = payload["choices"][0]["message"]["content"]
+        if not isinstance(content, str):
+            raise TypeError
+        usage = payload.get("usage", {})
+        return content, usage if isinstance(usage, dict) else {}
+    except httpx.TimeoutException as exc:
+        raise ExecutionFailure("timeout", True) from exc
+    except httpx.HTTPStatusError as exc:
+        raise _classify(exc.response.text[-8000:]) from exc
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+        raise ExecutionFailure("execution_failed", False) from exc
 
 
 def process_one(factory: sessionmaker[Session], settings: Settings) -> bool:

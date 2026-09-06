@@ -4,14 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hotel-flight-matcher"
-version = "0.1.0"
-description = "Privacy-bounded hotel email extraction and deterministic flight matching API"
+version = "0.2.0"
+description = "OAuth mailbox ingestion, queued hotel extraction, and deterministic matching"
 requires-python = ">=3.14.6"
 dependencies = [
+  "aio-pika>=9.5.8,<10",
+  "cryptography>=46.0.5,<47",
   "fastapi>=0.141.1,<1",
   "httpx>=0.28.1,<1",
+  "psycopg[binary]>=3.3.4,<4",
   "pydantic>=2.13.4,<3",
   "pydantic-settings>=2.15.0,<3",
+  "SQLAlchemy>=2.0.52,<3",
   "structlog>=26.1.0,<27",
   "typer>=0.27.1,<1",
   "uvicorn>=0.52.4,<1",

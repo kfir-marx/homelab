@@ -14,6 +14,7 @@ from external_ai.broker import claim_fair, submit
 from external_ai.config import Settings, resolve_model
 from external_ai.database import initialize, make_engine, make_factory
 from external_ai.models import Job
+from external_ai.rpc import execute_rpc
 from external_ai.worker import ExecutionFailure, _classify, command_for, execute, process_one
 
 
@@ -39,12 +40,50 @@ def body(requester: str = "homelab-assistant") -> dict[str, object]:
 
 def test_model_alias_and_no_fallback() -> None:
     assert resolve_model("sol", "max") == ("gpt-5.6-sol", "max")
+    assert resolve_model("qwen", "none") == ("alibaba:qwen-plus", "none")
     try:
         resolve_model("anything", "high")
     except ValueError as exc:
         assert "allowlisted" in str(exc)
     else:
         raise AssertionError("unknown model must fail closed")
+
+
+def test_rpc_model_selects_alibaba_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configured = settings(tmp_path).model_copy(
+        update={"alibaba_api_key": SecretStr("model-studio-key")}
+    )
+    captured: dict[str, Any] = {}
+
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, Any]:
+            return {"choices": [{"message": {"content": '{"ok":true}'}}]}
+
+    def post(*args: object, **kwargs: object) -> Response:
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr("external_ai.rpc.httpx.post", post)
+    response = execute_rpc(
+        {
+            "model": "alibaba:qwen-plus",
+            "messages": [{"role": "user", "content": "return json"}],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"schema": {"type": "object"}},
+            },
+        },
+        configured,
+    )
+    assert response["choices"][0]["message"]["content"] == '{"ok":true}'
+    request = captured["json"]
+    assert request["model"] == "qwen-plus"
+    assert request["response_format"] == {"type": "json_object"}
 
 
 def test_api_is_scoped_and_idempotent(tmp_path: Path) -> None:

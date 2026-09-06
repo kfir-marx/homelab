@@ -38,7 +38,51 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: hotel-flight-matcher-to-internal-llm
+  name: hotel-flight-matcher-to-rabbitmq
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: hotel-flight-matcher
+      component: api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rabbitmq
+          podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - port: 5672
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hotel-flight-matcher-postgres
+  namespace: homelab-assistant
+spec:
+  podSelector:
+    matchLabels:
+      app: hotel-flight-matcher
+      component: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: hotel-flight-matcher
+              component: api
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hotel-flight-matcher-to-postgres
   namespace: homelab-assistant
 spec:
   podSelector:
@@ -50,10 +94,10 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app: internal-llm
-              component: api
+              app: hotel-flight-matcher
+              component: postgres
       ports:
-        - port: 8080
+        - port: 5432
           protocol: TCP
 ---
 apiVersion: cilium.io/v2
@@ -79,7 +123,11 @@ spec:
             dns:
               - matchPattern: "*"
     - toFQDNs:
+        - matchName: accounts.google.com
         - matchName: oauth2.googleapis.com
+        - matchName: gmail.googleapis.com
+        - matchName: login.microsoftonline.com
+        - matchName: graph.microsoft.com
       toPorts:
         - ports:
             - port: "443"

@@ -23,6 +23,10 @@ OPENAI_MODEL=local-llm
 OPENAI_API_KEY=<same value as LLM_API_KEY>
 ```
 
+Hotel Flight Matcher is the intentional exception: it publishes the same
+OpenAI-compatible RPC envelope directly to `internal-llm.requests` so it can
+apply ordered RabbitMQ-level fallback to external-ai without an HTTP hop.
+
 The namespace remains `homelab-assistant` intentionally. Renaming it would
 replace the retained local-GPU PVC identity and complicate the existing
 workstation-assistant rollback resources. The compatibility Service

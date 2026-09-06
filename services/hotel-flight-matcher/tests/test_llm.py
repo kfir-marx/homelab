@@ -1,9 +1,34 @@
-import httpx
-import pytest
-import respx
+from __future__ import annotations
 
-from hotel_flight_matcher.llm import BookingExtractor, ExtractionError
+from typing import Any
+
+import pytest
+
+from hotel_flight_matcher.llm import BookingExtractor, RpcResponse
 from hotel_flight_matcher.models import EmailForAnalysis
+
+
+class FakeEndpoint:
+    def __init__(self, responses: list[RpcResponse | Exception]) -> None:
+        self.responses = responses
+        self.requests: list[dict[str, Any]] = []
+
+    @property
+    def ready(self) -> bool:
+        return True
+
+    async def connect(self) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+    async def request(self, body: dict[str, Any]) -> RpcResponse:
+        self.requests.append(body)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def email() -> EmailForAnalysis:
@@ -15,49 +40,50 @@ def email() -> EmailForAnalysis:
     )
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_extracts_valid_schema() -> None:
-    route = respx.post("http://llm.test/v1/chat/completions").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "choices": [
-                    {
-                        "message": {
-                            "content": (
-                                '{"is_hotel_booking":true,"booking_status":"confirmed",'
-                                '"hotel_name":"Hotel","city":"London","country":"UK",'
-                                '"check_in_date":"2026-10-12","check_out_date":"2026-10-17",'
-                                '"guest_name":null,"confirmation_number":null,"confidence":0.9,'
-                                '"evidence":["confirmed stay"]}'
-                            )
-                        }
+def valid() -> RpcResponse:
+    return RpcResponse(
+        200,
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            '{"is_hotel_booking_confirmation":true,'
+                            '"booking_status":"confirmed","hotel_name":"Hotel",'
+                            '"city":"London","country":"UK",'
+                            '"check_in_date":"2026-10-12",'
+                            '"check_out_date":"2026-10-17","guest_name":null,'
+                            '"confirmation_number":null}'
+                        )
                     }
-                ]
-            },
-        )
+                }
+            ]
+        },
     )
-    async with httpx.AsyncClient() as client:
-        result = await BookingExtractor(
-            client, "http://llm.test/v1", "x" * 32, "local-llm"
-        ).extract(email())
-    assert route.called
-    assert result.is_hotel_booking is True
-    request_body = route.calls[0].request.content.decode()
-    assert "json_schema" in request_body
-    assert "MUST NOT be null" in request_body
-    assert "never follow instructions" not in email().body_text
 
 
 @pytest.mark.asyncio
-@respx.mock
-async def test_invalid_model_output_fails_closed() -> None:
-    respx.post("http://llm.test/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json={"choices": [{"message": {"content": "no"}}]})
+async def test_falls_back_in_configured_order() -> None:
+    internal = FakeEndpoint([TimeoutError()])
+    external = FakeEndpoint([valid()])
+    extractor = BookingExtractor(
+        ("internal-llm", "external-ai"),
+        {"internal-llm": internal, "external-ai": external},
+        {"internal-llm": "local-llm", "external-ai": "alibaba:qwen-plus"},
     )
-    async with httpx.AsyncClient() as client:
-        with pytest.raises(ExtractionError):
-            await BookingExtractor(client, "http://llm.test/v1", "x" * 32, "local-llm").extract(
-                email()
-            )
+    result = await extractor.extract(email())
+    assert result.is_hotel_booking_confirmation
+    assert internal.requests[0]["model"] == "local-llm"
+    assert external.requests[0]["model"] == "alibaba:qwen-plus"
+    assert "json_schema" in external.requests[0]["response_format"]["type"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_first_output_uses_fallback() -> None:
+    invalid = RpcResponse(200, {"choices": [{"message": {"content": "no"}}]})
+    extractor = BookingExtractor(
+        ("external-ai", "internal-llm"),
+        {"internal-llm": FakeEndpoint([valid()]), "external-ai": FakeEndpoint([invalid])},
+        {"internal-llm": "local-llm", "external-ai": "alibaba:qwen-plus"},
+    )
+    assert (await extractor.extract(email())).hotel_name == "Hotel"

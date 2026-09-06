@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+
 import typer
 import uvicorn
 
 from .api import create_app
 from .config import Settings
 from .database import initialize, make_engine, make_factory
-from .worker import run
+from .rpc import run
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 
@@ -22,7 +24,7 @@ def worker() -> None:
     settings = Settings()
     engine = make_engine(settings)
     initialize(engine)
-    run(make_factory(engine), settings)
+    asyncio.run(run(make_factory(engine), settings))
 
 
 if __name__ == "__main__":

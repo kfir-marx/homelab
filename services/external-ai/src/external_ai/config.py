@@ -21,10 +21,22 @@ class Settings(BaseSettings):
     maximum_timeout_seconds: int = 1200
     maximum_prompt_bytes: int = 512_000
     poll_seconds: float = 2.0
+    rabbitmq_url: SecretStr = SecretStr("")
+    request_queue: str = "external-ai.requests"
+    rpc_timeout_seconds: int = 300
+    alibaba_api_key: SecretStr = SecretStr("")
+    alibaba_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 
-MODEL_ALIASES = {"sol": "gpt-5.6-sol"}
-MODEL_REASONING = {"gpt-5.6-sol": frozenset({"none", "low", "medium", "high", "xhigh", "max"})}
+MODEL_ALIASES = {
+    "sol": "gpt-5.6-sol",
+    "qwen": "alibaba:qwen-plus",
+    "qwen-plus": "alibaba:qwen-plus",
+}
+MODEL_REASONING = {
+    "gpt-5.6-sol": frozenset({"none", "low", "medium", "high", "xhigh", "max"}),
+    "alibaba:qwen-plus": frozenset({"none"}),
+}
 
 
 def resolve_model(model: str, reasoning: str) -> tuple[str, str]:

@@ -99,7 +99,7 @@ spec:
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: codex-openai-egress
+  name: external-model-egress
   namespace: external-ai
 spec:
   endpointSelector:
@@ -112,7 +112,32 @@ spec:
         - matchName: auth.openai.com
         - matchName: chatgpt.com
         - matchPattern: "*.chatgpt.com"
+        - matchName: dashscope-intl.aliyuncs.com
+        - matchPattern: "*.maas.aliyuncs.com"
       toPorts:
         - ports:
             - port: "443"
               protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rabbitmq-egress
+  namespace: external-ai
+spec:
+  podSelector:
+    matchLabels:
+      app: external-ai
+      component: worker
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: rabbitmq
+          podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - port: 5672
+          protocol: TCP
