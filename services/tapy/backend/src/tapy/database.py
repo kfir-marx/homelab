@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint, create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import URL, Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from .config import Settings
@@ -81,8 +81,15 @@ def new_agent(session: Session) -> tuple[Agent, str]:
     return agent, token
 
 
+def _database_url(settings: Settings) -> URL:
+    url = make_url(settings.database_url.get_secret_value())
+    if url.drivername in {"postgres", "postgresql"}:
+        return url.set(drivername="postgresql+psycopg")
+    return url
+
+
 def make_engine(settings: Settings) -> Engine:
-    return create_engine(settings.database_url.get_secret_value(), pool_pre_ping=True)
+    return create_engine(_database_url(settings), pool_pre_ping=True)
 
 
 def initialize(engine: Engine) -> None:

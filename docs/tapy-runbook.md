@@ -111,6 +111,10 @@ Create `homelab-assistant/tapy-secrets` with:
 - `GOOGLE_OAUTH_CLIENT_SECRET`
 - `MICROSOFT_OAUTH_CLIENT_SECRET`
 
+Tapy uses Psycopg 3 for PostgreSQL. The preferred `DATABASE_URL` scheme is
+`postgresql+psycopg://`; plain legacy `postgresql://` and `postgres://` schemes
+are normalized to the installed Psycopg driver at startup.
+
 Create `homelab-assistant/tapy-frontend-secrets` with:
 
 - `TWILIO_ACCOUNT_SID`
