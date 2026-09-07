@@ -61,7 +61,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api
-          image: ghcr.io/kfir-marx/homelab-internal-llm:sha-7f1fea12731829b7b3fcff30af704d351f293c36
+          image: ghcr.io/kfir-marx/homelab-internal-llm:sha-7f1fea12731829b7b3fcff30af704d351f293c36@sha256:da156b586e18c45f7f30b5bfc80af9b6ff2e3ef70359dc4bb7b9174d2e3f0b45
           args: [api]
           env:
             - name: INTERNAL_LLM_API_KEY
@@ -137,7 +137,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: worker
-          image: ghcr.io/kfir-marx/homelab-internal-llm:sha-7f1fea12731829b7b3fcff30af704d351f293c36
+          image: ghcr.io/kfir-marx/homelab-internal-llm:sha-7f1fea12731829b7b3fcff30af704d351f293c36@sha256:da156b586e18c45f7f30b5bfc80af9b6ff2e3ef70359dc4bb7b9174d2e3f0b45
           args: [worker]
           env:
             - name: INTERNAL_LLM_RABBITMQ_URL
