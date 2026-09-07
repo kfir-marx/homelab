@@ -41,6 +41,9 @@ spec:
             - name: RABBITMQ_TAPY_PASSWORD
               valueFrom:
                 secretKeyRef: {name: rabbitmq-tapy-user, key: password}
+            - name: RABBITMQ_EXTERNAL_AI_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: rabbitmq-external-ai-user, key: password}
           ports:
             - {name: amqp, containerPort: 5672}
             - {name: management, containerPort: 15672}
@@ -64,15 +67,24 @@ spec:
                   - -ec
                   - |
                     until rabbitmq-diagnostics -q check_running; do sleep 2; done
-                    if rabbitmqctl list_users --no-table-headers 2>/dev/null | awk '{print $1}' | grep -qx tapy; then
-                      rabbitmqctl change_password tapy "$RABBITMQ_TAPY_PASSWORD" >/dev/null
-                    else
-                      rabbitmqctl add_user tapy "$RABBITMQ_TAPY_PASSWORD" >/dev/null
-                    fi
-                    rabbitmqctl set_user_tags tapy >/dev/null
+                    reconcile_user() {
+                      user="$1"
+                      password="$2"
+                      if rabbitmqctl list_users --no-table-headers 2>/dev/null | awk '{print $1}' | grep -qx "$user"; then
+                        rabbitmqctl change_password "$user" "$password" >/dev/null
+                      else
+                        rabbitmqctl add_user "$user" "$password" >/dev/null
+                      fi
+                      rabbitmqctl set_user_tags "$user" >/dev/null
+                    }
+                    reconcile_user tapy "$RABBITMQ_TAPY_PASSWORD"
                     rabbitmqctl set_permissions --vhost homelab tapy \
-                      '^(internal-llm\.requests|external-ai\.requests|amq\.gen-.*)$' \
-                      '^$' '^amq\.gen-.*$' >/dev/null
+                      '^(internal-llm\.requests|external-ai\.requests|amq\.gen-.*|amq_[0-9a-f]{32})$' \
+                      '^amq\.default$' '^(amq\.gen-.*|amq_[0-9a-f]{32})$' >/dev/null
+                    reconcile_user external-ai "$RABBITMQ_EXTERNAL_AI_PASSWORD"
+                    rabbitmqctl set_permissions --vhost homelab external-ai \
+                      '^external-ai\.requests$' '^amq\.default$' \
+                      '^external-ai\.requests$' >/dev/null
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

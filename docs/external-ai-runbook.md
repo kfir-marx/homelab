@@ -45,8 +45,9 @@ Both static PVs use `nfs-storage2`, hard binding, and `Retain`.
 `external-ai-secrets` requires `POSTGRES_PASSWORD`, `DATABASE_URL`,
 `HOMELAB_ASSISTANT_TOKEN`, `JOB_ASSISTANT_TOKEN`, `RABBITMQ_URL`, and
 `ALIBABA_API_KEY`. The requester tokens must be independent. The RabbitMQ URL
-must use a non-administrator identity limited to `external-ai.requests` and
-reply queues. `external-ai-codex-auth-bootstrap` requires only `auth.json`.
+must use a non-administrator identity with configure/read permission limited to
+`external-ai.requests` and write permission limited to `^amq\.default$` for
+callback replies. `external-ai-codex-auth-bootstrap` requires only `auth.json`.
 Create and capture these manually; no plaintext or fabricated encrypted snapshot
 belongs in Git.
 

@@ -7,9 +7,8 @@ cross-service configuration matrix are documented in
 ## Contract
 
 The `rabbitmq` Argo CD Application is the cluster-wide AMQP 0-9-1 transport.
-Selected namespaced clients may reach
-`rabbitmq.rabbitmq.svc.cluster.local:5672`, but every client must authenticate.
-The management port is not admitted by network
+Any namespaced pod may reach `rabbitmq.rabbitmq.svc.cluster.local:5672`, but
+every client must authenticate. The management port is not admitted by network
 policy; Prometheus alone can reach the dedicated metrics port `15692`.
 
 Applications own their exchanges, queues, retry/dead-letter policy, schemas,
@@ -50,29 +49,34 @@ server-named exclusive callback queues. Its exact `homelab` vhost permissions
 are:
 
 ```text
-configure: ^(internal-llm\.requests|external-ai\.requests|amq\.gen-.*)$
-write:     ^$
-read:      ^amq\.gen-.*$
+configure: ^(internal-llm\.requests|external-ai\.requests|amq\.gen-.*|amq_[0-9a-f]{32})$
+write:     ^amq\.default$
+read:      ^(amq\.gen-.*|amq_[0-9a-f]{32})$
 ```
 
-The empty write regex matches only RabbitMQ's nameless default exchange; the
-routing key is still one of the queues Tapy can configure. Tapy has no
-administrator tag and cannot consume either request queue.
+RabbitMQ authorizes AMQP's nameless default exchange under the internal
+resource name `amq.default`; the exact write regex grants no other exchange.
+The routing key is still one of the queues Tapy can configure. The pinned
+`aio-pika` client currently chooses `amq_` plus 32 lowercase hexadecimal
+characters for its exclusive callback queue; `amq.gen-*` remains allowed for
+broker-generated callback names. Tapy has no administrator tag and cannot
+consume either request queue.
 
 The external-ai worker identity consumes `external-ai.requests` and publishes
-to callback queues. Both identities must use the same application vhost as the
+to callback queues through the same `^amq\.default$` write permission. Both
+identities must use the same application vhost as the
 internal-llm queue (currently `homelab`). Keep these permissions narrower than
 the RabbitMQ bootstrap administrator.
 
 Credentials configured through `RABBITMQ_DEFAULT_*` take effect only against a
 blank node. With transient storage every recreated Pod is blank, so keep the
 encrypted bootstrap values stable. A post-start reconciler in the homelab
-StatefulSet recreates or updates the `tapy` user from the encrypted
-`rabbitmq/rabbitmq-tapy-user` Secret and reapplies the restricted permissions
-after every container start. This deliberately covers only Tapy; the existing
-`external-ai` identity is still an operational durability gap after a blank Pod
-replacement. Do not restart or replace RabbitMQ until that identity has also
-been restored manually or given equivalent declarative bootstrap coverage.
+StatefulSet recreates or updates the `tapy` and `external-ai` users from the
+encrypted `rabbitmq/rabbitmq-tapy-user` and
+`rabbitmq/rabbitmq-external-ai-user` Secrets and reapplies their restricted
+permissions after every container start. Add equivalent broker-side recovery
+and bootstrap logic before introducing another application identity; users
+created only in RabbitMQ disappear with the next blank Pod replacement.
 
 ## Verification
 

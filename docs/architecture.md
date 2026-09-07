@@ -247,7 +247,7 @@ path. Both exports must be mountable from the Talos nodes.
 | `homelab-assistant-postgres-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/homelab-assistant/postgres` | 5 Gi | **Retained recovery** — inactive legacy PostgreSQL binding preserved through migration and rollback |
 | `gpu2-scratch-pv` | `local-gpu-scratch` | `gpu-2:/var/mnt/gpu-scratch` | 390 Gi | **Scratch** — replaceable local-LLM weights and caches; unavailable in Windows mode |
 | `external-ai-*-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/external-ai/*` | 1–5 Gi | **Critical** — durable external job queue and retained ChatGPT-managed Codex authentication |
-| `tapy-postgres-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/tapy/postgres` | 5 Gi | **Critical** — agent identities, encrypted mailbox grants, and processed-message metadata |
+| `tapy-postgres-tapy-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/tapy/postgres` | 5 Gi | **Critical** — Tapy-namespace agent identities, encrypted mailbox grants, and processed-message metadata |
 
 Tapy, external-ai, and RabbitMQ are organized as portable
 Kustomize bases with homelab and cloud overlays. Homelab-specific NFS bindings,
@@ -327,6 +327,10 @@ transient cluster transport for backpressure and dispatch; applications retain
 irreproducible job state in their own database. The `internal-llm` Application
 uses it between a cluster-wide authenticated OpenAI-compatible API and two
 workers, while the GPU-backed vLLM Service is reachable only by those workers.
+Dedicated least-privilege `tapy` and `external-ai` RabbitMQ users are recreated
+from encrypted Secrets after blank broker starts; any future manually
+provisioned application user remains subject to the transient-user durability
+limitation until it receives equivalent bootstrap coverage.
 A durable RabbitMQ tier requires future local SSD volumes and replicas across
 failure domains.
 

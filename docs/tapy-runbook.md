@@ -157,9 +157,10 @@ on a trusted machine. Never rotate it without re-encrypting every stored OAuth
 token. Tapy's dedicated RabbitMQ user is `tapy`. Its AMQP URL uses the
 `homelab` vhost and lives only in `tapy/tapy-secrets`. The broker bootstrap
 reconciles that user from `rabbitmq/rabbitmq-tapy-user` after every blank-pod
-start with configure permission for the two request queues and `amq.gen-*`,
-write permission only for the default exchange, and read permission only for
-`amq.gen-*`. Capture both Secrets with
+start with configure permission for the two request queues and narrowly matched
+`amq.gen-*` or `amq_<32 lowercase hex>` callback queues, write permission only
+for the default exchange, and read permission only for those callback queues.
+Capture both Secrets with
 `scripts/secrets.sh capture-k8s tapy/tapy-secrets rabbitmq/rabbitmq-tapy-user`.
 
 Before sync, use the Ansible workstation play to create
