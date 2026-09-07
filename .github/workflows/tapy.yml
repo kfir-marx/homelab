@@ -37,7 +37,7 @@ jobs:
           python-version: "3.14"
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          version: "0.12.6"
+          version: "0.12.7"
           enable-cache: true
           cache-dependency-glob: services/tapy/backend/uv.lock
       - run: uv sync --directory services/tapy/backend --locked --extra dev
