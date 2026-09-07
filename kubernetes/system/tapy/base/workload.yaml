@@ -41,7 +41,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api
-          image: ghcr.io/kfir-marx/tapy:sha-85301e05cc7554b2118d174a07ac6801c542109f
+          image: ghcr.io/kfir-marx/tapy:sha-647e0c250cb84b1e06335de3bb027808fcdf37c9
           imagePullPolicy: IfNotPresent
           env:
             - name: MATCHER_DATABASE_URL
