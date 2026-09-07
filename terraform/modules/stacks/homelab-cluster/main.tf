@@ -458,7 +458,7 @@ data "talos_cluster_health" "this" {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 4. ArgoCD bootstrap — one-time Helm install, then ArgoCD manages itself
+# 4. ArgoCD bootstrap and upgrades — managed by Terraform
 # ──────────────────────────────────────────────────────────────────────────────
 
 resource "helm_release" "argocd" {
@@ -467,12 +467,14 @@ resource "helm_release" "argocd" {
   create_namespace = true
   repository       = "https://argoproj.github.io/argo-helm"
   chart            = "argo-cd"
-  version          = "7.8.13"
-  atomic           = true
-  cleanup_on_fail  = true
-  wait             = true
-  wait_for_jobs    = true
-  timeout          = 600
+  # Argo CD 3.4 is tested with Kubernetes 1.35. Stay below 3.5 for now because
+  # 3.5 switches application rendering to Helm 4.
+  version         = "10.2.2"
+  atomic          = true
+  cleanup_on_fail = true
+  wait            = true
+  wait_for_jobs   = true
+  timeout         = 600
 
   values = [
     yamlencode({
