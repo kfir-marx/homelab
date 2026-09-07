@@ -21,3 +21,4 @@ COPY --from=builder --chown=10001:10001 /app/instructions.txt ./instructions.txt
 USER 10001:10001
 EXPOSE 3000
 CMD ["node", "server.js"]
+#comment just for a change to trigger gh actions

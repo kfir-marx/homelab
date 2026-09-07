@@ -20,3 +20,5 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 ENTRYPOINT ["/usr/bin/tini", "--", "tapy"]
 CMD ["serve"]
+
+#comment just for a change to trigger gh actions
