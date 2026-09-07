@@ -8,5 +8,5 @@ deterministic code scores a booking against flights.
 
 Raw mail bodies are never persisted. Agent identities, encrypted refresh
 tokens, processed-message IDs, and match metadata are stored in PostgreSQL.
-See `../../docs/tapy-runbook.md` for the API and deployment
+See `../../../docs/tapy-runbook.md` for the API and deployment
 contract.

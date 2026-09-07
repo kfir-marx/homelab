@@ -65,9 +65,9 @@ spec:
           podSelector:
             matchLabels:
               app: tapy
-              component: api
+              component: frontend
       ports:
-        - port: 8080
+        - port: 3000
           protocol: TCP
 ---
 apiVersion: cilium.io/v2

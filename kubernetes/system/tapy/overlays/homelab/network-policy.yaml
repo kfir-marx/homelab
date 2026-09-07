@@ -1,10 +1,10 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: cloudflared-to-tapy
+  name: cloudflared-to-tapy-frontend
 spec:
   podSelector:
-    matchLabels: {app: tapy, component: api}
+    matchLabels: {app: tapy, component: frontend}
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -12,7 +12,7 @@ spec:
             matchLabels: {kubernetes.io/metadata.name: cloudflared}
           podSelector:
             matchLabels: {app: cloudflared}
-      ports: [{port: 8080, protocol: TCP}]
+      ports: [{port: 3000, protocol: TCP}]
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -66,3 +66,37 @@ spec:
     - fromEntities: [host, remote-node]
       toPorts:
         - ports: [{port: "8080", protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tapy-frontend-external-egress
+spec:
+  endpointSelector:
+    matchLabels: {app: tapy, component: frontend}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports: [{port: "53", protocol: ANY}]
+          rules:
+            dns: [{matchPattern: "*"}]
+    - toFQDNs:
+        - {matchName: api.twilio.com}
+        - {matchName: generativelanguage.googleapis.com}
+      toPorts:
+        - ports: [{port: "443", protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tapy-frontend-health-probes
+spec:
+  endpointSelector:
+    matchLabels: {app: tapy, component: frontend}
+  ingress:
+    - fromEntities: [host, remote-node]
+      toPorts:
+        - ports: [{port: "3000", protocol: TCP}]

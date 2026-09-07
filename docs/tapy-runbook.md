@@ -1,4 +1,4 @@
-# Tapy backend
+# Tapy
 
 Portable homelab/cloud topology, cloud prerequisites, configuration matrices,
 deployment order, and migration steps are documented in
@@ -6,9 +6,11 @@ deployment order, and migration steps are documented in
 
 ## Runtime design
 
-The service is a backend-only proof of concept. It does not require a browser
-extension and it never accepts mailbox access tokens or email bodies from a
-frontend. The flow is:
+Tapy is deployed as separate frontend and backend workloads. The public
+`tapy` Service sends traffic to the Next.js frontend, which proxies `/v1/*`
+to the private `tapy-backend` Service. This keeps the existing public hostname
+and OAuth callback URIs stable. The backend never accepts mailbox access
+tokens or email bodies from the frontend. The intended flow is:
 
 ```text
 frontend -> create agent -> open official provider consent page
@@ -32,7 +34,7 @@ strict lower bound, so the default action runs only when `score > 0.90`.
 ## Backend API
 
 `POST /v1/agents` creates an agent and returns its opaque bearer token once.
-The future frontend must keep that token out of URLs and browser logs. All
+The frontend must keep that token out of URLs and browser logs. All
 remaining frontend calls use `Authorization: Bearer <agent token>`.
 
 - `GET /v1/agents/me` returns the agent and connected provider names.
@@ -53,6 +55,12 @@ mailbox identity, processed provider message IDs, and small match summaries.
 It never retains access tokens or message bodies. In the homelab overlay the
 PostgreSQL PV is hard bound to the permanent critical NFS tier with `Retain`;
 cloud uses either a dynamically provisioned retained PVC or managed PostgreSQL.
+
+The checked-in frontend is the partner/investor demo used as the POC starting
+point. Its business logic and mock-data behavior are unchanged in this
+deployment pass. Its existing server actions call Twilio and Gemini directly
+from the Next.js server; their credentials are never exposed as
+`NEXT_PUBLIC_*` values.
 
 ## OAuth registration
 
@@ -83,7 +91,7 @@ Follow Microsoft's official
 
 Update `PUBLIC_BASE_URL` and both provider redirect registrations together if
 the hostname changes. Keep Cloudflare Access disabled on the callback/API
-hostname because the provider and future frontend must reach it directly.
+hostname because the provider and frontend must reach it directly.
 
 ## Configuration and secrets
 
@@ -100,6 +108,19 @@ Create `homelab-assistant/tapy-secrets` with:
 - `OAUTH_TOKEN_ENCRYPTION_KEY` (a Fernet key)
 - `GOOGLE_OAUTH_CLIENT_SECRET`
 - `MICROSOFT_OAUTH_CLIENT_SECRET`
+
+Create `homelab-assistant/tapy-frontend-secrets` with:
+
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `AGENT_PHONE_NUMBER`
+- `GEMINI_API_KEY`
+
+The local source values belong in the repository-level gitignored `.env`; the
+same names are documented in `.env-template`. Capture the updated encrypted
+environment bundle with `scripts/secrets.sh capture-env`. After creating the
+Kubernetes Secret through the trusted local workflow, capture it with
+`scripts/secrets.sh capture-k8s homelab-assistant/tapy-frontend-secrets`.
 
 Generate the Fernet value with
 `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`
@@ -119,7 +140,8 @@ The rename changes the Argo CD Application, Kubernetes workload and storage
 object names, Secret name, container image repository, PostgreSQL database and
 role, retained NFS directory, public hostname, cloud namespace, and cloud
 network-policy labels together. Before the first sync, publish the
-`ghcr.io/kfir-marx/tapy` image, create and capture `tapy-secrets` while
+`ghcr.io/kfir-marx/tapy` and `ghcr.io/kfir-marx/tapy-frontend` images, create
+and capture both Tapy Secrets while
 preserving the existing OAuth encryption key, and complete an authorized
 host-side PostgreSQL data migration into `/mnt/storage2-bulk/tapy/postgres`.
 Provision `tapy.547600.xyz` in DNS and the Cloudflare Tunnel, and update the
@@ -132,19 +154,22 @@ API, mailbox grants, and processed-message history have been verified.
 Static checks:
 
 ```bash
-uv sync --directory services/tapy --locked --extra dev
-uv run --directory services/tapy --locked --extra dev ruff format --check .
-uv run --directory services/tapy --locked --extra dev ruff check .
-uv run --directory services/tapy --locked --extra dev mypy src tests
-uv run --directory services/tapy --locked --extra dev pytest
+uv sync --directory services/tapy/backend --locked --extra dev
+uv run --directory services/tapy/backend --locked --extra dev ruff format --check .
+uv run --directory services/tapy/backend --locked --extra dev ruff check .
+uv run --directory services/tapy/backend --locked --extra dev mypy src tests
+uv run --directory services/tapy/backend --locked --extra dev pytest
+docker build services/tapy/frontend
 kubectl kustomize kubernetes/system/tapy >/tmp/tapy.yaml
 kubectl kustomize kubernetes/system/tapy/overlays/cloud/in-cluster >/tmp/tapy-cloud.yaml
 kubectl kustomize kubernetes/system/tapy/overlays/cloud/managed >/tmp/tapy-managed.yaml
 ```
 
 An authorized rollout must converge the workstation directory first, then
-RabbitMQ, internal-llm, external-ai, and finally tapy. Do not
-sync the placeholder image or OAuth client IDs. After rollout, create a test
-agent through the API, complete each provider's browser consent, scan benign
-test mail, and verify internal failure falls back to external inference. Never
-place agent, OAuth, RabbitMQ, or provider tokens in shell history.
+RabbitMQ, internal-llm, external-ai, and finally tapy. The release workflow
+publishes both images and opens its immutable image-pin PR. Before merging that
+PR, create and capture `tapy-frontend-secrets`. Do not sync the placeholder
+frontend image or OAuth client IDs. After rollout, create a test agent through
+the API, complete each provider's browser consent, scan benign test mail, and
+verify internal failure falls back to external inference. Never place agent,
+OAuth, RabbitMQ, or provider tokens in shell history.

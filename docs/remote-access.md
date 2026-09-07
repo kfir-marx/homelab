@@ -53,7 +53,7 @@ Cloudflare. No inbound port forwarding or public home IP is required.
 | Jellyfin | `jellyfin.547600.xyz` | `jellyfin.media.svc:8096` | Jellyfin account |
 | Seerr | `seerr.547600.xyz` | `seerr.media.svc:5055` | Individual Jellyfin account and Seerr permissions |
 | Immich | `immich.547600.xyz` | `immich-server.immich.svc:2283` | Immich account |
-| Tapy API | `tapy.547600.xyz` | `tapy.homelab-assistant.svc:8080` | Google OAuth token issued to the exact Chrome client |
+| Tapy | `tapy.547600.xyz` | `tapy.homelab-assistant.svc:8080` | No tunnel-layer authentication; `/v1/*` is proxied to the backend for its own agent-token and OAuth controls |
 
 Add only applications intended for external users to the tunnel. Do not put
 ArgoCD, Proxmox, the Kubernetes API, or other administrative endpoints on it.

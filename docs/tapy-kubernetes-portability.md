@@ -3,7 +3,8 @@
 ## Architecture and ownership
 
 Tapy keeps the same runtime architecture in development and
-production: the matcher stores agents and encrypted mailbox grants in
+production: the frontend serves the UI and proxies `/v1/*` to the private
+matcher, which stores agents and encrypted mailbox grants in
 PostgreSQL, publishes OpenAI-compatible RPC requests through RabbitMQ, and
 tries the configured internal/external LLM queues in order. `external-ai`
 retains its authenticated HTTP job API, durable PostgreSQL job state, RabbitMQ
@@ -13,7 +14,7 @@ Each service separates portable resources from deployment choices:
 
 | Service | Portable resources | Homelab development | Cloud production |
 |---|---|---|---|
-| Matcher | `kubernetes/system/tapy/base` | `overlays/homelab` | `overlays/cloud/in-cluster` or `overlays/cloud/managed` |
+| Frontend and matcher | `kubernetes/system/tapy/base` | `overlays/homelab` | `overlays/cloud/in-cluster` or `overlays/cloud/managed` |
 | external-ai | `kubernetes/system/external-ai/base` | `overlays/homelab` | `overlays/cloud/in-cluster` or `overlays/cloud/managed` |
 | RabbitMQ | `kubernetes/system/rabbitmq/base` | `overlays/homelab` | `overlays/cloud` when not managed |
 
@@ -42,7 +43,7 @@ mail, and model-provider addresses by hostname.
 Cloud additionally requires:
 
 - an installed Ingress controller and namespace/pod selectors chosen for it;
-- a public DNS record for the matcher hostname and a matching TLS Secret;
+- a public DNS record for the frontend hostname and a matching TLS Secret;
 - a dynamically provisioning StorageClass whose reclaim policy is `Retain`
   for every in-cluster PostgreSQL or Codex PVC;
 - DNS hostnames, CA trust, TLS modes, and credentials for managed PostgreSQL or
@@ -51,8 +52,8 @@ Cloud additionally requires:
 
 Deploy in this order: storage and CNI prerequisites; namespaces and Secrets;
 RabbitMQ (or verify the managed broker); PostgreSQL (or verify managed
-databases); internal-llm if used; external-ai; matcher; Ingress/DNS/TLS; then
-OAuth end-to-end tests.
+databases); internal-llm if used; external-ai; matcher and frontend;
+Ingress/DNS/TLS; then OAuth end-to-end tests.
 
 ## Required customization
 
@@ -106,7 +107,9 @@ Never commit a Secret manifest with real or fabricated values.
 | Namespace / Secret | Required keys |
 |---|---|
 | `tapy/tapy-secrets` (cloud) | `DATABASE_URL`, `RABBITMQ_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`; add `POSTGRES_PASSWORD` for in-cluster PostgreSQL |
+| `tapy/tapy-frontend-secrets` (cloud) | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `AGENT_PHONE_NUMBER`, `GEMINI_API_KEY` |
 | `homelab-assistant/tapy-secrets` | `DATABASE_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`, `POSTGRES_PASSWORD` |
+| `homelab-assistant/tapy-frontend-secrets` | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `AGENT_PHONE_NUMBER`, `GEMINI_API_KEY` |
 | `homelab-assistant/homelab-assistant-secrets` | `RABBITMQ_URL` (the homelab overlay preserves this existing identity) |
 | `external-ai/external-ai-secrets` | `DATABASE_URL`, `RABBITMQ_URL`, `HOMELAB_ASSISTANT_TOKEN`, `JOB_ASSISTANT_TOKEN`; `POSTGRES_PASSWORD` for in-cluster PostgreSQL; `ALIBABA_API_KEY` when Model Studio is enabled |
 | `external-ai/external-ai-codex-auth-bootstrap` | `auth.json` when Codex-backed models are enabled |
@@ -148,7 +151,9 @@ managed broker; no application code change is required.
 
 ## Homelab deployment
 
-The renamed public URL is `https://tapy.547600.xyz`. Update its DNS and
+The public URL is `https://tapy.547600.xyz`. It reaches the frontend Service;
+the frontend proxies `/v1/*` to the internal backend Service so the OAuth
+callbacks remain on the same origin. Update its DNS and
 Cloudflare Tunnel route before switching traffic, and register the new callback
 URLs with both OAuth providers. Cloudflare Tunnel access exists only in the
 homelab overlay. PostgreSQL and external-ai

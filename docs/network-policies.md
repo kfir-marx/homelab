@@ -43,8 +43,10 @@ apply step is required.
 | `external-ai/postgres` | external-ai API and worker to TCP/5432 | None |
 | `homelab-assistant/internal-llm` | Namespaced cluster pods and node health probes to queued API TCP/8080; workers alone reach private vLLM TCP/8000 | RabbitMQ TCP/5672, private vLLM for workers, cluster DNS, and pinned-model Hugging Face HTTPS only |
 | `rabbitmq/rabbitmq` | Namespaced cluster pods to AMQP TCP/5672; Prometheus to TCP/15692; management TCP/15672 denied | Cluster DNS only |
-| `homelab-assistant/tapy` | Cloudflared and node health probes to TCP/8080 | PostgreSQL, RabbitMQ, cluster DNS, Google OAuth/Gmail, and Microsoft OAuth/Graph HTTPS |
-| `tapy/tapy` (cloud) | Selected Ingress controller and node health probes to TCP/8080 | Selected PostgreSQL/RabbitMQ endpoints, cluster DNS, Google OAuth/Gmail, and Microsoft OAuth/Graph HTTPS |
+| `homelab-assistant/tapy` frontend | Cloudflared and node health probes to TCP/3000 | Backend TCP/8080, cluster DNS, Twilio HTTPS, and Gemini HTTPS |
+| `homelab-assistant/tapy` API | Frontend and node health probes to TCP/8080 | PostgreSQL, RabbitMQ, cluster DNS, Google OAuth/Gmail, and Microsoft OAuth/Graph HTTPS |
+| `tapy/tapy` frontend (cloud) | Selected Ingress controller and node health probes to TCP/3000 | Backend TCP/8080, cluster DNS, Twilio HTTPS, and Gemini HTTPS |
+| `tapy/tapy` API (cloud) | Frontend and node health probes to TCP/8080 | Selected PostgreSQL/RabbitMQ endpoints, cluster DNS, Google OAuth/Gmail, and Microsoft OAuth/Graph HTTPS |
 | `immich/redis` | Server to TCP/6379 | None |
 | `media` | Same-namespace application traffic; Gateway to each web UI; Cloudflared to Jellyfin TCP/8096 and Seerr TCP/5055; LAN/world peers to qBittorrent TCP/UDP 51413 | Cluster DNS; public-only TCP 80/443 for metadata, indexers, subtitle providers, and trackers; qBittorrent additionally reaches public TCP/UDP peers |
 | `tailscale-router` | Public/LAN UDP 41641 (pinned in the Deployment) | Not isolated; see the Cilium Gateway hairpin exception below |

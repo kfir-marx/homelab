@@ -14,3 +14,12 @@ spec:
                 secretKeyRef:
                   name: homelab-assistant-secrets
                   key: RABBITMQ_URL
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tapy-frontend
+spec:
+  template:
+    spec:
+      priorityClassName: homelab-tapy
