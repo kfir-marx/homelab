@@ -41,7 +41,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: frontend
-          image: ghcr.io/kfir-marx/tapy-frontend:sha-REPLACE_WITH_RELEASE_SHA
+          image: ghcr.io/kfir-marx/tapy-frontend:sha-572098ac8ed6826ba6a0f1e57ae30978d8c109e2
           imagePullPolicy: IfNotPresent
           env:
             - name: TWILIO_ACCOUNT_SID
