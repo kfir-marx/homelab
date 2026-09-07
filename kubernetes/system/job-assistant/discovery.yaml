@@ -34,7 +34,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: discover
-              image: ghcr.io/kfir-marx/homelab-job-assistant:sha-fac0b0cd7867b8381b4374024229754b4990d893
+              image: ghcr.io/kfir-marx/homelab-job-assistant:sha-07fe8d8ab2cb47d525d7e833710aa70b7ebb1b6d
               imagePullPolicy: IfNotPresent
               args: [discover]
               env:
@@ -123,7 +123,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: reminders
-              image: ghcr.io/kfir-marx/homelab-job-assistant:sha-fac0b0cd7867b8381b4374024229754b4990d893
+              image: ghcr.io/kfir-marx/homelab-job-assistant:sha-07fe8d8ab2cb47d525d7e833710aa70b7ebb1b6d
               imagePullPolicy: IfNotPresent
               args: [reminders]
               env:
