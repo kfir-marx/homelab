@@ -47,7 +47,7 @@ spec:
       containers:
         - name: gateway
           # The first release workflow replaces this explicit non-image sentinel.
-          image: ghcr.io/kfir-marx/homelab-shared-services-telegram:sha-fac0b0cd7867b8381b4374024229754b4990d893@sha256:8be1e0dd6b949e01bf1512d40f2028d390cf671aa3c47ab6ea09291e4bccbbaf
+          image: ghcr.io/kfir-marx/homelab-shared-services-telegram:sha-07fe8d8ab2cb47d525d7e833710aa70b7ebb1b6d
           imagePullPolicy: IfNotPresent
           env:
             - name: SHARED_SERVICES_TELEGRAM_TELEGRAM_TOKEN
