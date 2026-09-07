@@ -76,4 +76,4 @@ nfs_server_exports:
     options: rw,sync,no_subtree_check,no_root_squash,fsid=10
 
 homelab_assistant_enabled: true
-homelab_assistant_image: ghcr.io/kfir-marx/homelab-assistant:sha-3a59ca3772d504dcfcc7ec34d769d3cb7a6c508b
+homelab_assistant_image: ghcr.io/kfir-marx/homelab-assistant:sha-572098ac8ed6826ba6a0f1e57ae30978d8c109e2
