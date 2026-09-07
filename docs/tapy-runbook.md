@@ -16,14 +16,15 @@ tokens or email bodies from the frontend. The intended flow is:
 frontend -> create agent -> open official provider consent page
 provider -> OAuth callback -> encrypted refresh token in PostgreSQL
 frontend -> start scan -> Gmail API or Microsoft Graph -> bounded email text
-matcher -> RabbitMQ -> internal-llm, then external-ai on failure
+matcher -> RabbitMQ -> external-ai
 matcher -> deterministic flight scoring -> function boundary on score > 0.90
 ```
 
 The LLM may only classify `is_hotel_booking_confirmation` and populate the
 strict `HotelBooking` schema. It does not choose flights, calculate a score, or
 invoke actions. Invalid model output counts as a backend failure and triggers
-the next configured LLM. The default order is `internal-llm,external-ai`.
+the next configured LLM. The homelab development deployment uses only
+`external-ai`, so Tapy startup and readiness do not depend on `internal-llm`.
 
 The current flight source remains `/config/flights.json`. The application calls
 it through a per-agent `FlightRepository` boundary so a future database-backed
@@ -98,8 +99,9 @@ hostname because the provider and frontend must reach it directly.
 The ConfigMap owns `LLM_ORDER`, both queue names and model names,
 `MICROSOFT_TENANT`, optional explicit redirect URIs, `MATCH_THRESHOLD`, scan
 limit, Gmail query, public URL, and non-secret OAuth client IDs. The matcher
-uses the `internal-llm.requests` and `external-ai.requests` durable queues
-directly; it receives RabbitMQ credentials, not either LLM's HTTP credential.
+uses only the durable queues selected by `LLM_ORDER`; it receives RabbitMQ
+credentials, not either LLM's HTTP credential. The homelab overlay selects
+only `external-ai.requests`.
 
 Create `homelab-assistant/tapy-secrets` with:
 
@@ -166,10 +168,11 @@ kubectl kustomize kubernetes/system/tapy/overlays/cloud/managed >/tmp/tapy-manag
 ```
 
 An authorized rollout must converge the workstation directory first, then
-RabbitMQ, internal-llm, external-ai, and finally tapy. The release workflow
+RabbitMQ, external-ai, and finally tapy. The optional internal-llm can converge
+independently. The release workflow
 publishes both images and opens its immutable image-pin PR. Before merging that
 PR, create and capture `tapy-frontend-secrets`. Do not sync the placeholder
 frontend image or OAuth client IDs. After rollout, create a test agent through
 the API, complete each provider's browser consent, scan benign test mail, and
-verify internal failure falls back to external inference. Never place agent,
+verify external inference. Never place agent,
 OAuth, RabbitMQ, or provider tokens in shell history.

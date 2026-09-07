@@ -236,13 +236,13 @@ jobs:
           )
           before_count="$(grep --extended-regexp --only-matching --no-filename \
             "image: ${IMAGE_NAME}:[^[:space:]]+" "${manifests[@]}" | wc --lines)"
-          test "${before_count}" -eq 5
+          test "${before_count}" -eq 6
           sed --in-place --regexp-extended \
             "s|(image: ${IMAGE_NAME}:)[^[:space:]]+|\\1${IMAGE_TAG}|" \
             "${manifests[@]}"
           after_count="$(grep --fixed-strings --only-matching --no-filename \
             "image: ${IMAGE_NAME}:${IMAGE_TAG}" "${manifests[@]}" | wc --lines)"
-          test "${after_count}" -eq 5
+          test "${after_count}" -eq 6
           gateway_manifest=kubernetes/system/shared-services-telegram/workload.yaml
           gateway_before="$(grep --extended-regexp --only-matching --no-filename \
             "image: ${GATEWAY_IMAGE_NAME}:[^[:space:]]+" "${gateway_manifest}" | wc --lines)"

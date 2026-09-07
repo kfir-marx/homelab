@@ -21,4 +21,3 @@ ENV PYTHONUNBUFFERED=1 \
 ENTRYPOINT ["/usr/bin/tini", "--", "tapy"]
 CMD ["serve"]
 
-#comment just for a change to trigger gh actions

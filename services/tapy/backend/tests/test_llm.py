@@ -102,6 +102,22 @@ def test_external_only_configuration_builds_one_rpc_endpoint() -> None:
     assert extractor.readiness == {"external-ai": "unavailable"}
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("external-ai", ("external-ai",)),
+        ("internal-llm,external-ai", ("internal-llm", "external-ai")),
+    ],
+)
+def test_llm_order_accepts_environment_value(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+    expected: tuple[str, ...],
+) -> None:
+    monkeypatch.setenv("MATCHER_LLM_ORDER", value)
+    assert Settings().llm_order == expected
+
+
 def test_rabbitmq_is_required_for_runtime_extractor() -> None:
     with pytest.raises(ValueError, match="MATCHER_RABBITMQ_URL"):
         Settings().require_rabbitmq()

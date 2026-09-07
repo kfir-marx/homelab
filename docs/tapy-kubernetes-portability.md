@@ -128,7 +128,7 @@ all participants use the same reachable broker/vhost and matching queue names.
 
 | Scenario | `LLM_ORDER` | Internal queue/model | External queue/model | Dependencies |
 |---|---|---|---|---|
-| Homelab, internal first | `internal-llm,external-ai` | `internal-llm.requests` / `local-llm` | `external-ai.requests` / `alibaba:qwen-plus` | Homelab RabbitMQ; both workers |
+| Homelab development | `external-ai` | unused | `external-ai.requests` / `alibaba:qwen-plus` | Homelab RabbitMQ; external-ai worker only |
 | Cloud, both LLMs | `internal-llm,external-ai` | operator-selected queue / cloud internal model | operator-selected queue / provider model | Reachable cloud internal-llm and external-ai consumers |
 | Cloud, external only | `external-ai` | unused | operator-selected queue / `alibaba:qwen-plus` or allowlisted Codex model | external-ai worker only |
 
@@ -162,8 +162,9 @@ workstation IP and paths, with reclaim policy `Retain`. RabbitMQ remains the
 intentional 10 GiB `emptyDir` transport; it has not been moved onto NFS.
 
 After NFS directories and out-of-band Secrets exist, let the existing Argo CD
-Applications reconcile in this order: `rabbitmq`, `internal-llm`, `external-ai`,
-then `tapy`. No direct manifest apply is required.
+Applications reconcile in this order: `rabbitmq`, `external-ai`, then `tapy`.
+The optional `internal-llm` Application is independent of Tapy in the homelab
+development configuration. No direct manifest apply is required.
 
 ## Generic cloud deployment
 

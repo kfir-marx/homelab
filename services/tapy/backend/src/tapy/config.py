@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 LlmBackend = Literal["internal-llm", "external-ai"]
 
@@ -20,7 +20,10 @@ class Settings(BaseSettings):
     internal_llm_model: str = "local-llm"
     external_ai_queue: str = "external-ai.requests"
     external_ai_model: str = "alibaba:qwen-plus"
-    llm_order: tuple[LlmBackend, ...] = ("external-ai", "internal-llm")
+    llm_order: Annotated[tuple[LlmBackend, ...], NoDecode] = (
+        "external-ai",
+        "internal-llm",
+    )
     flights_config_path: Path = Path("/config/flights.json")
     request_timeout_seconds: float = Field(default=120, gt=0, le=300)
     match_threshold: float = Field(default=0.90, ge=0, le=1)
