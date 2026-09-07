@@ -4,12 +4,17 @@ import { useDemo } from "../lib/store";
 import type { Lang } from "../lib/i18n";
 import AgentView from "./AgentView";
 import AgencyView from "./AgencyView";
+import AuthScreen from "./AuthScreen";
 import ChatBot from "./ChatBot";
 import ToastStack from "./ToastStack";
+import { UserInfoPage, UserSettingsPage } from "./UserPages";
 
 export default function AppShell() {
-  const { view, setView, agents, activeAgentId, lang, setLang, t } = useDemo();
-  const me = agents.find((a) => a.id === activeAgentId)!;
+  const { view, setView, agents, activeAgentId, lang, setLang, t, user, loading, logout } = useDemo();
+  const me = agents.find((a) => a.id === activeAgentId);
+
+  if (loading) return <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">Loading Tapy…</div>;
+  if (!user || !me) return <AuthScreen />;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -30,7 +35,7 @@ export default function AppShell() {
           </div>
 
           <ViewToggle
-            current={view}
+            current={view === "agency" ? "agency" : "agent"}
             onChange={setView}
             labels={{ agent: t("nav.agent"), agency: t("nav.agency") }}
           />
@@ -46,23 +51,28 @@ export default function AppShell() {
               <p className="text-xs font-semibold text-slate-900">{me.name}</p>
               <p className="text-[11px] text-slate-500">{t("nav.role")}</p>
             </div>
-            <div
+            <button
+              type="button"
+              onClick={() => setView(view === "profile" ? "agent" : "profile")}
+              aria-label="Open user information"
               className={`flex h-9 w-9 flex-none items-center justify-center rounded-full bg-gradient-to-br ${me.avatarTint} text-xs font-semibold text-white shadow-sm ring-2 ring-white`}
             >
               {me.initials}
-            </div>
+            </button>
+            <button type="button" onClick={() => setView("settings")} className="hidden text-xs font-semibold text-slate-600 hover:text-slate-900 sm:block">Settings</button>
+            <button type="button" onClick={() => void logout()} className="hidden text-xs font-semibold text-slate-400 hover:text-rose-600 sm:block">Sign out</button>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10">
         <div key={view} className="view-fade">
-          {view === "agent" ? <AgentView /> : <AgencyView />}
+          {view === "agent" ? <AgentView /> : view === "agency" ? <AgencyView /> : view === "profile" ? <UserInfoPage /> : <UserSettingsPage />}
         </div>
       </main>
 
       <ToastStack />
-      <ChatBot />
+      {(view === "agent" || view === "agency") && <ChatBot />}
     </div>
   );
 }

@@ -13,11 +13,11 @@ and OAuth callback URIs stable. The backend never accepts mailbox access
 tokens or email bodies from the frontend. The intended flow is:
 
 ```text
-frontend -> create agent -> open official provider consent page
-provider -> OAuth callback -> encrypted refresh token in PostgreSQL
-frontend -> start scan -> Gmail API or Microsoft Graph -> bounded email text
+frontend -> password/Google/Microsoft login -> HttpOnly backend session
+settings -> official mailbox consent page -> encrypted refresh token in PostgreSQL
+provider webhook -> Gmail API or Microsoft Graph -> bounded email text
 matcher -> RabbitMQ -> external-ai
-matcher -> deterministic flight scoring -> function boundary on score > 0.90
+matcher -> per-user deterministic flight scoring -> close flight on score > 0.90
 ```
 
 The LLM may only classify `is_hotel_booking_confirmation` and populate the
@@ -26,40 +26,50 @@ invoke actions. Invalid model output counts as a backend failure and triggers
 the next configured LLM. The homelab development deployment uses only
 `external-ai`, so Tapy startup and readiness do not depend on `internal-llm`.
 
-The current flight source remains `/config/flights.json`. The application calls
-it through a per-agent `FlightRepository` boundary so a future database-backed
-one-to-many agent/flight model does not change mail ingestion, extraction, or
-scoring. Exact location and dates score 1.0; the configured threshold is a
-strict lower bound, so the default action runs only when `score > 0.90`.
+Flights are stored in PostgreSQL and owned by one user. The frontend creates
+them manually for now. Exact location and dates score 1.0; the configured
+threshold is a strict lower bound. A winning match stores a small hotel
+summary, closes the flight for upsell, and notifies connected frontends. If a
+flight already has a hotel match, the backend leaves it unchanged and logs the
+duplicate to standard output.
 
 ## Backend API
 
-`POST /v1/agents` creates an agent and returns its opaque bearer token once.
-The frontend must keep that token out of URLs and browser logs. All
-remaining frontend calls use `Authorization: Bearer <agent token>`.
+The browser uses a Secure, HttpOnly, SameSite=Lax session cookie. Passwords are
+stored using salted scrypt hashes. Google and Microsoft login use the same
+confidential OAuth registrations as mailbox consent, but request only identity
+scopes. Login and mailbox grants remain separate operations.
 
-- `GET /v1/agents/me` returns the agent and connected provider names.
+- `POST /v1/auth/register`, `POST /v1/auth/login`, and `POST /v1/auth/logout`
+  manage regular authentication.
+- `GET /v1/auth/{google|microsoft}/authorization` starts social login.
+- `GET/PATCH /v1/users/me` returns or updates the user profile and connections.
+- `GET/POST /v1/flights` and `PATCH /v1/flights/{id}/status` own the live flight pipeline.
+- `GET /v1/metrics` returns server-derived dashboard metrics.
+- `GET /v1/events` streams invalidations; the frontend also refreshes on focus
+  and every 30 seconds as a recovery path.
 - `POST /v1/mailboxes/gmail/authorization` returns a Google consent URL.
 - `POST /v1/mailboxes/outlook/authorization` returns a Microsoft consent URL.
 - `GET /v1/oauth/{provider}/callback` consumes the one-time OAuth state and
-  stores the encrypted refresh token.
+  stores the encrypted refresh token and registers a renewable provider watch.
 - `POST /v1/scans` with `{"provider":"gmail"}` or `{"provider":"outlook"}`
-  fetches and analyzes up to the configured message limit.
+  remains available for manual recovery/testing.
+- `POST /v1/webhooks/gmail` accepts Google Pub/Sub pushes and
+  `POST /v1/webhooks/outlook` accepts Microsoft Graph notifications.
 
-OAuth state is random, one-time, database-backed, and expires after ten
-minutes. A mailbox account can belong to only one agent. Agent-token creation
-is deliberately a minimal first-iteration identity boundary; replace it with
-the eventual frontend's login/session system before a public multi-user launch.
+OAuth state is random, one-time, database-backed, purpose-bound, and expires
+after ten minutes. A mailbox account can belong to only one user. The old
+`/v1/agents` bearer-token endpoints remain only for development compatibility.
 
-The database retains agent identities, encrypted provider refresh tokens,
-mailbox identity, processed provider message IDs, and small match summaries.
+The database retains users, login identities and sessions, per-user flights,
+encrypted provider refresh tokens, renewable webhook state, processed provider
+message IDs, and small match summaries.
 It never retains access tokens or message bodies. In the homelab overlay the
 PostgreSQL PV is hard bound to the permanent critical NFS tier with `Retain`;
 cloud uses either a dynamically provisioned retained PVC or managed PostgreSQL.
 
-The checked-in frontend is the partner/investor demo used as the POC starting
-point. Its business logic and mock-data behavior are unchanged in this
-deployment pass. Its existing server actions call Twilio and Gemini directly
+The frontend has no seeded business data. Flights, statuses, user data, and
+metrics come from the backend. Its existing server actions call Twilio and Gemini directly
 from the Next.js server; their credentials are never exposed as
 `NEXT_PUBLIC_*` values.
 
@@ -94,11 +104,20 @@ Update `PUBLIC_BASE_URL` and both provider redirect registrations together if
 the hostname changes. Keep Cloudflare Access disabled on the callback/API
 hostname because the provider and frontend must reach it directly.
 
+For Gmail push, create a Google Cloud Pub/Sub topic, grant Gmail permission to
+publish to it, set `GMAIL_PUBSUB_TOPIC` to its full
+`projects/<project>/topics/<topic>` name, and configure a push subscription to
+`/v1/webhooks/gmail?token=<WEBHOOK_VERIFICATION_TOKEN>`. Gmail watches are
+renewed by Tapy. Microsoft Graph subscriptions point directly to
+`/v1/webhooks/outlook`, carry a per-mailbox `clientState`, and are renewed by
+Tapy. `WEBHOOK_PUBLIC_BASE_URL` may override `PUBLIC_BASE_URL` for callbacks.
+
 ## Configuration and secrets
 
 The ConfigMap owns `LLM_ORDER`, both queue names and model names,
 `MICROSOFT_TENANT`, optional explicit redirect URIs, `MATCH_THRESHOLD`, scan
-limit, Gmail query, public URL, and non-secret OAuth client IDs. The matcher
+limit, Gmail query and Pub/Sub topic, public/webhook URLs, secure-cookie mode,
+and non-secret OAuth client IDs. The matcher
 uses only the durable queues selected by `LLM_ORDER`; it receives RabbitMQ
 credentials, not either LLM's HTTP credential. The homelab overlay selects
 only `external-ai.requests`.
@@ -110,6 +129,7 @@ Create `homelab-assistant/tapy-secrets` with:
 - `OAUTH_TOKEN_ENCRYPTION_KEY` (a Fernet key)
 - `GOOGLE_OAUTH_CLIENT_SECRET`
 - `MICROSOFT_OAUTH_CLIENT_SECRET`
+- `WEBHOOK_VERIFICATION_TOKEN` (strong random value; recommended)
 
 Tapy uses Psycopg 3 for PostgreSQL. The preferred `DATABASE_URL` scheme is
 `postgresql+psycopg://`; plain legacy `postgresql://` and `postgres://` schemes

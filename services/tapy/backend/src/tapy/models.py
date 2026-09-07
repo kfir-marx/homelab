@@ -1,18 +1,23 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+Provider = Literal["gmail", "outlook"]
+AuthProvider = Literal["google", "microsoft"]
+FlightStatus = Literal["open", "upsold", "declined", "past"]
+
+
 class Destination(StrictModel):
     city: str = Field(min_length=1, max_length=100)
-    country: str = Field(min_length=1, max_length=100)
+    country: str = Field(default="", max_length=100)
     airport_codes: list[str] = Field(default_factory=list, max_length=10)
     aliases: list[str] = Field(default_factory=list, max_length=20)
 
@@ -24,7 +29,7 @@ class Destination(StrictModel):
 
 class Flight(StrictModel):
     id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
-    label: str = Field(min_length=1, max_length=120)
+    label: str = Field(min_length=1, max_length=160)
     arrival_date: date
     departure_date: date
     destination: Destination
@@ -36,9 +41,61 @@ class Flight(StrictModel):
         return self
 
 
+class FlightView(StrictModel):
+    id: str
+    booking_ref: str = Field(min_length=1, max_length=64)
+    passenger_name: str = Field(min_length=1, max_length=160)
+    party_size: int = Field(default=1, ge=1, le=99)
+    email: str = Field(default="", max_length=320)
+    phone: str = Field(default="", max_length=50)
+    origin: str = Field(min_length=1, max_length=10)
+    origin_city: str = Field(min_length=1, max_length=100)
+    destination_code: str = Field(min_length=1, max_length=10)
+    destination: Destination
+    arrival_date: date
+    departure_date: date
+    flight_cost_usd: float = Field(default=0, ge=0)
+    hotel_cost_usd: float = Field(default=0, ge=0)
+    user_id: str
+    status: FlightStatus
+    closed_reason: str | None = None
+    matched_hotel: dict[str, object] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlightCreate(StrictModel):
+    booking_ref: str | None = Field(default=None, max_length=64)
+    passenger_name: str = Field(min_length=1, max_length=160)
+    party_size: int = Field(default=1, ge=1, le=99)
+    email: str = Field(default="", max_length=320)
+    phone: str = Field(default="", max_length=50)
+    origin: str = Field(min_length=1, max_length=10)
+    origin_city: str = Field(min_length=1, max_length=100)
+    destination_code: str = Field(min_length=1, max_length=10)
+    destination_city: str = Field(min_length=1, max_length=100)
+    destination_country: str = Field(default="", max_length=100)
+    arrival_date: date
+    departure_date: date
+    flight_cost_usd: float = Field(default=0, ge=0)
+    hotel_cost_usd: float = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def dates_are_ordered(self) -> FlightCreate:
+        if self.departure_date < self.arrival_date:
+            raise ValueError("departure_date must not precede arrival_date")
+        return self
+
+
+class FlightStatusUpdate(StrictModel):
+    status: Literal["open", "upsold", "declined"]
+
+
 class FlightConfiguration(StrictModel):
+    """Legacy import format retained for one-off development data imports."""
+
     version: int = Field(ge=1)
-    flights: list[Flight] = Field(min_length=1, max_length=100)
+    flights: list[Flight] = Field(default_factory=list, max_length=1000)
 
     @model_validator(mode="after")
     def flight_ids_are_unique(self) -> FlightConfiguration:
@@ -96,7 +153,39 @@ class AnalysisResponse(StrictModel):
     best_score: float = Field(ge=0, le=1)
 
 
-Provider = Literal["gmail", "outlook"]
+class RegisterRequest(StrictModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+    password: str = Field(min_length=10, max_length=256)
+
+
+class LoginRequest(StrictModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=256)
+
+
+class UserUpdate(StrictModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    language: Literal["en", "he"] | None = None
+
+
+class MailboxView(StrictModel):
+    provider: Provider
+    email_address: str
+    webhook_active: bool
+
+
+class UserView(StrictModel):
+    id: str
+    name: str
+    email: str
+    language: Literal["en", "he"]
+    auth_providers: list[str]
+    mailboxes: list[MailboxView]
+
+
+class AuthResult(StrictModel):
+    user: UserView
 
 
 class AgentCreated(StrictModel):
@@ -126,3 +215,15 @@ class ScanResult(StrictModel):
     confirmations_found: int
     matches_found: int
     results: list[AnalysisResponse]
+
+
+class MetricsView(StrictModel):
+    total_flights: int
+    upsold_count: int
+    open_count: int
+    declined_count: int
+    hotel_on_file_count: int
+    closing_rate: float
+    net_profit: float
+    potential_profit: float
+    total_hotel_revenue: float

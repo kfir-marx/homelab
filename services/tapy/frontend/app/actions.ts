@@ -16,8 +16,6 @@ export type UpsellResult =
   | { ok: false; error: string };
 
 const TWILIO_FROM = "whatsapp:+14155238886";
-const LANDING_PAGE_BASE = "https://tapy.example.com/hotels";
-
 export async function sendUpsellWhatsApp(input: UpsellInput): Promise<UpsellResult> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;

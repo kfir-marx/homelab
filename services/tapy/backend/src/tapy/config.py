@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Annotated, Literal
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from cryptography.fernet import Fernet
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     microsoft_oauth_client_secret: SecretStr = SecretStr("")
     microsoft_tenant: str = "common"
     oauth_state_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+    session_days: int = Field(default=30, ge=1, le=365)
+    secure_cookies: bool = False
+    gmail_pubsub_topic: str = ""
+    webhook_public_base_url: str = ""
+    webhook_verification_token: SecretStr = SecretStr("")
+    webhook_renewal_seconds: int = Field(default=21_600, ge=300, le=86_400)
 
     @field_validator("llm_order", mode="before")
     @classmethod
@@ -67,7 +73,12 @@ class Settings(BaseSettings):
             raise ValueError("value must not be empty")
         return value.strip()
 
-    @field_validator("public_base_url", "google_oauth_redirect_uri", "microsoft_oauth_redirect_uri")
+    @field_validator(
+        "public_base_url",
+        "google_oauth_redirect_uri",
+        "microsoft_oauth_redirect_uri",
+        "webhook_public_base_url",
+    )
     @classmethod
     def http_url(cls, value: str) -> str:
         if not value:
@@ -106,6 +117,8 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "oauth_token_encryption_key must be a valid Fernet key when OAuth is enabled"
                 ) from exc
+        if self.gmail_pubsub_topic and not self.webhook_verification_token.get_secret_value():
+            raise ValueError("webhook_verification_token is required when Gmail Pub/Sub is enabled")
         return self
 
     def oauth_redirect_uri(self, provider: Literal["gmail", "outlook"]) -> str:
@@ -114,6 +127,12 @@ class Settings(BaseSettings):
         if provider == "outlook" and self.microsoft_oauth_redirect_uri:
             return self.microsoft_oauth_redirect_uri
         return f"{self.public_base_url}/v1/oauth/{provider}/callback"
+
+    def webhook_url(self, provider: Literal["gmail", "outlook"]) -> str:
+        base = self.webhook_public_base_url or self.public_base_url
+        url = f"{base.rstrip('/')}/v1/webhooks/{provider}"
+        token = self.webhook_verification_token.get_secret_value()
+        return f"{url}?token={quote(token, safe='')}" if token else url
 
     def require_rabbitmq(self) -> None:
         value = self.rabbitmq_url.get_secret_value().strip()

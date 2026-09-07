@@ -16,6 +16,11 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+The UI expects `/v1/*` on the same origin; Next.js proxies those requests to
+the private backend service. Authentication uses an HttpOnly session cookie.
+Flights and metrics are loaded from the backend, updated optimistically, and
+reconciled through server-sent events plus periodic/focus refreshes.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

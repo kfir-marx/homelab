@@ -59,6 +59,12 @@ spec:
             - name: MATCHER_MICROSOFT_OAUTH_CLIENT_SECRET
               valueFrom:
                 secretKeyRef: {name: tapy-secrets, key: MICROSOFT_OAUTH_CLIENT_SECRET}
+            - name: MATCHER_WEBHOOK_VERIFICATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tapy-secrets
+                  key: WEBHOOK_VERIFICATION_TOKEN
+                  optional: true
             - name: MATCHER_GOOGLE_OAUTH_CLIENT_ID
               valueFrom:
                 configMapKeyRef: {name: tapy, key: GOOGLE_OAUTH_CLIENT_ID}
@@ -77,6 +83,15 @@ spec:
             - name: MATCHER_MICROSOFT_OAUTH_REDIRECT_URI
               valueFrom:
                 configMapKeyRef: {name: tapy, key: MICROSOFT_OAUTH_REDIRECT_URI}
+            - name: MATCHER_GMAIL_PUBSUB_TOPIC
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: GMAIL_PUBSUB_TOPIC}
+            - name: MATCHER_WEBHOOK_PUBLIC_BASE_URL
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: WEBHOOK_PUBLIC_BASE_URL}
+            - name: MATCHER_SECURE_COOKIES
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: SECURE_COOKIES}
             - name: MATCHER_LLM_ORDER
               valueFrom:
                 configMapKeyRef: {name: tapy, key: LLM_ORDER}

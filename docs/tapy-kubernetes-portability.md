@@ -4,7 +4,7 @@
 
 Tapy keeps the same runtime architecture in development and
 production: the frontend serves the UI and proxies `/v1/*` to the private
-matcher, which stores agents and encrypted mailbox grants in
+backend, which stores users, sessions, per-user flights, and encrypted mailbox grants in
 PostgreSQL, publishes OpenAI-compatible RPC requests through RabbitMQ, and
 tries the configured internal/external LLM queues in order. `external-ai`
 retains its authenticated HTTP job API, durable PostgreSQL job state, RabbitMQ
@@ -74,6 +74,12 @@ redirects normally end in `/v1/oauth/gmail/callback` and
 Microsoft. Set `MICROSOFT_TENANT` to `common`, an organization tenant ID, or
 another tenant value appropriate for the registration.
 
+Set `WEBHOOK_PUBLIC_BASE_URL` to the same externally reachable origin (or a
+dedicated webhook origin). Set `GMAIL_PUBSUB_TOPIC` only after creating the
+topic and its push subscription. Include a strong `WEBHOOK_VERIFICATION_TOKEN`
+in the backend Secret and in the Gmail push URL; Outlook additionally validates
+the per-subscription `clientState`.
+
 Cloud PVCs use `REPLACE_WITH_STORAGE_CLASS`. Use a class backed by storage with
 the durability, zone topology, expansion, snapshot, and recovery behavior
 required for production. Its reclaim policy must be `Retain`; the RabbitMQ
@@ -106,9 +112,9 @@ Never commit a Secret manifest with real or fabricated values.
 
 | Namespace / Secret | Required keys |
 |---|---|
-| `tapy/tapy-secrets` (cloud) | `DATABASE_URL`, `RABBITMQ_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`; add `POSTGRES_PASSWORD` for in-cluster PostgreSQL |
+| `tapy/tapy-secrets` (cloud) | `DATABASE_URL`, `RABBITMQ_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`, `WEBHOOK_VERIFICATION_TOKEN`; add `POSTGRES_PASSWORD` for in-cluster PostgreSQL |
 | `tapy/tapy-frontend-secrets` (cloud) | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `AGENT_PHONE_NUMBER`, `GEMINI_API_KEY` |
-| `homelab-assistant/tapy-secrets` | `DATABASE_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`, `POSTGRES_PASSWORD` |
+| `homelab-assistant/tapy-secrets` | `DATABASE_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`, `WEBHOOK_VERIFICATION_TOKEN`, `POSTGRES_PASSWORD` |
 | `homelab-assistant/tapy-frontend-secrets` | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `AGENT_PHONE_NUMBER`, `GEMINI_API_KEY` |
 | `homelab-assistant/homelab-assistant-secrets` | `RABBITMQ_URL` (the homelab overlay preserves this existing identity) |
 | `external-ai/external-ai-secrets` | `DATABASE_URL`, `RABBITMQ_URL`, `HOMELAB_ASSISTANT_TOKEN`, `JOB_ASSISTANT_TOKEN`; `POSTGRES_PASSWORD` for in-cluster PostgreSQL; `ALIBABA_API_KEY` when Model Studio is enabled |
@@ -177,8 +183,8 @@ development configuration. No direct manifest apply is required.
    install the two Applications under `kubernetes/apps/cloud/managed`.
 5. For external-ai-only inference, patch matcher `LLM_ORDER` to `external-ai`.
 6. Configure Ingress selectors, DNS, TLS, provider endpoints, OAuth apps,
-   flight data, and any cloud internal-llm worker.
-7. Verify `/health/ready`, create a test agent, complete both consent flows,
+   webhook delivery, and any cloud internal-llm worker.
+7. Verify `/health/ready`, create a test user, complete both consent flows,
    and exercise a benign mailbox scan. Readiness reports database, RabbitMQ,
    and each configured LLM queue connection without exposing credentials.
 

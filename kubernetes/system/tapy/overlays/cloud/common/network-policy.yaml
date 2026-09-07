@@ -32,6 +32,7 @@ spec:
             dns: [{matchPattern: "*"}]
     - toFQDNs:
         - {matchName: accounts.google.com}
+        - {matchName: openidconnect.googleapis.com}
         - {matchName: oauth2.googleapis.com}
         - {matchName: gmail.googleapis.com}
         - {matchName: login.microsoftonline.com}

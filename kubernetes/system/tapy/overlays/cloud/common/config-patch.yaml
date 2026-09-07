@@ -9,6 +9,8 @@ data:
   PUBLIC_BASE_URL: https://tapy.example.invalid
   GOOGLE_OAUTH_REDIRECT_URI: https://tapy.example.invalid/v1/oauth/gmail/callback
   MICROSOFT_OAUTH_REDIRECT_URI: https://tapy.example.invalid/v1/oauth/outlook/callback
+  WEBHOOK_PUBLIC_BASE_URL: https://tapy.example.invalid
+  GMAIL_PUBSUB_TOPIC: ""
   LLM_ORDER: internal-llm,external-ai
   INTERNAL_LLM_QUEUE: internal-llm.requests
   INTERNAL_LLM_MODEL: REPLACE_WITH_INTERNAL_MODEL

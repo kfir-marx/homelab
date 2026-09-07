@@ -24,6 +24,14 @@ export default function AddFlightModal({ open, onClose }: Props) {
   const [ret, setRet] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [bookingRef, setBookingRef] = useState("");
+  const [originCode, setOriginCode] = useState("");
+  const [destinationCode, setDestinationCode] = useState("");
+  const [destinationCountry, setDestinationCountry] = useState("");
+  const [partySize, setPartySize] = useState("1");
+  const [flightCost, setFlightCost] = useState("0");
+  const [hotelValue, setHotelValue] = useState("0");
+  const [submitting, setSubmitting] = useState(false);
 
   function resetForm() {
     setName("");
@@ -33,6 +41,13 @@ export default function AddFlightModal({ open, onClose }: Props) {
     setRet("");
     setEmail("");
     setPhone("");
+    setBookingRef("");
+    setOriginCode("");
+    setDestinationCode("");
+    setDestinationCountry("");
+    setPartySize("1");
+    setFlightCost("0");
+    setHotelValue("0");
   }
 
   useEffect(() => {
@@ -80,32 +95,47 @@ export default function AddFlightModal({ open, onClose }: Props) {
       ret.length > 0 &&
       depart <= ret &&
       email.trim().includes("@") &&
-      phone.trim().length > 0,
-    [name, origin, destination, depart, ret, email, phone],
+      phone.trim().length > 0 &&
+      originCode.trim().length > 0 &&
+      destinationCode.trim().length > 0 &&
+      Number(partySize) >= 1 &&
+      Number(flightCost) >= 0 &&
+      Number(hotelValue) >= 0,
+    [name, origin, destination, depart, ret, email, phone, originCode, destinationCode, partySize, flightCost, hotelValue],
   );
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
-    const f = addFlight({
-      passengerName: name.trim(),
-      originCity: origin.trim(),
-      destinationCity: destination.trim(),
-      departureDate: depart,
-      returnDate: ret,
-      email: email.trim(),
-      phone: phone.trim(),
-    });
-    pushToast({
-      tone: "success",
-      title: t("newFlight.toast.title"),
-      body: t("newFlight.toast.body", {
-        name: f.passengerName,
-        origin: f.originCity,
-        destination: f.destinationCity,
-      }),
-    });
-    onClose();
+    setSubmitting(true);
+    try {
+      const f = await addFlight({
+        bookingRef: bookingRef.trim() || undefined,
+        passengerName: name.trim(),
+        partySize: Number(partySize),
+        origin: originCode.trim().toUpperCase(),
+        originCity: origin.trim(),
+        destination: destinationCode.trim().toUpperCase(),
+        destinationCity: destination.trim(),
+        destinationCountry: destinationCountry.trim(),
+        departureDate: depart,
+        returnDate: ret,
+        email: email.trim(),
+        phone: phone.trim(),
+        flightCostUsd: Number(flightCost),
+        hotelCostUsd: Number(hotelValue),
+      });
+      pushToast({
+        tone: "success",
+        title: t("newFlight.toast.title"),
+        body: t("newFlight.toast.body", { name: f.passengerName, origin: f.originCity, destination: f.destinationCity }),
+      });
+      onClose();
+    } catch (reason) {
+      pushToast({ tone: "error", title: "Could not add flight", body: reason instanceof Error ? reason.message : "Try again." });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (!open && !mounted) return null;
@@ -172,6 +202,12 @@ export default function AddFlightModal({ open, onClose }: Props) {
 
           <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Booking reference (optional)">
+                <input type="text" value={bookingRef} onChange={(e) => setBookingRef(e.target.value)} placeholder="e.g. TPY-9421" className={INPUT_CLASS} />
+              </Field>
+              <Field label="Travelers">
+                <input type="number" min="1" max="99" required value={partySize} onChange={(e) => setPartySize(e.target.value)} className={INPUT_CLASS} />
+              </Field>
               <Field label={t("newFlight.field.name")} className="sm:col-span-2">
                 <input
                   ref={firstInputRef}
@@ -202,6 +238,15 @@ export default function AddFlightModal({ open, onClose }: Props) {
                   placeholder={t("newFlight.placeholder.to")}
                   className={INPUT_CLASS}
                 />
+              </Field>
+              <Field label="Origin airport code">
+                <input type="text" maxLength={10} required value={originCode} onChange={(e) => setOriginCode(e.target.value)} placeholder="JFK" className={INPUT_CLASS} />
+              </Field>
+              <Field label="Destination airport code">
+                <input type="text" maxLength={10} required value={destinationCode} onChange={(e) => setDestinationCode(e.target.value)} placeholder="LHR" className={INPUT_CLASS} />
+              </Field>
+              <Field label="Destination country" className="sm:col-span-2">
+                <input type="text" value={destinationCountry} onChange={(e) => setDestinationCountry(e.target.value)} placeholder="United Kingdom" className={INPUT_CLASS} />
               </Field>
               <Field label={t("newFlight.field.depart")}>
                 <input
@@ -242,6 +287,12 @@ export default function AddFlightModal({ open, onClose }: Props) {
                   className={INPUT_CLASS}
                 />
               </Field>
+              <Field label="Flight cost (USD)">
+                <input type="number" min="0" step="0.01" required value={flightCost} onChange={(e) => setFlightCost(e.target.value)} className={INPUT_CLASS} />
+              </Field>
+              <Field label="Expected hotel value (USD)">
+                <input type="number" min="0" step="0.01" required value={hotelValue} onChange={(e) => setHotelValue(e.target.value)} className={INPUT_CLASS} />
+              </Field>
             </div>
           </div>
 
@@ -256,7 +307,7 @@ export default function AddFlightModal({ open, onClose }: Props) {
               </button>
               <button
                 type="submit"
-                disabled={!canSubmit}
+                disabled={!canSubmit || submitting}
                 className="flex-[1.6] rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-3 text-sm font-semibold text-white shadow-[0_8px_24px_-8px_rgba(234,88,12,0.6)] transition hover:from-amber-400 hover:to-orange-400 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:from-amber-500 disabled:hover:to-orange-500"
               >
                 <span className="inline-flex items-center justify-center gap-2">

@@ -70,7 +70,13 @@ export default function FlightDetailModal({ flight, onClose }: Props) {
   async function handleYes() {
     if (working) return;
     setWorking("yes");
-    markUpsold(f.id);
+    try {
+      await markUpsold(f.id);
+    } catch (reason) {
+      setWorking(null);
+      pushToast({ tone: "error", title: "Could not update flight", body: reason instanceof Error ? reason.message : "Try again." });
+      return;
+    }
     pushToast({
       tone: "success",
       title: t("toast.upsold.title"),
@@ -97,10 +103,16 @@ export default function FlightDetailModal({ flight, onClose }: Props) {
     });
   }
 
-  function handleNo() {
+  async function handleNo() {
     if (working) return;
     setWorking("no");
-    markDeclined(f.id);
+    try {
+      await markDeclined(f.id);
+    } catch (reason) {
+      setWorking(null);
+      pushToast({ tone: "error", title: "Could not update flight", body: reason instanceof Error ? reason.message : "Try again." });
+      return;
+    }
     pushToast({
       tone: "info",
       title: t("toast.declined.title"),
@@ -109,10 +121,16 @@ export default function FlightDetailModal({ flight, onClose }: Props) {
     onClose();
   }
 
-  function handleRestore() {
+  async function handleRestore() {
     if (working) return;
     setWorking("restore");
-    markOpen(f.id);
+    try {
+      await markOpen(f.id);
+    } catch (reason) {
+      setWorking(null);
+      pushToast({ tone: "error", title: "Could not update flight", body: reason instanceof Error ? reason.message : "Try again." });
+      return;
+    }
     pushToast({
       tone: "info",
       title: t("toast.restored.title"),

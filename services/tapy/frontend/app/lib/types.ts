@@ -17,6 +17,8 @@ export type Flight = {
   hotelCostUsd: number;
   agentId: string;
   status: FlightStatus;
+  closedReason?: string | null;
+  matchedHotel?: Record<string, unknown> | null;
 };
 
 export type Agent = {
@@ -27,4 +29,19 @@ export type Agent = {
   avatarTint: string;
 };
 
-export type View = "agent" | "agency";
+export type Mailbox = {
+  provider: "gmail" | "outlook";
+  emailAddress: string;
+  webhookActive: boolean;
+};
+
+export type User = {
+  id: string;
+  name: string;
+  email: string;
+  language: "en" | "he";
+  authProviders: string[];
+  mailboxes: Mailbox[];
+};
+
+export type View = "agent" | "agency" | "profile" | "settings";

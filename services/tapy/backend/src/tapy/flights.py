@@ -7,10 +7,16 @@ from datetime import date
 from pathlib import Path
 from typing import Protocol
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
+
+from .database import FlightRecord
 from .models import (
+    Destination,
     Flight,
     FlightConfiguration,
     FlightMatch,
+    FlightView,
     HotelBooking,
     ScoreComponents,
 )
@@ -33,6 +39,69 @@ class ConfigFlightRepository:
     def for_agent(self, agent_id: str) -> Sequence[Flight]:
         del agent_id
         return self.configuration.flights
+
+
+def record_to_flight(record: FlightRecord) -> Flight:
+    return Flight(
+        id=record.id,
+        label=f"{record.origin}–{record.destination_code}: {record.passenger_name}",
+        arrival_date=record.arrival_date,
+        departure_date=record.departure_date,
+        destination=Destination(
+            city=record.destination_city,
+            country=record.destination_country,
+            airport_codes=[record.destination_code],
+        ),
+    )
+
+
+def record_to_view(record: FlightRecord) -> FlightView:
+    if record.is_open_for_upsell:
+        status = "open"
+    elif record.closed_reason == "upsold":
+        status = "upsold"
+    elif record.closed_reason == "declined":
+        status = "declined"
+    else:
+        status = "past"
+    return FlightView(
+        id=record.id,
+        booking_ref=record.booking_ref,
+        passenger_name=record.passenger_name,
+        party_size=record.party_size,
+        email=record.email,
+        phone=record.phone,
+        origin=record.origin,
+        origin_city=record.origin_city,
+        destination_code=record.destination_code,
+        destination=Destination(
+            city=record.destination_city,
+            country=record.destination_country,
+            airport_codes=[record.destination_code],
+        ),
+        arrival_date=record.arrival_date,
+        departure_date=record.departure_date,
+        flight_cost_usd=record.flight_cost_usd,
+        hotel_cost_usd=record.hotel_cost_usd,
+        user_id=record.user_id,
+        status=status,
+        closed_reason=record.closed_reason,
+        matched_hotel=record.matched_hotel,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+class DatabaseFlightRepository:
+    def __init__(self, factory: sessionmaker[Session]) -> None:
+        self._factory = factory
+
+    def for_agent(self, agent_id: str) -> Sequence[Flight]:
+        with self._factory() as session:
+            records = session.scalars(
+                select(FlightRecord).where(FlightRecord.user_id == agent_id)
+            ).all()
+        return [record_to_flight(record) for record in records]
 
 
 def _normalized(value: str | None) -> str:

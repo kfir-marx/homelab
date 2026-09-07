@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tapy"
-version = "0.2.0"
+version = "0.3.0"
 description = "OAuth mailbox ingestion, queued hotel extraction, and deterministic matching"
 requires-python = ">=3.14.7"
 dependencies = [
   "aio-pika>=10.0.1,<11",
   "cryptography>=50.0.1,<51",
   "fastapi>=0.141.1,<1",
+  "email-validator>=2.3.0,<3",
   "httpx>=0.28.1,<1",
   "psycopg[binary]>=3.3.4,<4",
   "pydantic>=2.13.5,<3",

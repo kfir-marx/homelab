@@ -23,7 +23,7 @@ metadata:
   name: llm-inference
   namespace: homelab-assistant
 spec:
-  replicas: 1
+  replicas: 0
   strategy:
     type: Recreate
   selector:
