@@ -7,8 +7,9 @@ cross-service configuration matrix are documented in
 ## Contract
 
 The `rabbitmq` Argo CD Application is the cluster-wide AMQP 0-9-1 transport.
-Any namespaced pod may reach `rabbitmq.rabbitmq.svc.cluster.local:5672`, but
-every client must authenticate. The management port is not admitted by network
+Selected namespaced clients may reach
+`rabbitmq.rabbitmq.svc.cluster.local:5672`, but every client must authenticate.
+The management port is not admitted by network
 policy; Prometheus alone can reach the dedicated metrics port `15692`.
 
 Applications own their exchanges, queues, retry/dead-letter policy, schemas,
@@ -37,16 +38,27 @@ endpoint from `RABBITMQ_URL`.
 
 Create `rabbitmq/rabbitmq-secrets` with strong generated values for `username`,
 `password`, and `erlang-cookie`, then capture it with the repository's encrypted
-secret workflow. The initial user exists to bootstrap administration. Create an
-`internal-llm` application user with permissions for the `homelab` vhost and
-store its AMQP URL as `RABBITMQ_URL` in
-`homelab-assistant/homelab-assistant-secrets`. Other services receive their own
-credentials in their own namespace.
+secret workflow. The initial user exists to bootstrap administration. Other
+services receive their own credentials in their own namespace. Tapy does not
+use the `internal-llm` identity: it uses the dedicated `tapy` user and keeps its
+URL in `tapy/tapy-secrets`.
 
-Tapy publishes OpenAI-compatible RPC envelopes directly to
+Tapy declares the configured durable request queue, publishes
+OpenAI-compatible RPC envelopes through the default exchange to
 `internal-llm.requests` and `external-ai.requests` and consumes replies from
-server-named exclusive callback queues. Its identity needs write permission on
-both request queues and configure/read permission only for its reply queues.
+server-named exclusive callback queues. Its exact `homelab` vhost permissions
+are:
+
+```text
+configure: ^(internal-llm\.requests|external-ai\.requests|amq\.gen-.*)$
+write:     ^$
+read:      ^amq\.gen-.*$
+```
+
+The empty write regex matches only RabbitMQ's nameless default exchange; the
+routing key is still one of the queues Tapy can configure. Tapy has no
+administrator tag and cannot consume either request queue.
+
 The external-ai worker identity consumes `external-ai.requests` and publishes
 to callback queues. Both identities must use the same application vhost as the
 internal-llm queue (currently `homelab`). Keep these permissions narrower than
@@ -54,8 +66,13 @@ the RabbitMQ bootstrap administrator.
 
 Credentials configured through `RABBITMQ_DEFAULT_*` take effect only against a
 blank node. With transient storage every recreated Pod is blank, so keep the
-encrypted bootstrap values stable. Rotate application credentials through the
-management CLI/API and update their encrypted client Secret together.
+encrypted bootstrap values stable. A post-start reconciler in the homelab
+StatefulSet recreates or updates the `tapy` user from the encrypted
+`rabbitmq/rabbitmq-tapy-user` Secret and reapplies the restricted permissions
+after every container start. This deliberately covers only Tapy; the existing
+`external-ai` identity is still an operational durability gap after a blank Pod
+replacement. Do not restart or replace RabbitMQ until that identity has also
+been restored manually or given equivalent declarative bootstrap coverage.
 
 ## Verification
 
@@ -76,6 +93,8 @@ kubectl -n rabbitmq rollout status statefulset/rabbitmq
 kubectl -n rabbitmq get pod,service,networkpolicy
 kubectl -n rabbitmq exec statefulset/rabbitmq -- rabbitmq-diagnostics -q check_running
 kubectl -n rabbitmq exec statefulset/rabbitmq -- rabbitmqctl list_vhosts
+kubectl -n rabbitmq exec statefulset/rabbitmq -- \
+  rabbitmqctl list_permissions --vhost homelab
 kubectl -n rabbitmq exec statefulset/rabbitmq -- rabbitmqctl list_queues \
   name messages_ready messages_unacknowledged consumers
 ```

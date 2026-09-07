@@ -15,5 +15,5 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: tapy
+                name: tapy-frontend
                 port: {name: http}

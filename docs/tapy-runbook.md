@@ -7,8 +7,10 @@ deployment order, and migration steps are documented in
 ## Runtime design
 
 Tapy is deployed as separate frontend and backend workloads. The public
-`tapy` Service sends traffic to the Next.js frontend, which proxies `/v1/*`
-to the private `tapy-backend` Service. This keeps the existing public hostname
+`tapy-frontend` Service on port 3000 sends traffic to the Next.js frontend,
+which proxies `/v1/*` to the private `tapy-backend` Service on port 8080. Both
+workloads and their PostgreSQL resources run only in the `tapy` namespace.
+This keeps the existing public hostname
 and OAuth callback URIs stable. The backend never accepts mailbox access
 tokens or email bodies from the frontend. The intended flow is:
 
@@ -122,10 +124,11 @@ uses only the durable queues selected by `LLM_ORDER`; it receives RabbitMQ
 credentials, not either LLM's HTTP credential. The homelab overlay selects
 only `external-ai.requests`.
 
-Create `homelab-assistant/tapy-secrets` with:
+Create `tapy/tapy-secrets` with:
 
 - `POSTGRES_PASSWORD`
 - `DATABASE_URL`
+- `RABBITMQ_URL`
 - `OAUTH_TOKEN_ENCRYPTION_KEY` (a Fernet key)
 - `GOOGLE_OAUTH_CLIENT_SECRET`
 - `MICROSOFT_OAUTH_CLIENT_SECRET`
@@ -135,7 +138,7 @@ Tapy uses Psycopg 3 for PostgreSQL. The preferred `DATABASE_URL` scheme is
 `postgresql+psycopg://`; plain legacy `postgresql://` and `postgres://` schemes
 are normalized to the installed Psycopg driver at startup.
 
-Create `homelab-assistant/tapy-frontend-secrets` with:
+Create `tapy/tapy-frontend-secrets` with:
 
 - `TWILIO_ACCOUNT_SID`
 - `TWILIO_AUTH_TOKEN`
@@ -146,34 +149,36 @@ The local source values belong in the repository-level gitignored `.env`; the
 same names are documented in `.env-template`. Capture the updated encrypted
 environment bundle with `scripts/secrets.sh capture-env`. After creating the
 Kubernetes Secret through the trusted local workflow, capture it with
-`scripts/secrets.sh capture-k8s homelab-assistant/tapy-frontend-secrets`.
+`scripts/secrets.sh capture-k8s tapy/tapy-frontend-secrets`.
 
 Generate the Fernet value with
 `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`
 on a trusted machine. Never rotate it without re-encrypting every stored OAuth
-token. Add queue permissions for the matcher RabbitMQ identity to publish to
-both request queues and use server-named reply queues. Capture the Secret with
-`scripts/secrets.sh capture-k8s homelab-assistant/tapy-secrets`.
+token. Tapy's dedicated RabbitMQ user is `tapy`. Its AMQP URL uses the
+`homelab` vhost and lives only in `tapy/tapy-secrets`. The broker bootstrap
+reconciles that user from `rabbitmq/rabbitmq-tapy-user` after every blank-pod
+start with configure permission for the two request queues and `amq.gen-*`,
+write permission only for the default exchange, and read permission only for
+`amq.gen-*`. Capture both Secrets with
+`scripts/secrets.sh capture-k8s tapy/tapy-secrets rabbitmq/rabbitmq-tapy-user`.
 
 Before sync, use the Ansible workstation play to create
 `/mnt/storage2-bulk/tapy/postgres`; do not create or alter the
 filesystem itself. Also add `RABBITMQ_URL` and `ALIBABA_API_KEY` to
 `external-ai/external-ai-secrets` and recapture that Secret.
 
-## Rename cutover
+## Namespace cutover
 
-The rename changes the Argo CD Application, Kubernetes workload and storage
-object names, Secret name, container image repository, PostgreSQL database and
-role, retained NFS directory, public hostname, cloud namespace, and cloud
-network-policy labels together. Before the first sync, publish the
-`ghcr.io/kfir-marx/tapy` and `ghcr.io/kfir-marx/tapy-frontend` images, create
-and capture both Tapy Secrets while
-preserving the existing OAuth encryption key, and complete an authorized
-host-side PostgreSQL data migration into `/mnt/storage2-bulk/tapy/postgres`.
-Provision `tapy.547600.xyz` in DNS and the Cloudflare Tunnel, and update the
-Google and Microsoft OAuth registrations to use the Tapy callback URLs.
-Keep the superseded retained volume and application resources until the Tapy
-API, mailbox grants, and processed-message history have been verified.
+The homelab Application targets the dedicated `tapy` namespace. Its workload
+names are `tapy-backend` and `tapy-frontend`; its Services have the same names.
+The namespace migration reuses `/mnt/storage2-bulk/tapy/postgres` through the
+new retained `tapy-postgres-tapy-pv`. Stop the old PostgreSQL writer before
+binding or starting the new one, and never run both against that directory.
+Keep the old namespace, PVC, and `tapy-postgres-pv` until the new API, mailbox
+grants, and processed-message history have been verified. The new database URL
+must target `tapy-postgres.tapy.svc.cluster.local` while preserving the existing
+database password and OAuth encryption key exactly. The Cloudflare Tunnel
+origin is `http://tapy-frontend.tapy.svc:3000`.
 
 ## Verification and rollout
 
@@ -189,6 +194,7 @@ docker build services/tapy/frontend
 kubectl kustomize kubernetes/system/tapy >/tmp/tapy.yaml
 kubectl kustomize kubernetes/system/tapy/overlays/cloud/in-cluster >/tmp/tapy-cloud.yaml
 kubectl kustomize kubernetes/system/tapy/overlays/cloud/managed >/tmp/tapy-managed.yaml
+kubectl create --dry-run=client --validate=false -f /tmp/tapy.yaml -o name
 ```
 
 An authorized rollout must converge the workstation directory first, then
@@ -196,7 +202,10 @@ RabbitMQ, external-ai, and finally tapy. The optional internal-llm can converge
 independently. The release workflow
 publishes both images and opens its immutable image-pin PR. Before merging that
 PR, create and capture `tapy-frontend-secrets`. Do not sync the placeholder
-frontend image or OAuth client IDs. After rollout, create a test agent through
-the API, complete each provider's browser consent, scan benign test mail, and
-verify external inference. Never place agent,
+frontend image or OAuth client IDs. After rollout, confirm `tapy-backend` and
+`tapy-frontend` are Ready, check `/health/live` and `/health/ready`, submit a
+benign request through `external-ai.requests`, and inspect logs for startup
+exceptions or `ACCESS_REFUSED`. Then create a test agent through the API,
+complete each provider's browser consent, scan benign test mail, and verify
+external inference. Never place agent,
 OAuth, RabbitMQ, or provider tokens in shell history.

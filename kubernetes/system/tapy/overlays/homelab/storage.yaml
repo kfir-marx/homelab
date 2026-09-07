@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: tapy-postgres-pv
+  name: tapy-postgres-tapy-pv
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
 spec:
@@ -11,7 +11,7 @@ spec:
   storageClassName: nfs-storage2
   mountOptions: [nfsvers=4.2, hard]
   claimRef:
-    namespace: homelab-assistant
+    namespace: tapy
     name: tapy-postgres
   nfs:
     server: 192.168.1.105

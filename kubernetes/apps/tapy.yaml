@@ -15,9 +15,7 @@ spec:
     path: kubernetes/system/tapy/overlays/homelab
   destination:
     server: https://kubernetes.default.svc
-    # Reuse the local LLM namespace and its scoped RabbitMQ identity. Matcher
-    # OAuth/database secrets remain in a dedicated Secret owned out of band.
-    namespace: homelab-assistant
+    namespace: tapy
   syncPolicy:
     automated:
       prune: true
@@ -30,4 +28,8 @@ spec:
     - group: ""
       kind: Secret
       name: tapy-secrets
+      jsonPointers: [/data]
+    - group: ""
+      kind: Secret
+      name: tapy-frontend-secrets
       jsonPointers: [/data]

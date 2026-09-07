@@ -1,19 +1,11 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: tapy
+  name: tapy-backend
 spec:
   template:
     spec:
       priorityClassName: homelab-tapy
-      containers:
-        - name: api
-          env:
-            - name: MATCHER_RABBITMQ_URL
-              valueFrom:
-                secretKeyRef:
-                  name: homelab-assistant-secrets
-                  key: RABBITMQ_URL
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -20,3 +20,7 @@ spec:
       kind: Secret
       name: tapy-secrets
       jsonPointers: [/data]
+    - group: ""
+      kind: Secret
+      name: tapy-frontend-secrets
+      jsonPointers: [/data]

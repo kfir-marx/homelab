@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: tapy
+  name: tapy-frontend
   labels:
     app: tapy
     component: frontend
@@ -12,7 +12,7 @@ spec:
     component: frontend
   ports:
     - name: http
-      port: 8080
+      port: 3000
       targetPort: http
 ---
 apiVersion: apps/v1
