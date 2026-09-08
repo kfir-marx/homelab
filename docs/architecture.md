@@ -52,7 +52,7 @@ Talos, and ArgoCD owns in-cluster workloads.
 | `smallgpu` | `192.168.1.106` | Proxmox VE 9.1.1 | Ryzen 5 3600, 6c/12t; 46.98 GiB | RTX 2060 | `cp-2`, mixed GPU worker, and 10 TB bulk NFS |
 | `largegpu` | `192.168.1.107` | Proxmox VE 9.1.1 | Ryzen 7 5800X, 8c/16t; 62.70 GiB | RTX 3080 LHR | `cp-1`; Talos GPU / Windows runtime mutex |
 | `tinygpu` | `192.168.1.108` | Proxmox VE 9.1.1 | Intel i5-2500, 4c/4t; 11.63 GiB | None declared | General worker |
-| `nogpu` | Not recorded | Proxmox VE (version not recorded) | 4c; 8 GiB | Integrated only | `cp-3` failure domain |
+| `nogpu` | `192.168.1.109` | Proxmox VE 9.1.1 | Intel i5-2500, 4c/4t; 7.64 GiB | Integrated only | `cp-3` failure domain |
 
 | Host | Fast/system disk | Additional disk | Motherboard | Virtualization |
 |------|------------------|-----------------|-------------|----------------|
@@ -60,13 +60,13 @@ Talos, and ArgoCD owns in-cluster workloads.
 | `smallgpu` | 476.9 GB XPG NVMe | 9.1 TB Toshiba HDD | ASUS PRIME B450M-A | AMD-V / AMD-Vi |
 | `largegpu` | 931.5 GB Samsung 980 NVMe | 1.8 TB WD HDD | ASUS TUF GAMING X570-PLUS | AMD-V / AMD-Vi |
 | `tinygpu` | 931.5 GB WDC WD10EZEX HDD | None declared | Not recorded | Intel VT-x |
-| `nogpu` | Not recorded | None declared | Not recorded | Required; not yet recorded |
+| `nogpu` | 465.8 GiB Seagate ST500DM002 HDD | None declared | Not recorded | Intel VT-x |
 
-The fleet has 28 physical CPU cores / 48 threads and 144.77 GiB of usable RAM;
-the four Proxmox hosts contribute 22 cores / 36 threads and 129.31 GiB. These
+The fleet has 28 physical CPU cores / 48 threads and 144.41 GiB of usable RAM;
+the four Proxmox hosts contribute 22 cores / 36 threads and 128.95 GiB. These
 are host totals, not safe VM allocations. Capacity is unevenly distributed:
 `tinygpu` has only four non-hyperthreaded Sandy Bridge cores and 11.63 GiB, and
-`nogpu` has four cores and 8 GiB, so their host margins matter more than the
+`nogpu` has four cores and 7.64 GiB, so their host margins matter more than the
 aggregate capacity.
 
 The reserved cluster VIP is `192.168.1.210` — the Talos control-plane VIP and Kubernetes API endpoint.
@@ -88,7 +88,7 @@ or force-mounts the disk.
 
 Each layer has a deliberately non-overlapping owner:
 
-- **Ansible owns physical host configuration:** Proxmox packages and base configuration on inventory-enrolled PVE hosts; storage/backups/NFS/VFIO only where inventory groups declare them; and NFS on Ubuntu. It never partitions or formats disks, changes the active workstation network profile, or reboots the workstation. `nogpu` is already a Proxmox cluster member but cannot be enrolled in the inventory until its management address is recorded.
+- **Ansible owns physical host configuration:** Proxmox packages and base configuration on inventory-enrolled PVE hosts; storage/backups/NFS/VFIO only where inventory groups declare them; and NFS on Ubuntu. It never partitions or formats disks, changes the active workstation network profile, or reboots the workstation. `nogpu` is enrolled at its verified `192.168.1.109` management address with only the common Proxmox baseline.
 - **Terraform/Terragrunt owns virtual infrastructure and Talos bootstrap:** Proxmox VMs, PCI attachment, Talos machine configuration, cluster bootstrap, and initial ArgoCD/application bootstrap.
 - **ArgoCD owns in-cluster resources:** applications, system controllers, and static Kubernetes PV/StorageClass declarations. Kubernetes manifests do not configure their physical NFS servers.
 
@@ -110,7 +110,7 @@ The placement and resource budget are:
 |---|---|---|---|---|
 | `smallgpu`: 6c/12t, 46.98 GiB | `cp-2` 2 + `gpu-3` 10 vCPU | 4 + 36 GiB | `cp-2` 50 GiB; `gpu-3` 100 GiB system + 50 GiB retained media-state on `local-lvm` | 0 unallocated threads, 6.98 GiB raw RAM; ~4.4 GiB available measured after workloads recovered. Loss removes one etcd voter, one worker, and bulk NFS, while quorum remains. |
 | `largegpu`: 8c/16t, 62.70 GiB | `cp-1` 2 + either `gpu-2` or Windows 14 vCPU | 4 + either 52 GiB | `cp-1` 50 GiB plus `gpu-2` 159 + 400 GiB on `largegpu-hdd`, or Windows 700 GiB on `local-lvm` | 0 unallocated threads, 6.70 GiB raw RAM, and ~5.1 GiB currently available. Loss removes one voter and the active RTX 3080 guest, while quorum remains. |
-| `nogpu`: 4 cores, 8 GiB | `cp-3` 2 vCPU | 4 GiB | `cp-3` 50 GiB on `local-lvm` | 2 unallocated cores and 4 GiB raw RAM. Loss removes one etcd voter while the other two retain quorum. Management address, storage capacity, and measured available RAM remain to be recorded. |
+| `nogpu`: 4c/4t, 7.64 GiB | `cp-3` 2 vCPU | 4 GiB | `cp-3` 50 GiB on the 338.2 GiB `local-lvm` pool | 2 unallocated cores, 3.64 GiB raw RAM, and ~1.87 GiB measured available after migration. Loss removes one etcd voter while the other two retain quorum. |
 | `tinygpu`: 4c/4t, 11.63 GiB | `worker-1` 3 vCPU | 9 GiB | `worker-1` 700 GiB on the 794.3 GiB `local-lvm` pool | 1 unallocated core, 2.63 GiB raw RAM, and ~94 GiB (12%) thin-pool margin. Loss removes only a general worker; local data must remain reproducible or disposable. |
 
 Three voters require two for quorum. One control-plane failure domain may be
@@ -230,7 +230,7 @@ mounts the existing ext4 LV; it is not registered as Proxmox storage.
 | `largegpu`      | `local-lvm`           | LVM-thin     | 810 GB     | Independent Windows VM 502 disk (~700 GB) |
 | `largegpu`      | `largegpu-hdd`        | Directory    | 1.83 TB    | Resident `cp-1`, Windows/VirtIO ISOs, then `gpu-2`'s sparse 159 GiB system disk and capped 400 GiB disposable scratch |
 | `tinygpu`       | `local-lvm`           | LVM-thin     | 794.3 GiB  | `worker-1` 700 GiB; no irreplaceable local application state |
-| `nogpu`         | `local-lvm`           | LVM-thin     | Not recorded | `cp-3` 50 GiB; capacity must be verified before migration |
+| `nogpu`         | `local-lvm`           | LVM-thin     | 338.2 GiB  | `cp-3` 50 GiB; ~288.2 GiB currently available after migration |
 | `ubuntu-workstation` | `gpu1-extra`          | LVM-thin     | 912 GB     | Existing pool containing the critical-data LV |
 | `ubuntu-workstation` | `storage2-bulk` (NFS) | ext4 LV on `gpu1-extra`, NFSv4 export | 800 GB | **Critical tier** — Immich and personal data |
 | `smallgpu`      | `storage1-bulk` (NFS) | 10 TB NTFS via kernel `ntfs3`, NFSv4 export | 10 TB  | **Bulk tier** — active and mount-verified from Talos |

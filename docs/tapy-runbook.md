@@ -102,16 +102,21 @@ The frontend serves the legal pages without authentication on the same public
 origin used for OAuth:
 
 ```text
+https://tapy.547600.xyz/
 https://tapy.547600.xyz/privacy
 https://tapy.547600.xyz/terms
 ```
 
-The logged-out homepage describes Tapy and links to both pages; the authenticated
-shell links to them as well. The mailbox settings disclosure immediately before
-each consent action describes the read-only scope, bounded message processing,
-and Alibaba Cloud Qwen transfer. Keep the page text, provider list, retention
-practice, and in-product disclosure synchronized with runtime behavior before
-changing a data flow or subprocessor.
+The logged-out homepage identifies Tapy and its operator, fully describes the
+booking-to-upsell workflow, explains why Google user data is requested, and
+links to both legal pages. It remains public without an account. The authenticated
+shell links to the legal pages as well. The mailbox settings disclosure immediately
+before each consent action describes the read-only scope, bounded message
+processing, and Alibaba Cloud Qwen transfer. Keep the homepage, legal-page text,
+provider list, retention practice, and in-product disclosure synchronized with
+runtime behavior before changing a data flow or subprocessor. The homepage and
+Privacy Policy URLs configured in Google Cloud must exactly match the production
+URLs above.
 
 ## OAuth registration
 

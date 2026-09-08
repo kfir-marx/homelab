@@ -6,8 +6,9 @@ or change corosync membership, own VM declarations, or reboot a host during the
 normal configuration play. Backup automation never starts, stops, shuts down,
 or reboots a VM. `tinygpu` currently receives only the common Proxmox
 repository/package baseline; it has no declared storage, backup, NFS, UPS, or
-VFIO role. The already-joined `nogpu` host must be added to inventory after its
-management address is recorded; do not invent or assume that address.
+VFIO role. The `nogpu` host is enrolled at `192.168.1.109` and likewise receives
+only the common Proxmox baseline; it has no declared storage, backup, NFS, UPS,
+or VFIO role.
 `smallgpu` alone currently has a declared UPS integration.
 
 The former `gpunvdgtx1060` node is no longer a Proxmox host. The separate
@@ -135,6 +136,7 @@ Useful limited runs:
 ```bash
 ansible-playbook playbooks/configure-proxmox.yml --check --diff --tags repositories
 ansible-playbook playbooks/verify-proxmox.yml --limit tinygpu
+ansible-playbook playbooks/verify-proxmox.yml --limit nogpu
 ansible-playbook playbooks/configure-proxmox.yml --limit smallgpu --tags nfs
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags storage
 ansible-playbook playbooks/configure-proxmox.yml --limit largegpu --tags backup

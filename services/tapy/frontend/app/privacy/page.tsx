@@ -4,6 +4,9 @@ import LegalDocument from "../components/LegalDocument";
 export const metadata: Metadata = {
   title: "Privacy Policy — Tapy",
   description: "How Tapy collects, uses, shares, retains, and protects personal data.",
+  alternates: {
+    canonical: "/privacy",
+  },
 };
 
 export default function PrivacyPolicy() {

@@ -13,9 +13,21 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Tapy — Upsell Suite",
+  metadataBase: new URL("https://tapy.547600.xyz"),
+  title: "Tapy — Travel Upsell Workspace",
   description:
-    "Travel agent upsell suite: surface every flight without a hotel and convert it with a single tap.",
+    "Tapy helps travel professionals identify flights without matching hotels and manage reviewed hotel-upsell opportunities.",
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: "Tapy — Travel Upsell Workspace",
+    description:
+      "Identify confirmed travel bookings, find hotel opportunities, and manage agent-reviewed outreach.",
+    type: "website",
+    url: "/",
+    siteName: "Tapy",
+  },
 };
 
 export const viewport: Viewport = {

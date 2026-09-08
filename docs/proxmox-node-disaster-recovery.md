@@ -12,7 +12,7 @@ during node replacement.
 | `smallgpu` | `192.168.1.106/24` | `backup-on-largegpu` | `largegpu:/mnt/pve/largegpu-hdd/proxmox-backups/from-smallgpu` |
 | `largegpu` | `192.168.1.107/24` | `backup-on-smallgpu` | `smallgpu:/mnt/data10tb/proxmox-backups/from-largegpu` |
 | `tinygpu` | `192.168.1.108/24` | None declared | No native VM backup destination is configured |
-| `nogpu` | Not recorded | None declared | No native VM backup destination is configured |
+| `nogpu` | `192.168.1.109/24` | None declared | No native VM backup destination is configured |
 
 All four nodes use gateway `192.168.1.1` and bridge `vmbr0`. The general snapshot
 jobs run at 02:15 (`smallgpu`) and 07:00 (`largegpu`), use Zstandard, and retain
@@ -74,14 +74,14 @@ Expected bulk disks at the time of writing:
 - `tinygpu`: the 1 TB WDC `WD10EZEX-60WN4A0`, serial
   `WD-WCC6Y2VY58JE`, is the Proxmox system disk and contains `local-lvm`.
   There is no separately declared bulk or application-data disk.
-- `nogpu`: disk model, serial, layout, and `local-lvm` capacity have not been
-  recorded. Identify and document them before attempting recovery or migrating
-  control-plane VM 203.
+- `nogpu`: the 500 GB Seagate `ST500DM002-1BD142`, serial `Z2AQP8GK`, is the
+  Proxmox system disk and provides a 338.2 GiB `local-lvm` pool. There is no
+  separately declared bulk or application-data disk.
 
 Stop if model, serial, partition layout, or UUID differs. Select only the
 failed Proxmox **system** disk as the installer target; this is a known HDD on
-`tinygpu`, known NVMe on `smallgpu` and `largegpu`, and not yet recorded for
-`nogpu`. Never select either bulk disk, and never use `wipefs`, `mkfs`, `fsck`,
+`tinygpu` and `nogpu`, and known NVMe on `smallgpu` and `largegpu`. Never select
+either bulk disk, and never use `wipefs`, `mkfs`, `fsck`,
 a partition editor, or a forced mount against it.
 
 ## Reinstall with the original identity
@@ -91,7 +91,7 @@ a partition editor, or a forced mount against it.
 | small | `smallgpu` | `192.168.1.106/24` | `192.168.1.1` | `vmbr0` |
 | large | `largegpu` | `192.168.1.107/24` | `192.168.1.1` | `vmbr0` |
 | tiny | `tinygpu` | `192.168.1.108/24` | `192.168.1.1` | `vmbr0` |
-| no-GPU | `nogpu` | Not recorded | `192.168.1.1` | `vmbr0` |
+| no-GPU | `nogpu` | `192.168.1.109/24` | `192.168.1.1` | `vmbr0` |
 
 Install a Proxmox major version compatible with the survivor. Do not restore an
 old `config.db` or copy `/etc/pve` from a backup.
@@ -140,9 +140,9 @@ sudo scripts/proxmox/join-replacement-node.sh 192.168.1.107 \
 For `largegpu`, use survivor `192.168.1.106`, expected address
 `192.168.1.107/24`, and confirmation `largegpu`. For `tinygpu`, use either
 healthy survivor, expected address `192.168.1.108/24`, and confirmation
-`tinygpu`. Do not construct a `nogpu` replacement command until its management
-address has been recorded. Authentication is interactive; never place a
-password in a command or the repository.
+`tinygpu`. For `nogpu`, use any healthy survivor, expected address
+`192.168.1.109/24`, and confirmation `nogpu`. Authentication is interactive;
+never place a password in a command or the repository.
 
 ## Reapply physical-host configuration
 
@@ -154,11 +154,10 @@ ansible-playbook -i inventory/production/hosts.yml \
   playbooks/configure-proxmox.yml --limit smallgpu --diff
 ```
 
-Use `largegpu` or `tinygpu` for those hosts. `tinygpu` receives only the common
-Proxmox baseline because it has no storage, backup, NFS, UPS, or VFIO inventory
-role. Enroll `nogpu` with its verified management address and a hostname-only
-host-vars file before using this play against it. Review check mode before
-convergence. Ansible adopts known filesystems by UUID and never formats them.
+Use `largegpu`, `tinygpu`, or `nogpu` for those hosts. `tinygpu` and `nogpu`
+receive only the common Proxmox baseline because they have no storage, backup,
+NFS, UPS, or VFIO inventory role. Review check mode before convergence. Ansible
+adopts known filesystems by UUID and never formats them.
 Reboot only if the VFIO role explicitly requires it, before starting a GPU VM.
 
 ## Select and restore native backups

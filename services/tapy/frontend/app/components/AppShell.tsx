@@ -12,10 +12,9 @@ import ToastStack from "./ToastStack";
 import { UserInfoPage, UserSettingsPage } from "./UserPages";
 
 export default function AppShell() {
-  const { view, setView, agents, activeAgentId, lang, setLang, t, user, loading, logout } = useDemo();
+  const { view, setView, agents, activeAgentId, lang, setLang, t, user, logout } = useDemo();
   const me = agents.find((a) => a.id === activeAgentId);
 
-  if (loading) return <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">Loading Tapy…</div>;
   if (!user || !me) return <AuthScreen />;
 
   return (

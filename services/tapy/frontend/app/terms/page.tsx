@@ -4,6 +4,9 @@ import LegalDocument from "../components/LegalDocument";
 export const metadata: Metadata = {
   title: "Terms of Service — Tapy",
   description: "Terms governing use of the Tapy pilot service.",
+  alternates: {
+    canonical: "/terms",
+  },
 };
 
 export default function TermsOfService() {
