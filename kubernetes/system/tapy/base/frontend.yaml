@@ -41,7 +41,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: frontend
-          image: ghcr.io/kfir-marx/tapy-frontend:sha-16727a187507b1214723ea9bee4c52e1314edd1e
+          image: ghcr.io/kfir-marx/tapy-frontend:sha-e9d905be3efc67b0fa4dad66952ff0b6608ec2ef
           imagePullPolicy: IfNotPresent
           env:
             - name: GEMINI_API_KEY
