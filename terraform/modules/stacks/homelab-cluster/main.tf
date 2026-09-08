@@ -113,6 +113,10 @@ module "worker_vms" {
   source   = "./modules/proxmox-vm"
   for_each = var.worker_nodes
 
+  # A host vacated by a control-plane move must not receive its replacement
+  # worker until the migration has completed successfully.
+  depends_on = [module.control_plane_vms]
+
   hostname                 = each.key
   proxmox_node             = each.value.proxmox_node
   vm_id                    = each.value.vm_id

@@ -12,15 +12,17 @@ during node replacement.
 | `smallgpu` | `192.168.1.106/24` | `backup-on-largegpu` | `largegpu:/mnt/pve/largegpu-hdd/proxmox-backups/from-smallgpu` |
 | `largegpu` | `192.168.1.107/24` | `backup-on-smallgpu` | `smallgpu:/mnt/data10tb/proxmox-backups/from-largegpu` |
 | `tinygpu` | `192.168.1.108/24` | None declared | No native VM backup destination is configured |
+| `nogpu` | Not recorded | None declared | No native VM backup destination is configured |
 
-All three nodes use gateway `192.168.1.1` and bridge `vmbr0`. The general snapshot
+All four nodes use gateway `192.168.1.1` and bridge `vmbr0`. The general snapshot
 jobs run at 02:15 (`smallgpu`) and 07:00 (`largegpu`), use Zstandard, and retain
 three recent plus two weekly archives. Standalone gaming VM `502` has a
 separate 04:15 job with two recent archives. All jobs use snapshot mode without
 power-management hooks; backup automation does not change any VM power state.
 The `smallgpu` all-VM job includes `cp-2`/VM 202 after its first successful run.
-`tinygpu` has no backup role or opposite-node storage declaration, so this
-runbook does not claim an automated VM 203 restore path.
+`tinygpu` and `nogpu` have no backup role or opposite-node storage declaration,
+so this runbook does not claim an automated restore path for worker VM 301 or
+control-plane VM 203.
 
 The one-time 2026 emergency recovery is different: it uses
 `ansible/playbooks/restore-smallgpu.yml` and the accepted workstation qcow2
@@ -72,11 +74,15 @@ Expected bulk disks at the time of writing:
 - `tinygpu`: the 1 TB WDC `WD10EZEX-60WN4A0`, serial
   `WD-WCC6Y2VY58JE`, is the Proxmox system disk and contains `local-lvm`.
   There is no separately declared bulk or application-data disk.
+- `nogpu`: disk model, serial, layout, and `local-lvm` capacity have not been
+  recorded. Identify and document them before attempting recovery or migrating
+  control-plane VM 203.
 
 Stop if model, serial, partition layout, or UUID differs. Select only the
-failed Proxmox **system** disk as the installer target; this is an HDD on
-`tinygpu` and NVMe on the other hosts. Never select either bulk disk, and never
-use `wipefs`, `mkfs`, `fsck`, a partition editor, or a forced mount against it.
+failed Proxmox **system** disk as the installer target; this is a known HDD on
+`tinygpu`, known NVMe on `smallgpu` and `largegpu`, and not yet recorded for
+`nogpu`. Never select either bulk disk, and never use `wipefs`, `mkfs`, `fsck`,
+a partition editor, or a forced mount against it.
 
 ## Reinstall with the original identity
 
@@ -85,6 +91,7 @@ use `wipefs`, `mkfs`, `fsck`, a partition editor, or a forced mount against it.
 | small | `smallgpu` | `192.168.1.106/24` | `192.168.1.1` | `vmbr0` |
 | large | `largegpu` | `192.168.1.107/24` | `192.168.1.1` | `vmbr0` |
 | tiny | `tinygpu` | `192.168.1.108/24` | `192.168.1.1` | `vmbr0` |
+| no-GPU | `nogpu` | Not recorded | `192.168.1.1` | `vmbr0` |
 
 Install a Proxmox major version compatible with the survivor. Do not restore an
 old `config.db` or copy `/etc/pve` from a backup.
@@ -133,8 +140,9 @@ sudo scripts/proxmox/join-replacement-node.sh 192.168.1.107 \
 For `largegpu`, use survivor `192.168.1.106`, expected address
 `192.168.1.107/24`, and confirmation `largegpu`. For `tinygpu`, use either
 healthy survivor, expected address `192.168.1.108/24`, and confirmation
-`tinygpu`. Authentication is interactive; never place a password in a command
-or the repository.
+`tinygpu`. Do not construct a `nogpu` replacement command until its management
+address has been recorded. Authentication is interactive; never place a
+password in a command or the repository.
 
 ## Reapply physical-host configuration
 
@@ -148,9 +156,10 @@ ansible-playbook -i inventory/production/hosts.yml \
 
 Use `largegpu` or `tinygpu` for those hosts. `tinygpu` receives only the common
 Proxmox baseline because it has no storage, backup, NFS, UPS, or VFIO inventory
-role. Review check mode before convergence. Ansible adopts known filesystems by
-UUID and never formats them. Reboot only if the VFIO role explicitly requires
-it, before starting a GPU VM.
+role. Enroll `nogpu` with its verified management address and a hostname-only
+host-vars file before using this play against it. Review check mode before
+convergence. Ansible adopts known filesystems by UUID and never formats them.
+Reboot only if the VFIO role explicitly requires it, before starting a GPU VM.
 
 ## Select and restore native backups
 
@@ -190,12 +199,13 @@ worker 402 on the HDD and standalone Windows VM 502 on NVMe. Automatic startup
 starts only VM 201; choose either 402 or 502 manually after validating the
 Kubernetes API. Never start VM 402 and Windows VM 502 together.
 
-There is currently no native-backup restore mapping for `tinygpu` or VM 203.
+There is currently no native-backup restore mapping for `nogpu` or VM 203.
 Loss of that system disk leaves `cp-1` and `cp-2` quorate. Do not improvise a
 restore, delete the stale etcd member, or remove VM 203 from Terraform state
 until a reviewed Talos control-plane replacement procedure has identified the
 surviving member and preserved cluster secrets. A replacement must join the
-existing etcd cluster; it must never bootstrap a new one.
+existing etcd cluster; it must never bootstrap a new one. `tinygpu` worker VM
+301 is reproducible and has no critical local-state guarantee.
 
 ## Validate Talos and Kubernetes
 
