@@ -182,6 +182,7 @@ module "talos_cluster" {
   control_plane_nodes = {
     for name, node in var.control_plane_nodes : name => {
       ip_address = node.ip_address
+      vm_id      = module.control_plane_vms[name].vm_id
     }
   }
 
@@ -189,6 +190,7 @@ module "talos_cluster" {
     for name, node in var.worker_nodes : name => {
       ip_address = node.ip_address
       gpu        = false
+      vm_id      = module.worker_vms[name].vm_id
     }
   }
 
@@ -197,6 +199,7 @@ module "talos_cluster" {
       ip_address = node.ip_address
       gpu        = true
       dedicated  = node.dedicated
+      vm_id      = module.gpu_vms[name].vm_id
       user_volumes = concat(
         node.scratch_disk == null ? [] : [{
           name         = "gpu-scratch"
@@ -214,11 +217,6 @@ module "talos_cluster" {
     }
   }
 
-  depends_on = [
-    module.control_plane_vms,
-    module.worker_vms,
-    module.gpu_vms,
-  ]
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

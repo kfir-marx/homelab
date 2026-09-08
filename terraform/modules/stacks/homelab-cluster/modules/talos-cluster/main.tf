@@ -45,6 +45,7 @@ variable "nameservers" {
 variable "control_plane_nodes" {
   type = map(object({
     ip_address = string
+    vm_id      = number
   }))
 }
 
@@ -52,6 +53,7 @@ variable "worker_nodes" {
   type = map(object({
     ip_address = string
     gpu        = bool
+    vm_id      = number
   }))
   default = {}
 }
@@ -61,6 +63,7 @@ variable "gpu_worker_nodes" {
     ip_address = string
     gpu        = bool
     dedicated  = bool
+    vm_id      = number
     user_volumes = optional(list(object({
       name         = string
       disk_size_gb = number
@@ -302,6 +305,13 @@ resource "talos_machine_configuration_apply" "controlplane" {
   machine_configuration_input = data.talos_machine_configuration.controlplane[each.key].machine_configuration
   endpoint                    = split("/", each.value.ip_address)[0]
   node                        = split("/", each.value.ip_address)[0]
+
+  lifecycle {
+    precondition {
+      condition     = each.value.vm_id > 0
+      error_message = "The control-plane VM must exist before applying its Talos configuration."
+    }
+  }
 }
 
 resource "talos_machine_configuration_apply" "worker" {
@@ -311,6 +321,13 @@ resource "talos_machine_configuration_apply" "worker" {
   machine_configuration_input = data.talos_machine_configuration.worker[each.key].machine_configuration
   endpoint                    = split("/", each.value.ip_address)[0]
   node                        = split("/", each.value.ip_address)[0]
+
+  lifecycle {
+    precondition {
+      condition     = each.value.vm_id > 0
+      error_message = "The worker VM must exist before applying its Talos configuration."
+    }
+  }
 }
 
 resource "talos_machine_configuration_apply" "gpu_worker" {
@@ -320,6 +337,13 @@ resource "talos_machine_configuration_apply" "gpu_worker" {
   machine_configuration_input = data.talos_machine_configuration.gpu_worker[each.key].machine_configuration
   endpoint                    = split("/", each.value.ip_address)[0]
   node                        = split("/", each.value.ip_address)[0]
+
+  lifecycle {
+    precondition {
+      condition     = each.value.vm_id > 0
+      error_message = "The GPU worker VM must exist before applying its Talos configuration."
+    }
+  }
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
