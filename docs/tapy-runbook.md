@@ -96,6 +96,23 @@ metrics come from the backend. Its existing server actions call Twilio and Gemin
 from the Next.js server; their credentials are never exposed as
 `NEXT_PUBLIC_*` values.
 
+## Public legal pages
+
+The frontend serves the legal pages without authentication on the same public
+origin used for OAuth:
+
+```text
+https://tapy.547600.xyz/privacy
+https://tapy.547600.xyz/terms
+```
+
+The logged-out homepage describes Tapy and links to both pages; the authenticated
+shell links to them as well. The mailbox settings disclosure immediately before
+each consent action describes the read-only scope, bounded message processing,
+and Alibaba Cloud Qwen transfer. Keep the page text, provider list, retention
+practice, and in-product disclosure synchronized with runtime behavior before
+changing a data flow or subprocessor.
+
 ## OAuth registration
 
 For Google, create a Web application OAuth client, enable the Gmail API, and
@@ -132,8 +149,156 @@ publish to it, set `GMAIL_PUBSUB_TOPIC` to its full
 `projects/<project>/topics/<topic>` name, and configure a push subscription to
 `/v1/webhooks/gmail?token=<WEBHOOK_VERIFICATION_TOKEN>`. Gmail watches are
 renewed by Tapy. Microsoft Graph subscriptions point directly to
-`/v1/webhooks/outlook`, carry a per-mailbox `clientState`, and are renewed by
-Tapy. `WEBHOOK_PUBLIC_BASE_URL` may override `PUBLIC_BASE_URL` for callbacks.
+`/v1/webhooks/outlook` and carry a per-mailbox `clientState`. The current
+implementation periodically tries to create a replacement subscription; it
+must use Graph subscription renewal and lifecycle notifications before a
+production launch, as described below. `WEBHOOK_PUBLIC_BASE_URL` may override
+`PUBLIC_BASE_URL` for callbacks.
+
+## Provider promotion from development to production
+
+These console-side steps are not managed by Kubernetes or Argo CD. Complete
+them against dedicated production registrations; keep the development Google
+project and Microsoft app registration for development traffic only. Changing
+an OAuth client/application ID invalidates Tapy's ability to refresh grants
+issued to the old client, so plan an explicit reconnect prompt for every
+mailbox during cutover.
+
+Before either provider is promoted:
+
+1. Freeze the production HTTPS origin and callback paths. Publish working home,
+   privacy-policy, terms, support, account-disconnection, and data-deletion
+   pages on that origin. The privacy disclosure must describe transient email
+   processing by Tapy and the configured external LLM provider.
+2. Create production-only OAuth credentials and store them through the
+   production secret workflow. Do not put localhost, developer, or staging
+   redirect URIs in a production registration.
+3. Assign at least two maintained owner/contact accounts, route provider review
+   and credential-expiry mail to an attended address, and record who owns
+   renewals, quota alerts, consent reviews, and incident response.
+4. Keep the callback and webhook origin publicly reachable without Cloudflare
+   Access or another interactive login gate. Configure a non-empty, strong
+   `WEBHOOK_VERIFICATION_TOKEN`, redact it from request logs, and restrict all
+   unrelated routes at the application or edge.
+
+### Google Cloud and Gmail
+
+1. Create a separate production Google Cloud project, enable the Gmail API and
+   Pub/Sub API, attach the required billing account, and create production
+   OAuth and Pub/Sub resources. Google explicitly recommends separate testing
+   and production projects in its
+   [OAuth production-readiness guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/policy-compliance).
+2. In Google Auth Platform, configure production branding, support/developer
+   contacts, the final homepage, privacy policy, terms, and authorized domain.
+   Verify domain ownership in Search Console. Register only the exact
+   production Web redirect URI; do not copy test origins or callbacks into the
+   production client.
+3. Choose and document the audience:
+
+   - Use **Internal** only when every user belongs to the same Google Workspace
+     organization. It excludes consumer and other-organization accounts.
+   - Otherwise use **External**, publish the app to **Production**, and submit
+     it for verification. Testing mode is limited to named test users and its
+     mailbox refresh-token grants expire after seven days; it is not a
+     production workaround. See Google's
+     [audience and publishing-status rules](https://support.google.com/cloud/answer/15549945).
+4. Declare only the identity scopes used for Google login plus
+   `https://www.googleapis.com/auth/gmail.readonly` for mailbox connection.
+   `gmail.readonly` is a restricted scope. Prepare the scope justification,
+   end-to-end consent/use demo video, reviewer instructions, and evidence that
+   the published privacy policy accurately describes access, processing,
+   retention, sharing, deletion, and revocation. Confirm that the external LLM
+   provider's retention, training, human-access, and onward-transfer terms
+   comply with the Google Workspace API
+   [User Data Policy](https://developers.google.com/workspace/workspace-api-user-data-developer-policy),
+   not merely that the transfer is disclosed. That policy lists automated
+   travel itineraries and flight tracking as an approved Gmail use case, but
+   this does not waive verification. Submit the production app using Google's
+   [verification procedure](https://support.google.com/cloud/answer/13461325).
+5. Unless Tapy qualifies for and documents an exception, its server-side use
+   and transmission of restricted Gmail data requires a Google-approved CASA
+   security assessment and annual reassessment. Budget lead time and assessor
+   cost before announcing a launch. Before assessment, close the production
+   security gaps required by the Workspace policy: production-grade key
+   management, encryption in transit and at rest, prompt-injection protection
+   for email sent to the LLM, user-data deletion, and security-incident
+   handling. Google's
+   [restricted-scope requirements](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
+   are the release authority.
+6. Create the production Pub/Sub topic and grant
+   `gmail-api-push@system.gserviceaccount.com` publisher access to that topic.
+   Create the HTTPS push subscription using the production webhook URL, then
+   configure retry/retention and delivery-failure monitoring. Tapy currently
+   authenticates Gmail pushes with the strong query token; ensure edge and
+   application logs redact it. Supporting and validating a Pub/Sub OIDC push
+   token is the preferred follow-up before removing that shared token. Follow
+   the Gmail
+   [push notification setup](https://developers.google.com/workspace/gmail/api/guides/push).
+7. Configure quota and billing alerts, watch Pub/Sub undelivered-message age,
+   and alert on Gmail watch-renewal failures. After deploying the production
+   client ID, secret, and topic name, reconnect a production mailbox and prove
+   consent, initial scan, push delivery, token refresh, watch renewal, and
+   disconnect behavior before inviting users.
+
+Do not add a new scope directly to the production project and deploy it at the
+same time. Test it in the development project, submit the production scope
+change for approval, and deploy only after approval; Google may require
+reverification when branding, redirect, privacy-policy, or scope configuration
+changes.
+
+### Microsoft Entra ID and Outlook
+
+1. Create a production app registration separate from development. Choose the
+   supported account type deliberately: single tenant for one organization,
+   multitenant for external organizations, or multitenant plus personal
+   Microsoft accounts for Outlook.com users. Set `MICROSOFT_TENANT` to the
+   matching tenant ID or `common`; do not leave `common` on a deliberately
+   single-tenant deployment.
+2. Add the exact production callback as a **Web** redirect URI over HTTPS and
+   remove localhost and development redirects. Microsoft also recommends
+   separate registrations for this separation in its
+   [redirect URI guidance](https://learn.microsoft.com/en-us/entra/identity-platform/reply-url).
+3. Complete production branding, support/privacy/terms URLs, verify the
+   publisher domain, and set maintained owners. For a customer-facing
+   multitenant application, complete
+   [publisher verification](https://learn.microsoft.com/en-us/entra/identity-platform/publisher-verification-overview)
+   before launch when eligible. An unverified publisher can be blocked by
+   customer tenant consent policies even though `User.Read` and delegated
+   `Mail.Read` do not normally require administrator consent.
+4. Keep only delegated `User.Read` and `Mail.Read`; do not add application-wide
+   mail permissions. Test both a normal user-consent tenant and a tenant that
+   disables user consent. Provide an administrator-consent/onboarding path for
+   customers whose policy blocks users, following Microsoft's
+   [consent guidance](https://learn.microsoft.com/en-us/entra/identity-platform/application-consent-experience).
+5. Resolve the production credential gap before launch. Microsoft recommends a
+   certificate or federated credential instead of a client secret in
+   production, while Tapy currently implements only `client_secret` token
+   exchange. Prefer adding certificate client-assertion support. If a client
+   secret is temporarily accepted as a documented exception, keep it in the
+   production secret manager, use overlapping rotation, alert well before
+   expiry, and test rotation without disconnecting users. See Microsoft's
+   [credential guidance](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials).
+6. Expose the production Graph webhook directly over valid public HTTPS and
+   verify the validation-token handshake. Before production, change Tapy to
+   renew the existing subscription with `PATCH /subscriptions/{id}` instead of
+   attempting a duplicate `POST`, add a lifecycle-notification URL, and handle
+   `reauthorizationRequired`, `subscriptionRemoved`, and `missed` events. Graph
+   can delay or drop notifications from slow endpoints, so queue promptly,
+   return `202`, monitor response latency and renewal failures, and retain the
+   bounded scan as a recovery path. Microsoft's
+   [webhook delivery](https://learn.microsoft.com/en-us/graph/change-notifications-delivery-webhooks)
+   and
+   [lifecycle notification](https://learn.microsoft.com/en-us/graph/change-notifications-lifecycle-events)
+   documentation defines these production requirements.
+7. Deploy the production application ID and credential, then test organizational
+   and personal accounts as selected. Prove login, mailbox consent, refresh,
+   webhook creation and renewal, event delivery, missed-event recovery, tenant
+   revocation, and disconnect behavior before retiring the development app.
+
+Production promotion is complete only when Google verification/CASA status (or
+a documented exception), Microsoft audience/publisher/tenant-consent decisions,
+credential rotation, webhook renewal, provider alerts, and end-to-end mailbox
+reconnection have named owners and passing evidence.
 
 ## Configuration and secrets
 

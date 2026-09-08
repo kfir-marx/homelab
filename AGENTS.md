@@ -24,18 +24,18 @@ Keep changes declarative and make them in the layer that owns the resource.
   under `kubernetes/`.
 - `ubuntu-workstation` is the permanent critical-NFS host and local desktop, not
   a hypervisor. `smallgpu` and `largegpu` are borrowed and may hold only
-  reproducible or disposable application data. `tinygpu` is a third Proxmox
-  failure domain but has no declared storage, UPS, NFS, or VFIO role.
+  reproducible or disposable application data. `tinygpu` and `nogpu` have no
+  declared storage, UPS, NFS, or VFIO role.
 - Talos VM `402` and Windows VM `502` share the RTX 3080 and cannot run
   together.
 - The three Talos control planes are fixed one per Proxmox failure domain:
-  `cp-1` on `largegpu`, `cp-2` on `smallgpu`, and `cp-3` on `tinygpu`. Preserve
+  `cp-1` on `largegpu`, `cp-2` on `smallgpu`, and `cp-3` on `nogpu`. Preserve
   the existing machine secrets and etcd data; never bootstrap the cluster
   again. One failed control-plane host is tolerated, but two failures lose etcd
   quorum.
-- `tinygpu` prioritizes `cp-3`. Do not add a worker there without a new live
-  capacity review; its 4-core i5-2500 and 11.63 GiB usable RAM do not currently
-  justify sharing the host with another 4 GiB VM.
+- `tinygpu` is dedicated to general worker `worker-1` at 3 vCPU, 9 GiB RAM,
+  and a 700 GiB thin-provisioned system disk. Preserve its one-core, 2.63 GiB
+  raw-RAM, and approximately 94 GiB `local-lvm` host margins.
 - Never partition, format, force-mount, or clear safety flags on existing disks.
 - Preserve `Retain` behavior and the critical/bulk/scratch storage boundaries.
 

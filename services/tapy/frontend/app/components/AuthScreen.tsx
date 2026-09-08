@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useDemo } from "../lib/store";
 
@@ -38,7 +39,7 @@ export default function AuthScreen() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 py-10">
       <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-7 shadow-xl shadow-slate-200/50 sm:p-9">
         <div className="mb-8 flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-lg font-bold text-white">T</div>
@@ -78,7 +79,20 @@ export default function AuthScreen() {
         <button type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }} className="mt-5 w-full text-center text-sm font-medium text-indigo-600 hover:text-indigo-500">
           {mode === "login" ? "New to Tapy? Create an account" : "Already have an account? Sign in"}
         </button>
+
+        <p className="mt-6 border-t border-slate-100 pt-5 text-center text-xs leading-5 text-slate-500">
+          By using Tapy, you agree to the <Link href="/terms" className="font-medium text-slate-700 underline underline-offset-2 hover:text-slate-950">Terms of Service</Link> and acknowledge the <Link href="/privacy" className="font-medium text-slate-700 underline underline-offset-2 hover:text-slate-950">Privacy Policy</Link>.
+        </p>
       </div>
+      <section className="mt-6 w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/70 px-6 py-5 text-sm leading-6 text-slate-600 shadow-sm">
+        <h2 className="font-semibold text-slate-900">Built for travel professionals</h2>
+        <p className="mt-2">
+          Tapy is an invitation-based pilot that uses delegated, read-only mailbox access to identify confirmed flights and hotels, match bookings, and help travel teams manage hotel-upsell opportunities. Tapy cannot change or delete mailbox messages or make travel reservations.
+        </p>
+        <p className="mt-3 text-xs leading-5 text-slate-500">
+          Tapy&apos;s use of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements.
+        </p>
+      </section>
     </main>
   );
 }

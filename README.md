@@ -47,7 +47,8 @@ flowchart TB
     subgraph Physical["Physical layer"]
         Small["smallgpu · Proxmox VE 9<br/>RTX 2060 · 10 TB bulk NFS"]
         Large["largegpu · Proxmox VE 9<br/>RTX 3080 · Windows/Talos mutex"]
-        Tiny["tinygpu · Proxmox VE 9<br/>control-plane failure domain"]
+        Tiny["tinygpu · Proxmox VE 9<br/>general worker host"]
+        NoGPU["nogpu · Proxmox VE<br/>control-plane failure domain"]
         Ubuntu["Ubuntu workstation<br/>GTX 1060 desktop · 800 GB critical NFS"]
         Assistant["Private Telegram client<br/>thread selection · deterministic ops"]
         Codex["Codex App Server<br/>local Unix socket · workstation identity"]
@@ -58,6 +59,7 @@ flowchart TB
         CP1["cp-1<br/>control plane"]
         CP2["cp-2<br/>control plane"]
         CP3["cp-3<br/>control plane"]
+        Worker1["worker-1<br/>general worker"]
         GPU2["gpu-2<br/>RTX 3080 worker"]
         GPU3["gpu-3<br/>RTX 2060 mixed worker"]
         Platform["Cilium · Gateway API · GPU Operator"]
@@ -78,12 +80,14 @@ flowchart TB
     IaC --> CP1
     IaC --> CP2
     IaC --> CP3
+    IaC --> Worker1
     IaC --> GPU2
     IaC --> GPU3
     Small -. hosts .-> GPU3
     Large -. hosts .-> CP1
     Small -. hosts .-> CP2
-    Tiny -. hosts .-> CP3
+    NoGPU -. hosts .-> CP3
+    Tiny -. hosts .-> Worker1
     Large -. hosts .-> GPU2
     Argo --> Platform --> Apps
     Small -. bulk storage .-> Apps
@@ -170,10 +174,10 @@ execution boundary for Terraform apply or cluster recovery.
 | Public Git repository | Makes the architecture reviewable; plaintext credentials and generated access files stay out of Git, while recovery material is committed only as SOPS/age ciphertext |
 
 These constraints are documented rather than hidden. `gpu-3` is sized at
-36 GiB so `smallgpu` can also host `cp-2` with measured host headroom. A
-general worker on `tinygpu` is deferred: pairing another 4 GiB VM with `cp-3`
-would consume all four old CPU cores and cut the host's control-plane margin.
-When `smallgpu` is down, its worker and bulk NFS export are unavailable, while
+36 GiB so `smallgpu` can also host `cp-2` with measured host headroom. `cp-3`
+now runs on the 4-core / 8 GiB `nogpu` host. `tinygpu` runs `worker-1` at
+3 vCPU / 9 GiB, leaving one core and 2.63 GiB raw RAM for Proxmox. When
+`smallgpu` is down, its worker and bulk NFS export are unavailable, while
 `cp-1` and `cp-3` retain API and etcd quorum.
 
 ## Repository tour

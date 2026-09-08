@@ -2,7 +2,7 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  Production environment                                                    ║
 # ║                                                                            ║
-# ║  3 control planes + 2 GPU workers on the home LAN (192.168.1.0/24).       ║
+# ║  3 control planes + 1 general + 2 GPU workers on the home LAN.           ║
 # ║  Control planes span all three Proxmox failure domains.                   ║
 # ║                                                                            ║
 # ║  IP convention (matches the rest of the homelab):                          ║
@@ -30,8 +30,8 @@ cilium_load_balancer_ip_stop: "192.168.1.229"
 argocd_target_revision: "main"
 
 # ── Control-plane nodes ───────────────────────────────────────────────────────
-# One control plane lives in each Proxmox failure domain. cp-1 and its existing
-# etcd data remain in place on largegpu; cp-2 and cp-3 join that cluster.
+# One control plane lives in each of three Proxmox failure domains. cp-3 keeps
+# its VM ID, address, Talos identity, and etcd data while migrating to nogpu.
 control_plane_nodes:
   cp-1:
     proxmox_node: "largegpu"
@@ -55,7 +55,7 @@ control_plane_nodes:
     system_disk_datastore_id: "local-lvm"
     system_disk_file_format: "raw"
   cp-3:
-    proxmox_node: "tinygpu"
+    proxmox_node: "nogpu"
     vm_id: 203
     ip_address: "192.168.1.213/24"
     cores: 2
@@ -65,9 +65,19 @@ control_plane_nodes:
     system_disk_file_format: "raw"
 
 # ── General workers ───────────────────────────────────────────────────────────
-# None: gpu-3 is a mixed general+GPU worker. A tinygpu worker is deliberately
-# deferred so the old 4-core, 11.63 GiB host retains control-plane headroom.
-worker_nodes: {}
+# tinygpu has 4 physical cores, 11.63 GiB usable RAM, and a 794.3 GiB local-lvm
+# pool. Leave Proxmox one core, 2.63 GiB raw RAM, and ~94 GiB (12%) of the thin
+# pool; the worker may use the rest but must hold no irreplaceable local state.
+worker_nodes:
+  worker-1:
+    proxmox_node: "tinygpu"
+    vm_id: 301
+    ip_address: "192.168.1.231/24"
+    cores: 3
+    memory_mb: 9216
+    disk_size_gb: 700
+    system_disk_datastore_id: "local-lvm"
+    system_disk_file_format: "raw"
 
 # ── Proxmox GPU nodes (PCIe passthrough) ────────────────────────────────────
 gpu_nodes:

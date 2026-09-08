@@ -6,7 +6,9 @@ or change corosync membership, own VM declarations, or reboot a host during the
 normal configuration play. Backup automation never starts, stops, shuts down,
 or reboots a VM. `tinygpu` currently receives only the common Proxmox
 repository/package baseline; it has no declared storage, backup, NFS, UPS, or
-VFIO role. `smallgpu` alone currently has a declared UPS integration.
+VFIO role. The already-joined `nogpu` host must be added to inventory after its
+management address is recorded; do not invent or assume that address.
+`smallgpu` alone currently has a declared UPS integration.
 
 The former `gpunvdgtx1060` node is no longer a Proxmox host. The separate
 `configure-ubuntu-workstation.yml` play configures its replacement Ubuntu

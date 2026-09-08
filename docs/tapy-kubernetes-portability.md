@@ -184,7 +184,10 @@ development configuration. No direct manifest apply is required.
 5. For external-ai-only inference, patch matcher `LLM_ORDER` to `external-ai`.
 6. Configure Ingress selectors, DNS, TLS, provider endpoints, OAuth apps,
    webhook delivery, and any cloud internal-llm worker.
-7. Verify `/health/ready`, create a test user, complete both consent flows,
+7. Complete the Google and Microsoft development-to-production console and
+   verification checklist in the
+   [Tapy runbook](tapy-runbook.md#provider-promotion-from-development-to-production).
+8. Verify `/health/ready`, create a test user, complete both consent flows,
    and exercise a benign mailbox scan. Readiness reports database, RabbitMQ,
    and each configured LLM queue connection without exposing credentials.
 

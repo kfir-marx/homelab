@@ -17,10 +17,10 @@ This repository declaratively manages a homelab across three layers:
    `kubernetes/apps/` and `kubernetes/system/`.
 
 The production model defines three Talos control-plane VMs, one on each of
-`largegpu`, `smallgpu`, and `tinygpu`, plus GPU-capable workers on `largegpu`
-and `smallgpu`. Etcd therefore retains quorum after one Proxmox failure-domain
-loss. The separate Ubuntu workstation is an NFS server and desktop; it is not
-a Proxmox host or Kubernetes worker.
+`largegpu`, `smallgpu`, and `nogpu`, plus GPU-capable workers on `largegpu` and
+`smallgpu` and a general worker on `tinygpu`. Etcd therefore retains quorum
+after one control-plane failure-domain loss. The separate Ubuntu workstation
+is an NFS server and desktop; it is not a Proxmox host or Kubernetes worker.
 
 ## Source-of-truth order
 
@@ -63,17 +63,17 @@ for a single-layer change.
 - `ubuntu-workstation` holds the critical 800 GB NFS tier and must retain its
   local GTX 1060/HDMI. It must not be converted back into a hypervisor.
 - `smallgpu` and `largegpu` are borrowed hardware. Only reproducible or
-  disposable application data may depend on them. `tinygpu` has no declared
-  storage, UPS, NFS, or VFIO role.
+  disposable application data may depend on them. `tinygpu` and `nogpu` have
+  no declared storage, UPS, NFS, or VFIO role.
 - The RTX 3080 on `largegpu` is shared by Talos VM `402` and Windows VM `502`.
   They must never be started at the same time.
 - Preserve the three-control-plane placement: `cp-1` on `largegpu`, `cp-2` on
-  `smallgpu`, and `cp-3` on `tinygpu`, each at 4 GiB. Preserve the existing
+  `smallgpu`, and `cp-3` on `nogpu`, each at 4 GiB. Preserve the existing
   Talos machine secrets and etcd data and never run `talosctl bootstrap` again.
   A single host loss retains etcd quorum; two control-plane host losses do not.
-- Keep `tinygpu` dedicated to `cp-3` unless a fresh live capacity review
-  justifies a worker. Its current 4-core / 11.63 GiB budget favors control-plane
-  stability.
+- Keep `tinygpu` worker `worker-1` within its reviewed 3 vCPU / 9 GiB / 700 GiB
+  budget so Proxmox retains one core, 2.63 GiB raw RAM, and about 94 GiB of its
+  `local-lvm` thin pool.
 - Existing filesystems are adopted, validated, and mounted. Automation must not
   partition, format, force-mount, or clear filesystem safety flags.
 - Static persistent volumes use explicit storage classes and `Retain`. Critical

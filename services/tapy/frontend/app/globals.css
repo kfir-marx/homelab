@@ -92,3 +92,58 @@ header {
     transition-duration: 0.01ms !important;
   }
 }
+
+.legal-document section + section {
+  margin-top: 2rem;
+}
+
+.legal-document h2 {
+  color: #0f172a;
+  font-size: 1.125rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.legal-document p,
+.legal-document ul {
+  margin-top: 0.75rem;
+  color: #475569;
+  font-size: 0.9375rem;
+  line-height: 1.75;
+}
+
+.legal-document ul {
+  list-style: disc;
+  padding-inline-start: 1.25rem;
+}
+
+.legal-document li + li {
+  margin-top: 0.45rem;
+}
+
+.legal-document strong {
+  color: #1e293b;
+  font-weight: 650;
+}
+
+.legal-document a {
+  color: #4f46e5;
+  font-weight: 550;
+  text-decoration: underline;
+  text-decoration-color: #c7d2fe;
+  text-underline-offset: 0.2em;
+}
+
+.legal-document a:hover {
+  color: #4338ca;
+  text-decoration-color: #818cf8;
+}
+
+.legal-document code {
+  border-radius: 0.3rem;
+  background: #f1f5f9;
+  padding: 0.1rem 0.3rem;
+  color: #334155;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.82em;
+}

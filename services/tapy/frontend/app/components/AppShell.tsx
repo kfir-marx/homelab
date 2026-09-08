@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useDemo } from "../lib/store";
 import type { Lang } from "../lib/i18n";
 import AgentView from "./AgentView";
@@ -72,6 +73,11 @@ export default function AppShell() {
           {view === "agent" ? <AgentView /> : view === "agency" ? <AgencyView /> : view === "profile" ? <UserInfoPage /> : <UserSettingsPage />}
         </div>
       </main>
+
+      <footer className="relative z-10 mx-auto flex w-full max-w-7xl justify-center gap-5 px-4 pb-8 text-xs font-medium text-slate-500 sm:px-6">
+        <Link href="/privacy" className="hover:text-slate-900">Privacy Policy</Link>
+        <Link href="/terms" className="hover:text-slate-900">Terms of Service</Link>
+      </footer>
 
       <ToastStack />
       {(view === "agent" || view === "agency") && <ChatBot />}

@@ -50,7 +50,7 @@ export function UserSettingsPage() {
 
       <section className="mt-5 rounded-2xl border border-slate-200 p-5">
         <h2 className="font-semibold text-slate-900">Email permissions</h2>
-        <p className="mt-1 text-sm leading-relaxed text-slate-500">Tapy asks for read-only email access in the provider&apos;s own consent window. Tokens go directly to the backend, are encrypted there, and are never exposed to this page.</p>
+        <p className="mt-1 text-sm leading-relaxed text-slate-500">Tapy asks for read-only email access in the provider&apos;s own consent window. When connected, Tapy reads a bounded set of recent messages and sends their subject, sender, date, and text to Alibaba Cloud Qwen to identify flight and hotel confirmations. Full message bodies are not saved in Tapy&apos;s product database. Tokens go directly to the backend, are encrypted there, and are never exposed to this page. Selecting <strong>Grant read access</strong> requests this processing. See the <a href="/privacy" className="font-medium text-indigo-600 underline underline-offset-2">Privacy Policy</a>.</p>
         <div className="mt-5 space-y-3">
           <MailboxRow provider="gmail" title="Gmail" />
           <MailboxRow provider="outlook" title="Microsoft Outlook" />
