@@ -1,5 +1,21 @@
 export type FlightStatus = "open" | "upsold" | "declined" | "past";
 
+export type NotificationKind =
+  | "flight_added"
+  | "upsell_sent"
+  | "whatsapp_failed"
+  | "flight_add_failed";
+
+export type Notification = {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  message: string;
+  flightId: string | null;
+  createdAt: string;
+  readAt: string | null;
+};
+
 export type Flight = {
   id: string;
   bookingRef: string;

@@ -1,0 +1,61 @@
+# Elasticsearch, Kibana, and the cluster-wide log collector are reconciled as
+# one application. ECK owns safe Elasticsearch orchestration and credentials;
+# local manifests own the critical NFS bindings, lifecycle, and private route.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: elk
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/kfir-marx/homelab.git
+      targetRevision: main
+      path: kubernetes/system/elk
+    - repoURL: https://helm.elastic.co
+      chart: eck-operator
+      targetRevision: 3.5.0
+      helm:
+        releaseName: elastic-operator
+        valuesObject:
+          managedNamespaces:
+            - logging
+          image:
+            digest: sha256:b6f261372d9d9af7b00aab03efea25263314d16063c4d440ac322e52c2fdf314
+          priorityClassName: homelab-logging
+          resources:
+            requests:
+              cpu: 100m
+              memory: 150Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    # The operator stays outside the isolated workload namespace. All local
+    # resources carry an explicit logging namespace where applicable.
+    namespace: elastic-system
+  ignoreDifferences:
+    # The bootstrap hook owns these generated least-privilege credentials.
+    - group: ""
+      kind: Secret
+      name: elk-vector-credentials
+      namespace: logging
+      jsonPointers:
+        - /data
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true

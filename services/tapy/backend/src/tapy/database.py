@@ -170,6 +170,42 @@ class FlightRecord(Base):
     )
 
 
+class FlightIngestionRecord(Base):
+    """Source-specific facts kept separate from the user-facing flight record."""
+
+    __tablename__ = "tapy_flight_ingestion"
+
+    flight_id: Mapped[str] = mapped_column(
+        ForeignKey("tapy_flights.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    mailbox_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tapy_mailboxes.id", ondelete="SET NULL"), index=True
+    )
+    provider_message_id: Mapped[str | None] = mapped_column(String(512), index=True)
+    ticket_number: Mapped[str | None] = mapped_column(String(64))
+    departure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    return_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    details: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class NotificationRecord(Base):
+    __tablename__ = "tapy_notifications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("tapy_users.id", ondelete="CASCADE"), index=True
+    )
+    flight_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tapy_flights.id", ondelete="SET NULL"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
 def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    homelab.kfir.dev/private-gateway-access: "true"
+    # Do not feed Elasticsearch, Kibana, or Vector's own logs back into the
+    # collector. All other Kubernetes namespaces are collected by default.
+    vector.dev/exclude: "true"

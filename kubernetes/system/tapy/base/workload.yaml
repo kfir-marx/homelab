@@ -65,6 +65,12 @@ spec:
                   name: tapy-secrets
                   key: WEBHOOK_VERIFICATION_TOKEN
                   optional: true
+            - name: MATCHER_TWILIO_ACCOUNT_SID
+              valueFrom:
+                secretKeyRef: {name: tapy-frontend-secrets, key: TWILIO_ACCOUNT_SID}
+            - name: MATCHER_TWILIO_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: tapy-frontend-secrets, key: TWILIO_AUTH_TOKEN}
             - name: MATCHER_GOOGLE_OAUTH_CLIENT_ID
               valueFrom:
                 configMapKeyRef: {name: tapy, key: GOOGLE_OAUTH_CLIENT_ID}

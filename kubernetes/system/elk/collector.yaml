@@ -1,0 +1,255 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: elk-vector
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: elk-vector
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: elk-vector
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+subjects:
+  - kind: ServiceAccount
+    name: elk-vector
+    namespace: logging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: elk-vector
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elk-vector
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+data:
+  vector.yaml: |
+    data_dir: /var/lib/vector
+    api:
+      enabled: true
+      address: 0.0.0.0:8686
+
+    sources:
+      kubernetes_logs:
+        type: kubernetes_logs
+        auto_partial_merge: true
+        max_line_bytes: 262144
+        read_from: end
+
+    transforms:
+      route_by_service:
+        type: remap
+        inputs: [kubernetes_logs]
+        source: |
+          namespace = if exists(.kubernetes.pod_namespace) {
+            to_string!(.kubernetes.pod_namespace)
+          } else {
+            "unknown"
+          }
+
+          service = if exists(.kubernetes.pod_labels."logging.kfir.dev/stream") {
+            to_string!(.kubernetes.pod_labels."logging.kfir.dev/stream")
+          } else if exists(.kubernetes.pod_labels."app.kubernetes.io/name") {
+            to_string!(.kubernetes.pod_labels."app.kubernetes.io/name")
+          } else if exists(.kubernetes.pod_labels.app) {
+            to_string!(.kubernetes.pod_labels.app)
+          } else if exists(.kubernetes.container_name) {
+            to_string!(.kubernetes.container_name)
+          } else {
+            "unknown"
+          }
+
+          component = if exists(.kubernetes.pod_labels."app.kubernetes.io/component") {
+            to_string!(.kubernetes.pod_labels."app.kubernetes.io/component")
+          } else if exists(.kubernetes.pod_labels.component) {
+            to_string!(.kubernetes.pod_labels.component)
+          } else {
+            ""
+          }
+
+          if component != "" && component != service {
+            service = service + "." + component
+          }
+
+          dataset = downcase(namespace + "." + service)
+          dataset = replace(dataset, r'[^a-z0-9_.]+', "_")
+          dataset = replace(dataset, r'^[^a-z0-9]+|[^a-z0-9]+$', "")
+          if dataset == "" {
+            dataset = "unknown"
+          }
+
+          .data_stream.type = "logs"
+          .data_stream.dataset = dataset
+          .data_stream.namespace = "default"
+          del(.kubernetes.pod_annotations)
+
+    sinks:
+      elasticsearch:
+        type: elasticsearch
+        inputs: [route_by_service]
+        endpoints:
+          - https://elk-es-http.logging.svc:9200
+        mode: data_stream
+        api_version: auto
+        auth:
+          strategy: basic
+          user: ${ELASTIC_USERNAME}
+          password: ${ELASTIC_PASSWORD}
+        data_stream:
+          auto_routing: true
+          sync_fields: true
+        tls:
+          ca_file: /certs/ca.crt
+          verify_certificate: true
+          verify_hostname: true
+        compression: gzip
+        request:
+          timeout_secs: 60
+        batch:
+          max_bytes: 5242880
+          timeout_secs: 2
+        buffer:
+          type: disk
+          max_size: 268435488
+          when_full: block
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: elk-vector
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/part-of: elk
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vector
+      app.kubernetes.io/part-of: elk
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vector
+        app.kubernetes.io/part-of: elk
+    spec:
+      serviceAccountName: elk-vector
+      priorityClassName: homelab-logging
+      terminationGracePeriodSeconds: 60
+      tolerations:
+        - operator: Exists
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vector
+          image: timberio/vector:0.58.0-debian@sha256:1c1ea358c617ea0b23003d5af87f7a678b30f8f7096437e680380c47fc13d2d9
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config
+            - /etc/vector/vector.yaml
+          env:
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # Vector 0.57+ disables config environment interpolation by
+            # default. It is required only for the Secret-backed credentials.
+            - name: VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION
+              value: "true"
+            - name: ELASTIC_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: elk-vector-credentials
+                  key: username
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elk-vector-credentials
+                  key: password
+          ports:
+            - name: api
+              containerPort: 8686
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /health
+              port: api
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: api
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: api
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+              readOnly: true
+            - name: pod-logs
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: checkpoints
+              mountPath: /var/lib/vector
+            - name: elasticsearch-ca
+              mountPath: /certs
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: elk-vector
+        - name: pod-logs
+          hostPath:
+            path: /var/log/pods
+            type: Directory
+        - name: checkpoints
+          hostPath:
+            path: /var/lib/elk-vector
+            type: DirectoryOrCreate
+        - name: elasticsearch-ca
+          secret:
+            secretName: elk-es-http-certs-public
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi

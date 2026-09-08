@@ -219,6 +219,7 @@ When `smallgpu` is down, its worker and bulk NFS export are unavailable, while
 | [Tailscale runbook](docs/tailscale-runbook.md) | Subnet-router enrollment, route approval, client setup, and troubleshooting |
 | [AdGuard Home runbook](docs/adguard-home-runbook.md) | Private split DNS, tailnet filtering, setup, and recovery |
 | [Monitoring runbook](docs/monitoring-runbook.md) | Prometheus/Grafana deployment, storage, access, and verification |
+| [ELK logging runbook](docs/elk-runbook.md) | Elasticsearch/Kibana deployment, per-service data streams, retention, storage, and verification |
 | [Job assistant architecture](docs/job-assistant-architecture.md) | Dedicated Telegram bot target, friend data isolation, trust boundaries, and migration gates |
 | [Job assistant runbook](docs/job-assistant-runbook.md) | Private inputs, broker migration, secrets, deployment, restore, and troubleshooting |
 | [Homelab assistant runbook](docs/homelab-assistant-runbook.md) | Workstation Codex App Server, Telegram thread UX, Unix-socket boundary, deterministic VM switching, cutover, and rollback |

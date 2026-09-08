@@ -24,7 +24,15 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -34,8 +42,10 @@ from .auth import bearer_token, new_session, password_hash, password_matches
 from .config import Settings
 from .database import (
     AuthIdentity,
+    FlightIngestionRecord,
     FlightRecord,
     MailboxConnection,
+    NotificationRecord,
     ProcessedMessage,
     User,
     UserSession,
@@ -49,6 +59,7 @@ from .flights import (
     DatabaseFlightRepository,
     FlightRepository,
     load_flights,
+    record_to_flight,
     record_to_view,
     score_booking,
 )
@@ -61,19 +72,25 @@ from .models import (
     AuthorizationUrl,
     AuthProvider,
     AuthResult,
+    EmailExtraction,
     EmailForAnalysis,
     FlightCreate,
     FlightMatch,
     FlightStatusUpdate,
+    FlightTicket,
     FlightView,
     HotelBooking,
     LoginRequest,
     MailboxView,
     MetricsView,
+    NotificationKind,
+    NotificationsRead,
+    NotificationView,
     Provider,
     RegisterRequest,
     ScanRequest,
     ScanResult,
+    UpsellResult,
     UserUpdate,
     UserView,
 )
@@ -85,15 +102,15 @@ SESSION_COOKIE = "tapy_session"
 
 HOME_PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>Tapy</title>
-<main><h1>Tapy</h1><p>Tapy identifies hotel confirmations for your flights after you grant
+<main><h1>Tapy</h1><p>Tapy identifies flight and hotel confirmations after you grant
 read-only mailbox access.</p><p><a href=/privacy>Privacy policy</a> ·
 <a href=/terms>Terms</a></p></main></html>"""
 
 PRIVACY_PAGE = """<!doctype html><html lang=en><meta charset=utf-8><title>Tapy Privacy</title>
 <main><h1>Privacy Policy</h1><p>Tapy requests delegated read-only Gmail or Outlook access through
 the provider consent screen. Refresh tokens are encrypted. Message text is processed transiently
-to identify hotel confirmations and is not persisted. Users can revoke provider access at any
-time. Contact: kfir.marx@gmail.com.</p></main></html>"""
+to identify flight and hotel confirmations and is not persisted. Users can revoke provider access
+at any time. Contact: kfir.marx@gmail.com.</p></main></html>"""
 
 TERMS_PAGE = """<!doctype html><html lang=en><meta charset=utf-8><title>Tapy Terms</title>
 <main><h1>Proof-of-concept terms</h1><p>Results are heuristic. Verify bookings directly with the
@@ -104,7 +121,7 @@ class Extractor(Protocol):
     @property
     def ready(self) -> bool: ...
 
-    async def extract(self, email: EmailForAnalysis) -> HotelBooking: ...
+    async def extract(self, email: EmailForAnalysis) -> EmailExtraction | HotelBooking: ...
 
 
 class EventHub:
@@ -137,6 +154,10 @@ def _best(matches: list[FlightMatch]) -> FlightMatch | None:
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _normalized(value: str | None) -> str:
+    return " ".join((value or "").casefold().split())
 
 
 def _set_session_cookie(response: StarletteResponse, token: str, settings: Settings) -> None:
@@ -200,6 +221,169 @@ def create_app(
         with suppress(ValueError, OSError):
             legacy_flights = load_flights(resolved.flights_config_path)
     event_hub = EventHub()
+
+    def add_notification(
+        session: Session,
+        user_id: str,
+        kind: NotificationKind,
+        title: str,
+        message: str,
+        flight_id: str | None = None,
+    ) -> NotificationRecord:
+        notification = NotificationRecord(
+            user_id=user_id,
+            flight_id=flight_id,
+            kind=kind,
+            title=title,
+            message=message,
+        )
+        session.add(notification)
+        return notification
+
+    def is_duplicate_flight(
+        session: Session,
+        user_id: str,
+        body: FlightCreate,
+        departure_at: datetime | None,
+    ) -> bool:
+        candidates = session.scalars(
+            select(FlightRecord).where(
+                FlightRecord.user_id == user_id,
+                FlightRecord.arrival_date == body.arrival_date,
+            )
+        ).all()
+        for candidate in candidates:
+            same_person = _normalized(candidate.passenger_name) == _normalized(body.passenger_name)
+            codes_known = candidate.destination_code != "UNK" and body.destination_code != "UNK"
+            same_destination = (
+                candidate.destination_code.casefold() == body.destination_code.casefold()
+                if codes_known
+                else _normalized(candidate.destination_city) == _normalized(body.destination_city)
+            )
+            if not (same_person and same_destination):
+                continue
+            metadata = session.get(FlightIngestionRecord, candidate.id)
+            if departure_at and metadata and metadata.departure_at:
+                if _utc(metadata.departure_at) == _utc(departure_at):
+                    return True
+                continue
+            return True
+        return False
+
+    def available_booking_ref(
+        session: Session, user_id: str, requested: str | None, *, allow_suffix: bool
+    ) -> str:
+        base = (
+            requested.strip()
+            if requested and requested.strip()
+            else f"TPY-{secrets.token_hex(4).upper()}"
+        )
+        candidate = base[:64]
+        number = 2
+        while session.scalar(
+            select(FlightRecord.id).where(
+                FlightRecord.user_id == user_id,
+                FlightRecord.booking_ref == candidate,
+            )
+        ):
+            if not allow_suffix:
+                raise ValueError("this booking reference already exists")
+            suffix = f"-{number}"
+            candidate = base[: 64 - len(suffix)] + suffix
+            number += 1
+        return candidate
+
+    def insert_flight(
+        session: Session,
+        user_id: str,
+        body: FlightCreate,
+        *,
+        source: Literal["manual", "email"],
+        mailbox_id: str | None = None,
+        provider_message_id: str | None = None,
+        ticket_number: str | None = None,
+        departure_at: datetime | None = None,
+        return_at: datetime | None = None,
+        source_details: dict[str, object] | None = None,
+    ) -> FlightRecord | None:
+        if is_duplicate_flight(session, user_id, body, departure_at):
+            return None
+        record = FlightRecord(
+            user_id=user_id,
+            booking_ref=available_booking_ref(
+                session, user_id, body.booking_ref, allow_suffix=source == "email"
+            ),
+            passenger_name=body.passenger_name.strip(),
+            party_size=body.party_size,
+            email=body.email.strip(),
+            phone=body.phone.strip(),
+            origin=body.origin.strip().upper(),
+            origin_city=body.origin_city.strip(),
+            destination_code=body.destination_code.strip().upper(),
+            destination_city=body.destination_city.strip(),
+            destination_country=body.destination_country.strip(),
+            arrival_date=body.arrival_date,
+            departure_date=body.departure_date,
+            flight_cost_usd=body.flight_cost_usd,
+            hotel_cost_usd=body.hotel_cost_usd,
+            is_open_for_upsell=True,
+        )
+        session.add(record)
+        session.flush()
+        session.add(
+            FlightIngestionRecord(
+                flight_id=record.id,
+                source=source,
+                mailbox_id=mailbox_id,
+                provider_message_id=provider_message_id,
+                ticket_number=ticket_number,
+                departure_at=_utc(departure_at) if departure_at else None,
+                return_at=_utc(return_at) if return_at else None,
+                details=source_details or {},
+            )
+        )
+        return record
+
+    def flight_from_ticket(ticket: FlightTicket) -> FlightCreate:
+        missing: list[str] = []
+        if not ticket.passenger_name:
+            missing.append("passenger_name")
+        if not (ticket.destination_code or ticket.destination_city):
+            missing.append("destination")
+        if not ticket.departure_at:
+            missing.append("departure_at")
+        if missing:
+            raise ValueError("missing " + ", ".join(missing))
+        assert ticket.passenger_name and ticket.departure_at
+        departure_at = _utc(ticket.departure_at)
+        return_at = _utc(ticket.return_at) if ticket.return_at else departure_at
+        return FlightCreate(
+            booking_ref=ticket.booking_ref or ticket.ticket_number,
+            passenger_name=ticket.passenger_name,
+            party_size=1,
+            email=ticket.email or "",
+            phone=ticket.phone or "",
+            origin=ticket.origin_code or "UNK",
+            origin_city=ticket.origin_city or ticket.origin_code or "Unknown",
+            destination_code=ticket.destination_code or "UNK",
+            destination_city=ticket.destination_city or ticket.destination_code or "Unknown",
+            destination_country=ticket.destination_country or "",
+            arrival_date=departure_at.date(),
+            departure_date=return_at.date(),
+            flight_cost_usd=ticket.flight_cost_usd or 0,
+            hotel_cost_usd=0,
+        )
+
+    def notification_view(record: NotificationRecord) -> NotificationView:
+        return NotificationView(
+            id=record.id,
+            kind=cast(NotificationKind, record.kind),
+            title=record.title,
+            message=record.message,
+            flight_id=record.flight_id,
+            created_at=record.created_at,
+            read_at=record.read_at,
+        )
 
     async def renew_webhooks(app: FastAPI) -> None:
         while True:
@@ -285,6 +469,28 @@ def create_app(
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or expired session")
             return user
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if request.method == "POST" and request.url.path == "/v1/flights":
+            try:
+                user = authenticate(
+                    request.headers.get("authorization"),
+                    request.cookies.get(SESSION_COOKIE),
+                )
+            except HTTPException:
+                user = None
+            if user:
+                with factory.begin() as session:
+                    add_notification(
+                        session,
+                        user.id,
+                        "flight_add_failed",
+                        "Could not add flight",
+                        "The supplied flight details were invalid. Review them and try again.",
+                    )
+                event_hub.publish(user.id)
+        return await request_validation_exception_handler(request, exc)
+
     def flight_records(user_id: str) -> list[FlightRecord]:
         with factory() as session:
             return list(
@@ -316,6 +522,7 @@ def create_app(
 
         results: list[AnalysisResponse] = []
         skipped = confirmations = matched = 0
+        flight_confirmations = tickets_found = flights_added = 0
         flights = configured_flights.for_agent(user_id)
         for email in messages:
             with factory() as session:
@@ -329,10 +536,80 @@ def create_app(
                 skipped += 1
                 continue
             try:
-                booking = await configured_extractor.extract(email)
+                extracted = await configured_extractor.extract(email)
             except ExtractionError as exc:
-                logger.warning("hotel_extraction_failed", provider=provider, user_id=user_id)
+                logger.warning("email_extraction_failed", provider=provider, user_id=user_id)
                 raise HTTPException(status.HTTP_502_BAD_GATEWAY, "all LLM backends failed") from exc
+            if isinstance(extracted, HotelBooking):
+                booking = extracted
+                flight_booking = None
+            else:
+                booking = extracted.hotel_booking
+                flight_booking = extracted.flight_booking
+
+            added_ids: list[str] = []
+            email_tickets = (
+                flight_booking.tickets
+                if flight_booking
+                and flight_booking.is_flight_booking_confirmation
+                and flight_booking.booking_status == "confirmed"
+                else []
+            )
+            if email_tickets:
+                flight_confirmations += 1
+                tickets_found += len(email_tickets)
+            for ticket in email_tickets:
+                try:
+                    body = flight_from_ticket(ticket)
+                    with factory.begin() as session:
+                        record = insert_flight(
+                            session,
+                            user_id,
+                            body,
+                            source="email",
+                            mailbox_id=mailbox.id,
+                            provider_message_id=email.message_id,
+                            ticket_number=ticket.ticket_number,
+                            departure_at=ticket.departure_at,
+                            return_at=ticket.return_at,
+                            source_details=ticket.model_dump(mode="json"),
+                        )
+                        if record:
+                            add_notification(
+                                session,
+                                user_id,
+                                "flight_added",
+                                "New flight added",
+                                f"{record.passenger_name}: {record.origin} → "
+                                f"{record.destination_code} was extracted from email.",
+                                record.id,
+                            )
+                            session.flush()
+                    if record:
+                        added_ids.append(record.id)
+                        flights_added += 1
+                        if configured_flights is database_flights:
+                            flights = [*flights, record_to_flight(record)]
+                except (IntegrityError, ValueError) as exc:
+                    logger.warning(
+                        "email_flight_add_failed",
+                        user_id=user_id,
+                        provider=provider,
+                        message_id=email.message_id,
+                        error=str(exc),
+                    )
+                    with factory.begin() as session:
+                        add_notification(
+                            session,
+                            user_id,
+                            "flight_add_failed",
+                            "Could not add flight",
+                            "A flight ticket in an email could not be added. Review the email "
+                            "and enter the flight manually.",
+                        )
+                    event_hub.publish(user_id)
+            if added_ids:
+                event_hub.publish(user_id)
             matches = score_booking(booking, flights, resolved.match_threshold)
             best = _best(matches)
             is_confirmation = booking.is_hotel_booking_confirmation
@@ -346,6 +623,8 @@ def create_app(
                     matches=matches,
                     best_flight_id=best.flight_id if best else None,
                     best_score=best.score if best else 0,
+                    flight_tickets_found=len(email_tickets),
+                    flights_added=added_ids,
                 )
             )
             if is_match and best:
@@ -386,14 +665,22 @@ def create_app(
                     ProcessedMessage(
                         mailbox_id=mailbox.id,
                         provider_message_id=email.message_id,
-                        outcome="matched"
-                        if is_match
-                        else "confirmation"
-                        if is_confirmation
-                        else "other",
+                        outcome=(
+                            "flight_added"
+                            if added_ids
+                            else "matched"
+                            if is_match
+                            else "confirmation"
+                            if is_confirmation
+                            else "other"
+                        ),
                         best_score=str(best.score) if best else None,
                         result_summary={
                             "is_hotel_booking_confirmation": is_confirmation,
+                            "is_flight_booking_confirmation": bool(
+                                flight_booking and flight_booking.is_flight_booking_confirmation
+                            ),
+                            "flights_added": added_ids,
                             "matched_flight_id": best.flight_id if is_match and best else None,
                         },
                     )
@@ -405,6 +692,9 @@ def create_app(
             messages_analyzed=len(results),
             confirmations_found=confirmations,
             matches_found=matched,
+            flight_confirmations_found=flight_confirmations,
+            flight_tickets_found=tickets_found,
+            flights_added=flights_added,
             results=results,
         )
 
@@ -535,31 +825,31 @@ def create_app(
     ) -> FlightView:
         try:
             with factory.begin() as session:
-                identifier = secrets.token_hex(4).upper()
-                record = FlightRecord(
-                    user_id=user.id,
-                    booking_ref=body.booking_ref or f"TPY-{identifier}",
-                    passenger_name=body.passenger_name,
-                    party_size=body.party_size,
-                    email=body.email,
-                    phone=body.phone,
-                    origin=body.origin.upper(),
-                    origin_city=body.origin_city,
-                    destination_code=body.destination_code.upper(),
-                    destination_city=body.destination_city,
-                    destination_country=body.destination_country,
-                    arrival_date=body.arrival_date,
-                    departure_date=body.departure_date,
-                    flight_cost_usd=body.flight_cost_usd,
-                    hotel_cost_usd=body.hotel_cost_usd,
-                    is_open_for_upsell=True,
+                record = insert_flight(session, user.id, body, source="manual")
+                if not record:
+                    raise ValueError("this flight already exists")
+                add_notification(
+                    session,
+                    user.id,
+                    "flight_added",
+                    "New flight added",
+                    f"{record.passenger_name}: {record.origin} → "
+                    f"{record.destination_code} was added manually.",
+                    record.id,
                 )
-                session.add(record)
                 session.flush()
-        except IntegrityError as exc:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT, "this booking reference already exists"
-            ) from exc
+        except (IntegrityError, ValueError) as exc:
+            detail = str(exc) if isinstance(exc, ValueError) else "could not save the flight"
+            with factory.begin() as session:
+                add_notification(
+                    session,
+                    user.id,
+                    "flight_add_failed",
+                    "Could not add flight",
+                    detail,
+                )
+            event_hub.publish(user.id)
+            raise HTTPException(status.HTTP_409_CONFLICT, detail) from exc
         event_hub.publish(user.id)
         return record_to_view(record)
 
@@ -580,6 +870,126 @@ def create_app(
             session.flush()
         event_hub.publish(user.id)
         return record_to_view(record)
+
+    @app.post("/v1/flights/{flight_id}/send-upsell", response_model=UpsellResult)
+    async def send_flight_upsell(
+        flight_id: str,
+        user: User = Depends(authenticate),  # noqa: B008
+    ) -> UpsellResult:
+        with factory() as session:
+            record = session.get(FlightRecord, flight_id)
+            if not record or record.user_id != user.id:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "flight was not found")
+            if not record.is_open_for_upsell:
+                raise HTTPException(status.HTTP_409_CONFLICT, "flight is already closed")
+
+        async def fail(detail: str) -> None:
+            with factory.begin() as session:
+                add_notification(
+                    session,
+                    user.id,
+                    "whatsapp_failed",
+                    "WhatsApp delivery failed",
+                    f"The offer for {record.booking_ref} could not be sent: {detail}",
+                    record.id,
+                )
+            event_hub.publish(user.id)
+
+        account_sid = resolved.twilio_account_sid.strip()
+        auth_token = resolved.twilio_auth_token.get_secret_value()
+        if not account_sid or not auth_token:
+            detail = "Twilio is not configured"
+            await fail(detail)
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail)
+        if not record.phone.strip():
+            detail = "the customer has no phone number"
+            await fail(detail)
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail)
+
+        first_name = record.passenger_name.split("&", 1)[0].split(",", 1)[0].strip()
+        message_body = (
+            f"היי {first_name}! ✈️\n\n"
+            f"הנסיעה שלך עם Tapy ל-{record.destination_city} "
+            f"({record.arrival_date.isoformat()} - {record.departure_date.isoformat()}) אושרה.\n\n"
+            "מצאנו עבורך 3 מלונות במחירים בלעדיים לתאריכים שלך. "
+            "ניתן לשריין כל אחד מהם בלחיצה אחת — ללא חיוב עד הצ'ק-אין:\n\n"
+            f"👉 {resolved.hotel_offer_url}\n\nלהסרה השב STOP."
+        )
+        try:
+            response = await app.state.http_client.post(
+                f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json",
+                data={
+                    "To": f"whatsapp:{record.phone.strip()}",
+                    "From": resolved.twilio_whatsapp_from,
+                    "Body": message_body,
+                },
+                auth=(account_sid, auth_token),
+            )
+            response.raise_for_status()
+            message_sid = str(response.json()["sid"])
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            logger.warning(
+                "whatsapp_delivery_failed",
+                user_id=user.id,
+                flight_id=record.id,
+                error=type(exc).__name__,
+            )
+            detail = (
+                "Twilio rejected the message"
+                if isinstance(exc, httpx.HTTPStatusError)
+                else "Twilio could not be reached"
+            )
+            await fail(detail)
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
+
+        with factory.begin() as session:
+            current = session.get(FlightRecord, flight_id)
+            if not current or current.user_id != user.id:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "flight was not found")
+            current.is_open_for_upsell = False
+            current.closed_reason = "upsold"
+            add_notification(
+                session,
+                user.id,
+                "upsell_sent",
+                "Upsell sent",
+                f"The WhatsApp offer for {current.booking_ref} was sent and the flight closed.",
+                current.id,
+            )
+            session.flush()
+        event_hub.publish(user.id)
+        return UpsellResult(flight=record_to_view(current), message_sid=message_sid)
+
+    @app.get("/v1/notifications", response_model=list[NotificationView])
+    async def list_notifications(
+        user: User = Depends(authenticate),  # noqa: B008
+    ) -> list[NotificationView]:
+        with factory() as session:
+            records = session.scalars(
+                select(NotificationRecord)
+                .where(NotificationRecord.user_id == user.id)
+                .order_by(NotificationRecord.created_at.desc())
+                .limit(100)
+            ).all()
+        return [notification_view(record) for record in records]
+
+    @app.post("/v1/notifications/read", status_code=204)
+    async def mark_notifications_read(
+        body: NotificationsRead,
+        user: User = Depends(authenticate),  # noqa: B008
+    ) -> None:
+        now = datetime.now(UTC)
+        with factory.begin() as session:
+            unread = session.scalars(
+                select(NotificationRecord).where(
+                    NotificationRecord.user_id == user.id,
+                    NotificationRecord.id.in_(body.notification_ids),
+                    NotificationRecord.read_at.is_(None),
+                )
+            ).all()
+            for notification in unread:
+                notification.read_at = now
+        event_hub.publish(user.id)
 
     @app.get("/v1/metrics", response_model=MetricsView)
     async def metrics(user: User = Depends(authenticate)) -> MetricsView:  # noqa: B008

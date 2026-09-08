@@ -2,10 +2,10 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-The server-side actions read `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
-`AGENT_PHONE_NUMBER`, and `GEMINI_API_KEY`. Their local values live in the
-repository-level `.env`, not in this directory. Load that file into the shell
-before starting development:
+The server-side chat action reads `GEMINI_API_KEY`. The backend owns Twilio
+delivery and reads `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`; their local
+values live in the repository-level `.env`, not in this directory. Load that
+file into the shell before starting development:
 
 ```bash
 set -a

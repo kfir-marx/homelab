@@ -17,6 +17,12 @@ const EN: Dict = {
   "nav.lang.en": "EN",
   "nav.lang.he": "HE",
   "nav.lang.aria": "Switch language",
+  "notifications.aria": "Open notifications",
+  "notifications.title": "Notifications",
+  "notifications.subtitle": "Updates that need your attention",
+  "notifications.empty": "No notifications yet.",
+  "notifications.readError": "Could not mark notifications as read",
+  "notifications.tryAgain": "Try again.",
 
   // agent view
   "agent.eyebrow": "My Bookings",
@@ -176,6 +182,12 @@ const HE: Dict = {
   "nav.lang.en": "EN",
   "nav.lang.he": "HE",
   "nav.lang.aria": "החלפת שפה",
+  "notifications.aria": "פתיחת התראות",
+  "notifications.title": "התראות",
+  "notifications.subtitle": "עדכונים שדורשים את תשומת לבך",
+  "notifications.empty": "אין התראות עדיין.",
+  "notifications.readError": "לא ניתן לסמן את ההתראות כנקראו",
+  "notifications.tryAgain": "נסו שוב.",
 
   // agent view
   "agent.eyebrow": "ההזמנות שלי",

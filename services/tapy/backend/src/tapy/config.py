@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     webhook_public_base_url: str = ""
     webhook_verification_token: SecretStr = SecretStr("")
     webhook_renewal_seconds: int = Field(default=21_600, ge=300, le=86_400)
+    twilio_account_sid: str = ""
+    twilio_auth_token: SecretStr = SecretStr("")
+    twilio_whatsapp_from: str = "whatsapp:+14155238886"
+    hotel_offer_url: str = (
+        "https://app.letstay.co.il/results?place_id=ChIJOwg_06VPwokRYv534QaPC8g"
+        "&check_in=260530&check_out=260621&guests=2&rooms=1&private_travel=true"
+        "&utm_source=letstay"
+    )
 
     @field_validator("llm_order", mode="before")
     @classmethod

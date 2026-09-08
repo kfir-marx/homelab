@@ -76,6 +76,11 @@
       "matchPackageNames": [
         "/(^|\\/)(?:postgres(?:ql)?|valkey|redis|mariadb|mysql|mongodb)(?:$|[\\/-])/",
         "/(?:^|\\/)(?:csi|nfs)(?:$|[\\/-])/",
+        "docker.elastic.co/eck/eck-operator",
+        "docker.elastic.co/elasticsearch/elasticsearch",
+        "docker.elastic.co/kibana/kibana",
+        "eck-operator",
+        "timberio/vector",
         "cert-manager",
         "tailscale/tailscale",
         "cloudflare/cloudflared"

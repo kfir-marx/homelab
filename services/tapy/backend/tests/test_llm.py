@@ -64,6 +64,39 @@ def valid() -> RpcResponse:
     )
 
 
+def valid_flight() -> RpcResponse:
+    return RpcResponse(
+        200,
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            '{"hotel_booking":{"is_hotel_booking_confirmation":false,'
+                            '"booking_status":"unknown","hotel_name":null,"city":null,'
+                            '"country":null,"check_in_date":null,"check_out_date":null,'
+                            '"guest_name":null,"confirmation_number":null},'
+                            '"flight_booking":{"is_flight_booking_confirmation":true,'
+                            '"booking_status":"confirmed","tickets":[{"booking_ref":"PNR1",'
+                            '"ticket_number":"001","airline":"El Al",'
+                            '"outbound_flight_number":"LY315","return_flight_number":"LY316",'
+                            '"passenger_name":"Ada Lovelace",'
+                            '"email":null,"phone":null,"origin_code":"TLV",'
+                            '"origin_city":"Tel Aviv","destination_code":"LHR",'
+                            '"destination_city":"London","destination_country":"UK",'
+                            '"departure_at":"2026-10-12T08:00:00+03:00",'
+                            '"arrival_at":"2026-10-12T12:00:00+01:00",'
+                            '"return_at":"2026-10-17T18:00:00+01:00",'
+                            '"return_arrival_at":"2026-10-18T01:00:00+03:00",'
+                            '"flight_cost_usd":500,"currency":"USD"}]}}'
+                        )
+                    }
+                }
+            ]
+        },
+    )
+
+
 @pytest.mark.asyncio
 async def test_falls_back_in_configured_order() -> None:
     internal = FakeEndpoint([TimeoutError()])
@@ -89,6 +122,23 @@ async def test_invalid_first_output_uses_fallback() -> None:
         {"internal-llm": "local-llm", "external-ai": "alibaba:qwen-plus"},
     )
     assert (await extractor.extract(email())).hotel_name == "Hotel"
+
+
+@pytest.mark.asyncio
+async def test_extracts_one_standard_ticket_per_passenger() -> None:
+    endpoint = FakeEndpoint([valid_flight()])
+    extractor = BookingExtractor(
+        ("external-ai",),
+        {"external-ai": endpoint},
+        {"external-ai": "alibaba:qwen-plus"},
+    )
+
+    result = await extractor.extract(email())
+
+    assert result.flight_booking.is_flight_booking_confirmation
+    assert result.flight_booking.tickets[0].passenger_name == "Ada Lovelace"
+    schema = endpoint.requests[0]["response_format"]["json_schema"]["schema"]
+    assert "flight_booking" in schema["properties"]
 
 
 def test_external_only_configuration_builds_one_rpc_endpoint() -> None:

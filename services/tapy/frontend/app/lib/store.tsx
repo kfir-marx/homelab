@@ -8,7 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { Agent, Flight, FlightStatus, User, View } from "./types";
+import type { Agent, Flight, FlightStatus, Notification, User, View } from "./types";
 import { DICTIONARIES, LOCALES, type Lang, tr } from "./i18n";
 import {
   formatDate as fmtDate,
@@ -120,6 +120,16 @@ type ApiMetrics = {
   total_hotel_revenue: number;
 };
 
+type ApiNotification = {
+  id: string;
+  kind: Notification["kind"];
+  title: string;
+  message: string;
+  flight_id: string | null;
+  created_at: string;
+  read_at: string | null;
+};
+
 type TapyStore = {
   loading: boolean;
   user: User | null;
@@ -127,6 +137,8 @@ type TapyStore = {
   agents: Agent[];
   activeAgentId: string;
   metrics: AgencyMetrics;
+  notifications: Notification[];
+  unreadNotificationCount: number;
   view: View;
   setView: (view: View) => void;
   login: (email: string, password: string) => Promise<void>;
@@ -136,11 +148,12 @@ type TapyStore = {
   updateProfile: (input: { name?: string; language?: Lang }) => Promise<void>;
   connectMailbox: (provider: "gmail" | "outlook") => Promise<void>;
   disconnectMailbox: (provider: "gmail" | "outlook") => Promise<void>;
-  markUpsold: (flightId: string) => Promise<void>;
+  sendUpsell: (flightId: string) => Promise<void>;
   markDeclined: (flightId: string) => Promise<void>;
   markOpen: (flightId: string) => Promise<void>;
   addFlight: (input: NewFlightInput) => Promise<Flight>;
   refresh: () => Promise<void>;
+  markNotificationsRead: () => Promise<void>;
   pushToast: (toast: Omit<Toast, "id">) => void;
   toasts: Toast[];
   dismissToast: (id: number) => void;
@@ -225,36 +238,53 @@ function mapMetrics(value: ApiMetrics): AgencyMetrics {
   };
 }
 
+function mapNotification(value: ApiNotification): Notification {
+  return {
+    id: value.id,
+    kind: value.kind,
+    title: value.title,
+    message: value.message,
+    flightId: value.flight_id,
+    createdAt: value.created_at,
+    readAt: value.read_at,
+  };
+}
+
 export function DemoProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [flights, setFlights] = useState<Flight[]>([]);
   const [metrics, setMetrics] = useState<AgencyMetrics>(EMPTY_METRICS);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [view, setView] = useState<View>("agent");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [lang, setLangState] = useState<Lang>("en");
 
   const refresh = useCallback(async () => {
     try {
-      const [nextUser, nextFlights, nextMetrics] = await Promise.all([
+      const [nextUser, nextFlights, nextMetrics, nextNotifications] = await Promise.all([
         api<ApiUser>("/v1/users/me"),
         api<ApiFlight[]>("/v1/flights"),
         api<ApiMetrics>("/v1/metrics"),
+        api<ApiNotification[]>("/v1/notifications"),
       ]);
       const mapped = mapUser(nextUser);
       setUser(mapped);
       setLangState(mapped.language);
       setFlights(nextFlights.map(mapFlight));
       setMetrics(mapMetrics(nextMetrics));
+      setNotifications(nextNotifications.map(mapNotification));
     } catch (error) {
       if (error instanceof Error && error.message.includes("authentication")) {
         setUser(null);
         setFlights([]);
         setMetrics(EMPTY_METRICS);
+        setNotifications([]);
       } else if (error instanceof Error && error.message.includes("session")) {
         setUser(null);
         setFlights([]);
         setMetrics(EMPTY_METRICS);
+        setNotifications([]);
       } else {
         throw error;
       }
@@ -341,6 +371,7 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setFlights([]);
     setMetrics(EMPTY_METRICS);
+    setNotifications([]);
     setView("agent");
   }, []);
 
@@ -373,7 +404,7 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
     await refresh();
   }, [refresh]);
 
-  const updateStatus = useCallback(async (flightId: string, status: FlightStatus) => {
+  const updateStatus = useCallback(async (flightId: string, status: "open" | "declined") => {
     const previous = flights;
     setFlights((items) => items.map((item) => item.id === flightId ? { ...item, status } : item));
     try {
@@ -387,6 +418,28 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
       throw error;
     }
   }, [flights, refresh]);
+
+  const sendUpsell = useCallback(async (flightId: string) => {
+    await api(`/v1/flights/${flightId}/send-upsell`, { method: "POST" });
+    await refresh();
+  }, [refresh]);
+
+  const markNotificationsRead = useCallback(async () => {
+    const unreadIds = notifications.filter((item) => !item.readAt).map((item) => item.id);
+    if (unreadIds.length === 0) return;
+    const readAt = new Date().toISOString();
+    const unreadSet = new Set(unreadIds);
+    setNotifications((items) => items.map((item) => unreadSet.has(item.id) ? { ...item, readAt } : item));
+    try {
+      await api("/v1/notifications/read", {
+        method: "POST",
+        body: JSON.stringify({ notification_ids: unreadIds }),
+      });
+    } catch (error) {
+      await refresh();
+      throw error;
+    }
+  }, [notifications, refresh]);
 
   const addFlight = useCallback(async (input: NewFlightInput): Promise<Flight> => {
     const value = await api<ApiFlight>("/v1/flights", {
@@ -438,16 +491,24 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
     avatarTint: "from-indigo-500 to-violet-500",
   }] : [], [user]);
 
+  const unreadNotificationCount = useMemo(
+    () => notifications.filter((notification) => !notification.readAt).length,
+    [notifications],
+  );
+
   const value = useMemo<TapyStore>(() => ({
-    loading, user, flights, agents, activeAgentId: user?.id ?? "", metrics, view, setView,
+    loading, user, flights, agents, activeAgentId: user?.id ?? "", metrics,
+    notifications, unreadNotificationCount, view, setView,
     login, register, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox,
-    markUpsold: (id) => updateStatus(id, "upsold"),
+    sendUpsell,
     markDeclined: (id) => updateStatus(id, "declined"),
     markOpen: (id) => updateStatus(id, "open"),
-    addFlight, refresh, pushToast, toasts, dismissToast, lang, setLang, t, fmt,
+    addFlight, refresh, markNotificationsRead, pushToast, toasts, dismissToast,
+    lang, setLang, t, fmt,
   }), [loading, user, flights, agents, metrics, view, login, register, socialLogin, logout,
-    updateProfile, connectMailbox, disconnectMailbox, updateStatus, addFlight, refresh,
-    pushToast, toasts, dismissToast, lang, setLang, t, fmt]);
+    updateProfile, connectMailbox, disconnectMailbox, updateStatus, sendUpsell, addFlight, refresh,
+    markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, fmt,
+    notifications, unreadNotificationCount]);
 
   return <TapyContext.Provider value={value}>{children}</TapyContext.Provider>;
 }

@@ -95,6 +95,13 @@ description: "Priority 2: media-maintainerr"
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
+  name: homelab-logging
+value: 1000450
+description: "Priority 3: ELK logging"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
   name: homelab-monitoring
 value: 1000400
 description: "Priority 3: monitoring"

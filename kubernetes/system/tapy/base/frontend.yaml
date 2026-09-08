@@ -44,15 +44,6 @@ spec:
           image: ghcr.io/kfir-marx/tapy-frontend:sha-7b6afcc8b0114c6428825ee77b97105fb88a64c4
           imagePullPolicy: IfNotPresent
           env:
-            - name: TWILIO_ACCOUNT_SID
-              valueFrom:
-                secretKeyRef: {name: tapy-frontend-secrets, key: TWILIO_ACCOUNT_SID}
-            - name: TWILIO_AUTH_TOKEN
-              valueFrom:
-                secretKeyRef: {name: tapy-frontend-secrets, key: TWILIO_AUTH_TOKEN}
-            - name: AGENT_PHONE_NUMBER
-              valueFrom:
-                secretKeyRef: {name: tapy-frontend-secrets, key: AGENT_PHONE_NUMBER}
             - name: GEMINI_API_KEY
               valueFrom:
                 secretKeyRef: {name: tapy-frontend-secrets, key: GEMINI_API_KEY}

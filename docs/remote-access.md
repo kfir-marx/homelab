@@ -73,6 +73,7 @@ back to Tailscale's managed DERP relays when direct connectivity is unavailable.
 | ArgoCD | `https://argocd.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | AdGuard Home UI | `https://adguard.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | Grafana | `https://grafana.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
+| Kibana | `https://kibana.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | Bitwarden | `https://bitwarden.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | Immich | `https://immich.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |
 | Jellyfin | `https://jellyfin.home.547600.xyz` / `192.168.1.220:443` | Cilium Gateway API with cert-manager TLS |

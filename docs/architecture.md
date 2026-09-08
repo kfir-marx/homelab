@@ -239,6 +239,7 @@ path. Both exports must be mountable from the Talos nodes.
 |---------------------|------------------|-------------------------------------------------|--------|--------------------------------------------------------------------------------------------|
 | `storage1-bulk-pv`  | `nfs-storage1`   | `smallgpu:/mnt/data10tb` (NTFS via `ntfs3`)        | 9 Ti   | **Bulk** — media (Plex/Jellyfin, *arr), model caches, anything reproducible                |
 | `storage2-bulk-pv`  | `nfs-storage2`   | `ubuntu-workstation:/mnt/storage2-bulk` (`192.168.1.105`) | 800 Gi | **Critical** — Immich, config snapshots, and personal data |
+| `elk-elasticsearch-data-{0,1}-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/elk/elasticsearch-{0,1}` | 200 Gi each | **Critical** — retained Elasticsearch service-log primaries and replicas |
 | `media-data-pv` | `nfs-storage1` | `smallgpu:/mnt/data10tb/media` | 7 Ti | **Bulk** — Jellyfin library, torrents, and shared hardlink tree |
 | `media-state-pv` | `local-media-state` | `gpu-3:/var/mnt/media-state` | 45 Gi | **Local state** — SQLite/config; encrypted backups required |
 | `media-backups-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/media/backups` | 20 Gi | **Critical** — encrypted media-stack state archives |

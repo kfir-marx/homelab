@@ -1,0 +1,149 @@
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elk
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  version: 9.5.3
+  image: docker.elastic.co/elasticsearch/elasticsearch:9.5.3@sha256:f456578fc2a620a8a4f4c21d070fff1f6070345adb2be5e5626b65be72aea350
+  # Preserve claims if the Elasticsearch resource or Argo application is
+  # removed. The static PVs independently use Retain as a second safety layer.
+  volumeClaimDeletePolicy: DeleteOnScaledownOnly
+  nodeSets:
+    - name: data
+      count: 2
+      config:
+        node.roles:
+          - master
+          - data
+          - ingest
+          - remote_cluster_client
+          - transform
+        # NFS is slower than node-local storage, but is required here by the
+        # critical-data placement policy. NIO also avoids host vm.max_map_count
+        # dependencies and memory-mapped I/O against the network filesystem.
+        node.store.allow_mmap: false
+      podTemplate:
+        metadata:
+          labels:
+            app.kubernetes.io/name: elasticsearch
+            app.kubernetes.io/component: data
+            homelab.kfir.dev/elasticsearch-data: "true"
+        spec:
+          priorityClassName: homelab-logging
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      homelab.kfir.dev/elasticsearch-data: "true"
+                  topologyKey: kubernetes.io/hostname
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
+          containers:
+            - name: elasticsearch
+              env:
+                - name: ES_JAVA_OPTS
+                  value: -Xms1g -Xmx1g
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 2Gi
+                limits:
+                  cpu: "2"
+                  memory: 3Gi
+      volumeClaimTemplates:
+        - metadata:
+            name: elasticsearch-data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            storageClassName: nfs-storage2
+            resources:
+              requests:
+                storage: 200Gi
+    # A voting-only master makes the two data-node cluster resilient to either
+    # data node disappearing without storing a third copy of every log shard.
+    - name: tiebreaker
+      count: 1
+      config:
+        node.roles:
+          - master
+          - voting_only
+        node.store.allow_mmap: false
+      podTemplate:
+        metadata:
+          labels:
+            app.kubernetes.io/name: elasticsearch
+            app.kubernetes.io/component: tiebreaker
+        spec:
+          priorityClassName: homelab-logging
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
+          volumes:
+            - name: elasticsearch-data
+              emptyDir:
+                sizeLimit: 1Gi
+          containers:
+            - name: elasticsearch
+              env:
+                - name: ES_JAVA_OPTS
+                  value: -Xms512m -Xmx512m
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 768Mi
+                limits:
+                  cpu: 500m
+                  memory: 1Gi
+---
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: elk
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  version: 9.5.3
+  image: docker.elastic.co/kibana/kibana:9.5.3@sha256:4530cd98c529bc913ae364067f0233ab6cfb9a560644480b365b45f74a18dbf3
+  count: 1
+  elasticsearchRef:
+    name: elk
+  config:
+    server.publicBaseUrl: https://kibana.home.547600.xyz
+    xpack.security.secureCookies: true
+  # The private Gateway terminates browser TLS. Namespace isolation protects
+  # the plain HTTP hop from the Gateway to Kibana.
+  http:
+    tls:
+      selfSignedCertificate:
+        disabled: true
+  podTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kibana
+    spec:
+      priorityClassName: homelab-logging
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      containers:
+        - name: kibana
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi

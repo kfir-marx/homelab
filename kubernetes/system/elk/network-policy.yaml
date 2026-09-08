@@ -1,0 +1,64 @@
+# Elasticsearch is reachable only by the collector, bootstrap hook, Kibana,
+# and other ECK-managed pods in this namespace. Kibana's only browser entry is
+# the shared private Gateway.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-logging-internal
+  namespace: logging
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: logging-health-probes
+  namespace: logging
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "5601"
+              protocol: TCP
+            - port: "8686"
+              protocol: TCP
+            - port: "9200"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kibana-gateway-ingress
+  namespace: logging
+spec:
+  endpointSelector:
+    matchLabels:
+      common.k8s.elastic.co/type: kibana
+  ingress:
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "5601"
+              protocol: TCP

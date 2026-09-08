@@ -16,6 +16,7 @@ from .models import (
     Flight,
     FlightConfiguration,
     FlightMatch,
+    FlightStatus,
     FlightView,
     HotelBooking,
     ScoreComponents,
@@ -56,6 +57,7 @@ def record_to_flight(record: FlightRecord) -> Flight:
 
 
 def record_to_view(record: FlightRecord) -> FlightView:
+    status: FlightStatus
     if record.is_open_for_upsell:
         status = "open"
     elif record.closed_reason == "upsold":

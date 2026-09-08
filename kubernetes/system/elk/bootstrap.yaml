@@ -1,0 +1,261 @@
+# The hook installs the common data-stream template and creates a generated,
+# least-privilege Vector user. Its password exists only in a Kubernetes Secret;
+# no credential is stored in Git.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: elk-vector-credentials
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+type: Opaque
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: elk-bootstrap
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: elk-bootstrap
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["elk-vector-credentials"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames: ["elk-vector"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: elk-bootstrap
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+subjects:
+  - kind: ServiceAccount
+    name: elk-bootstrap
+    namespace: logging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: elk-bootstrap
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: elk-bootstrap
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  activeDeadlineSeconds: 1800
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: elk-bootstrap
+    spec:
+      serviceAccountName: elk-bootstrap
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: curlimages/curl:8.16.0@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6
+          command:
+            - /bin/sh
+            - -ceu
+            - |
+              es_url="https://elk-es-http.logging.svc:9200"
+              elastic_auth="elastic:${ELASTIC_PASSWORD}"
+
+              until curl --silent --fail --cacert /certs/ca.crt \
+                --user "${elastic_auth}" "${es_url}/_cluster/health" >/dev/null; do
+                sleep 5
+              done
+
+              curl --silent --show-error --fail --cacert /certs/ca.crt \
+                --user "${elastic_auth}" \
+                --header 'Content-Type: application/json' \
+                --request PUT "${es_url}/_ilm/policy/homelab-service-logs" \
+                --data-binary @- <<'JSON'
+              {
+                "policy": {
+                  "phases": {
+                    "hot": {
+                      "actions": {
+                        "rollover": {
+                          "max_age": "14d",
+                          "max_primary_shard_size": "10gb"
+                        }
+                      }
+                    },
+                    "delete": {
+                      "min_age": "0ms",
+                      "actions": {"delete": {}}
+                    }
+                  }
+                }
+              }
+              JSON
+
+              curl --silent --show-error --fail --cacert /certs/ca.crt \
+                --user "${elastic_auth}" \
+                --header 'Content-Type: application/json' \
+                --request PUT "${es_url}/_index_template/homelab-service-logs" \
+                --data-binary @- <<'JSON'
+              {
+                "index_patterns": ["logs-*-*"],
+                "priority": 500,
+                "data_stream": {},
+                "template": {
+                  "settings": {
+                    "index.number_of_shards": 1,
+                    "index.number_of_replicas": 1,
+                    "index.lifecycle.name": "homelab-service-logs"
+                  },
+                  "mappings": {
+                    "properties": {
+                      "@timestamp": {"type": "date"},
+                      "message": {"type": "match_only_text"},
+                      "stream": {"type": "keyword"},
+                      "data_stream": {
+                        "properties": {
+                          "type": {"type": "constant_keyword"},
+                          "dataset": {"type": "constant_keyword"},
+                          "namespace": {"type": "constant_keyword"}
+                        }
+                      },
+                      "kubernetes": {
+                        "properties": {
+                          "container_name": {"type": "keyword"},
+                          "namespace_labels": {"type": "flattened"},
+                          "pod_labels": {"type": "flattened"},
+                          "pod_name": {"type": "keyword"},
+                          "pod_namespace": {"type": "keyword"},
+                          "pod_node_name": {"type": "keyword"},
+                          "pod_owner": {"type": "keyword"}
+                        }
+                      }
+                    }
+                  }
+                },
+                "_meta": {
+                  "description": "One-shard, one-replica service log data streams"
+                }
+              }
+              JSON
+
+              curl --silent --show-error --fail --cacert /certs/ca.crt \
+                --user "${elastic_auth}" \
+                --header 'Content-Type: application/json' \
+                --request PUT "${es_url}/_security/role/vector_ingest" \
+                --data-binary '{
+                  "cluster": ["monitor"],
+                  "indices": [{
+                    "names": ["logs-*-*"],
+                    "privileges": ["auto_configure", "create_doc"]
+                  }]
+                }'
+
+              existing_password=""
+              if [ -s /vector-credentials/password ]; then
+                existing_password="$(cat /vector-credentials/password)"
+              fi
+
+              if [ -z "${existing_password}" ] || ! \
+                curl --silent --fail --cacert /certs/ca.crt \
+                  --user "vector_ingest:${existing_password}" \
+                  "${es_url}/_security/_authenticate" >/dev/null; then
+                vector_password="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)"
+
+                curl --silent --show-error --fail --cacert /certs/ca.crt \
+                  --user "${elastic_auth}" \
+                  --header 'Content-Type: application/json' \
+                  --request PUT "${es_url}/_security/user/vector_ingest" \
+                  --data-binary "{\"password\":\"${vector_password}\",\"roles\":[\"vector_ingest\"]}"
+
+                username_b64="$(printf %s vector_ingest | base64 | tr -d '\n')"
+                password_b64="$(printf %s "${vector_password}" | base64 | tr -d '\n')"
+                kubernetes_api="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}"
+                service_token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+
+                curl --silent --show-error --fail \
+                  --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+                  --header "Authorization: Bearer ${service_token}" \
+                  --header 'Content-Type: application/merge-patch+json' \
+                  --request PATCH \
+                  "${kubernetes_api}/api/v1/namespaces/logging/secrets/elk-vector-credentials" \
+                  --data-binary "{\"data\":{\"username\":\"${username_b64}\",\"password\":\"${password_b64}\"}}"
+
+                # Restart an existing collector after recovery-time credential
+                # rotation. A 404 is expected during the first installation.
+                restart_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                curl --silent --output /dev/null \
+                  --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+                  --header "Authorization: Bearer ${service_token}" \
+                  --header 'Content-Type: application/merge-patch+json' \
+                  --request PATCH \
+                  "${kubernetes_api}/apis/apps/v1/namespaces/logging/daemonsets/elk-vector" \
+                  --data-binary "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"homelab.kfir.dev/credentials-restarted-at\":\"${restart_at}\"}}}}}" \
+                  || true
+              fi
+          env:
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elk-es-elastic-user
+                  key: elastic
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: elasticsearch-ca
+              mountPath: /certs
+              readOnly: true
+            - name: vector-credentials
+              mountPath: /vector-credentials
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: elasticsearch-ca
+          secret:
+            secretName: elk-es-http-certs-public
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: vector-credentials
+          secret:
+            secretName: elk-vector-credentials
+            optional: true
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

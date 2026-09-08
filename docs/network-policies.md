@@ -49,6 +49,7 @@ apply step is required.
 | `media` | Same-namespace application traffic; Gateway to each web UI; Cloudflared to Jellyfin TCP/8096 and Seerr TCP/5055; LAN/world peers to qBittorrent TCP/UDP 51413 | Cluster DNS; public-only TCP 80/443 for metadata, indexers, subtitle providers, and trackers; qBittorrent additionally reaches public TCP/UDP peers |
 | `tailscale-router` | Public/LAN UDP 41641 (pinned in the Deployment) | Not isolated; see the Cilium Gateway hairpin exception below |
 | `monitoring` | Same-namespace traffic, Gateway to Grafana, and API-server webhook traffic | Not isolated: Prometheus must discover and scrape changing cluster targets |
+| `logging` | Same-namespace ECK, Elasticsearch, Kibana, bootstrap, and Vector traffic; Gateway to Kibana TCP/5601; node health probes | Not isolated: Vector watches the Kubernetes API and tails logs on every node |
 
 Return packets for admitted connections are allowed by Cilium's stateful
 connection tracking; separate reverse-direction rules are not required. NFS

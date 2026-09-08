@@ -113,7 +113,7 @@ Never commit a Secret manifest with real or fabricated values.
 | Namespace / Secret | Required keys |
 |---|---|
 | `tapy/tapy-secrets` | `DATABASE_URL`, `RABBITMQ_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`; optional `WEBHOOK_VERIFICATION_TOKEN`; add `POSTGRES_PASSWORD` for in-cluster PostgreSQL |
-| `tapy/tapy-frontend-secrets` | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `AGENT_PHONE_NUMBER`, `GEMINI_API_KEY` |
+| `tapy/tapy-frontend-secrets` | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `GEMINI_API_KEY` |
 | `external-ai/external-ai-secrets` | `DATABASE_URL`, `RABBITMQ_URL`, `HOMELAB_ASSISTANT_TOKEN`, `JOB_ASSISTANT_TOKEN`; `POSTGRES_PASSWORD` for in-cluster PostgreSQL; `ALIBABA_API_KEY` when Model Studio is enabled |
 | `external-ai/external-ai-codex-auth-bootstrap` | `auth.json` when Codex-backed models are enabled |
 | `rabbitmq/rabbitmq-secrets` | `username`, `password`, `erlang-cookie` |

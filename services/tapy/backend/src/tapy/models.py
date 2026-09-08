@@ -13,6 +13,12 @@ class StrictModel(BaseModel):
 Provider = Literal["gmail", "outlook"]
 AuthProvider = Literal["google", "microsoft"]
 FlightStatus = Literal["open", "upsold", "declined", "past"]
+NotificationKind = Literal[
+    "flight_added",
+    "upsell_sent",
+    "whatsapp_failed",
+    "flight_add_failed",
+]
 
 
 class Destination(StrictModel):
@@ -88,7 +94,7 @@ class FlightCreate(StrictModel):
 
 
 class FlightStatusUpdate(StrictModel):
-    status: Literal["open", "upsold", "declined"]
+    status: Literal["open", "declined"]
 
 
 class FlightConfiguration(StrictModel):
@@ -131,6 +137,51 @@ class HotelBooking(StrictModel):
     confirmation_number: str | None = Field(default=None, max_length=100)
 
 
+class FlightTicket(StrictModel):
+    """One passenger ticket extracted from a flight-confirmation email."""
+
+    booking_ref: str | None = Field(default=None, max_length=64)
+    ticket_number: str | None = Field(default=None, max_length=64)
+    airline: str | None = Field(default=None, max_length=160)
+    outbound_flight_number: str | None = Field(default=None, max_length=32)
+    return_flight_number: str | None = Field(default=None, max_length=32)
+    passenger_name: str | None = Field(default=None, max_length=160)
+    email: str | None = Field(default=None, max_length=320)
+    phone: str | None = Field(default=None, max_length=50)
+    origin_code: str | None = Field(default=None, max_length=10)
+    origin_city: str | None = Field(default=None, max_length=100)
+    destination_code: str | None = Field(default=None, max_length=10)
+    destination_city: str | None = Field(default=None, max_length=100)
+    destination_country: str | None = Field(default=None, max_length=100)
+    departure_at: datetime | None = None
+    arrival_at: datetime | None = None
+    return_at: datetime | None = None
+    return_arrival_at: datetime | None = None
+    flight_cost_usd: float | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+
+
+class FlightBooking(StrictModel):
+    is_flight_booking_confirmation: bool
+    booking_status: BookingStatus = "unknown"
+    tickets: list[FlightTicket] = Field(default_factory=list, max_length=50)
+
+
+class EmailExtraction(StrictModel):
+    """Strict LLM output; deterministic application code owns all actions."""
+
+    hotel_booking: HotelBooking
+    flight_booking: FlightBooking
+
+    @property
+    def is_hotel_booking_confirmation(self) -> bool:
+        return self.hotel_booking.is_hotel_booking_confirmation
+
+    @property
+    def hotel_name(self) -> str | None:
+        return self.hotel_booking.hotel_name
+
+
 class ScoreComponents(StrictModel):
     location: float = Field(ge=0, le=1)
     dates: float = Field(ge=0, le=1)
@@ -151,6 +202,8 @@ class AnalysisResponse(StrictModel):
     matches: list[FlightMatch]
     best_flight_id: str | None
     best_score: float = Field(ge=0, le=1)
+    flight_tickets_found: int = 0
+    flights_added: list[str] = Field(default_factory=list)
 
 
 class RegisterRequest(StrictModel):
@@ -214,7 +267,29 @@ class ScanResult(StrictModel):
     messages_analyzed: int
     confirmations_found: int
     matches_found: int
+    flight_confirmations_found: int = 0
+    flight_tickets_found: int = 0
+    flights_added: int = 0
     results: list[AnalysisResponse]
+
+
+class NotificationView(StrictModel):
+    id: str
+    kind: NotificationKind
+    title: str
+    message: str
+    flight_id: str | None = None
+    created_at: datetime
+    read_at: datetime | None = None
+
+
+class NotificationsRead(StrictModel):
+    notification_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class UpsellResult(StrictModel):
+    flight: FlightView
+    message_sid: str
 
 
 class MetricsView(StrictModel):

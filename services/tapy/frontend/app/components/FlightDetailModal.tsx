@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { sendUpsellWhatsApp } from "../actions";
 import { nightsBetween } from "../lib/format";
 import { useDemo } from "../lib/store";
 import type { Flight } from "../lib/types";
@@ -15,7 +14,7 @@ type T = (key: string, vars?: Record<string, string | number>) => string;
 type Fmt = ReturnType<typeof useDemo>["fmt"];
 
 export default function FlightDetailModal({ flight, onClose }: Props) {
-  const { markUpsold, markDeclined, markOpen, pushToast, t, fmt, lang } = useDemo();
+  const { sendUpsell, markDeclined, markOpen, pushToast, t, fmt, lang } = useDemo();
   const [mounted, setMounted] = useState(false);
   const [working, setWorking] = useState<"yes" | "no" | "restore" | null>(null);
   // Keep last-known flight so the panel can animate out gracefully after `flight` is cleared.
@@ -71,10 +70,10 @@ export default function FlightDetailModal({ flight, onClose }: Props) {
     if (working) return;
     setWorking("yes");
     try {
-      await markUpsold(f.id);
+      await sendUpsell(f.id);
     } catch (reason) {
       setWorking(null);
-      pushToast({ tone: "error", title: "Could not update flight", body: reason instanceof Error ? reason.message : "Try again." });
+      pushToast({ tone: "error", title: t("toast.error.title"), body: reason instanceof Error ? reason.message : "Try again." });
       return;
     }
     pushToast({
@@ -83,24 +82,6 @@ export default function FlightDetailModal({ flight, onClose }: Props) {
       body: t("toast.upsold.body", { name: firstName, email: f.email }),
     });
     onClose();
-    void sendUpsellWhatsApp({
-      flightId: f.id,
-      bookingRef: f.bookingRef,
-      passengerName: f.passengerName,
-      customerEmail: f.email,
-      customerPhone: f.phone,
-      destinationCity: f.destinationCity,
-      departureDate: f.departureDate,
-      returnDate: f.returnDate,
-    }).then((res) => {
-      if (!res.ok) {
-        pushToast({
-          tone: "error",
-          title: t("toast.error.title"),
-          body: res.error,
-        });
-      }
-    });
   }
 
   async function handleNo() {

@@ -19,21 +19,37 @@ frontend -> password/Google/Microsoft login -> HttpOnly backend session
 settings -> official mailbox consent page -> encrypted refresh token in PostgreSQL
 provider webhook -> Gmail API or Microsoft Graph -> bounded email text
 matcher -> RabbitMQ -> external-ai
-matcher -> per-user deterministic flight scoring -> close flight on score > 0.90
+matcher -> flight email -> one deduplicated open flight per passenger ticket
+matcher -> hotel email -> per-user deterministic flight scoring -> close flight on score > 0.90
+backend -> Twilio WhatsApp -> close flight only after delivery acceptance
+backend -> persisted per-user notifications -> SSE frontend refresh
 ```
 
-The LLM may only classify `is_hotel_booking_confirmation` and populate the
-strict `HotelBooking` schema. It does not choose flights, calculate a score, or
+The LLM may only classify hotel and flight confirmations and populate the
+strict `EmailExtraction` schema. A confirmed flight email contains one
+`FlightTicket` per passenger, so a shared multi-passenger booking creates
+separate flight rows without introducing a flight-booking aggregate. The LLM
+does not choose existing flights, calculate a score, deduplicate records, or
 invoke actions. Invalid model output counts as a backend failure and triggers
 the next configured LLM. The homelab development deployment uses only
 `external-ai`, so Tapy startup and readiness do not depend on `internal-llm`.
 
-Flights are stored in PostgreSQL and owned by one user. The frontend creates
-them manually for now. Exact location and dates score 1.0; the configured
+Flights are stored in PostgreSQL and owned by one user. Manual and email
+sources pass through the same insertion path. A candidate with the same
+normalized passenger, destination, and departure timestamp (or date when an
+exact time is unavailable) is skipped as a duplicate. Every new flight starts
+open for upsell and publishes an SSE invalidation to connected browsers.
+Exact hotel location and dates score 1.0; the configured
 threshold is a strict lower bound. A winning match stores a small hotel
 summary, closes the flight for upsell, and notifies connected frontends. If a
 flight already has a hotel match, the backend leaves it unchanged and logs the
 duplicate to standard output.
+
+User notifications are persistent records, not operational logs. Tapy creates
+them only when a flight is added, an upsell message is accepted and the flight
+is closed, WhatsApp delivery fails, or flight insertion fails. Opening the
+notification menu marks all current notifications read; later notifications
+restore the unread indicator.
 
 ## Backend API
 
@@ -50,6 +66,10 @@ scopes. Login and mailbox grants remain separate operations.
 - `GET /v1/metrics` returns server-derived dashboard metrics.
 - `GET /v1/events` streams invalidations; the frontend also refreshes on focus
   and every 30 seconds as a recovery path.
+- `GET /v1/notifications` lists the current user's notifications and
+  `POST /v1/notifications/read` marks the current set read.
+- `POST /v1/flights/{id}/send-upsell` sends the customer WhatsApp message and
+  closes the flight only when Twilio accepts it.
 - `POST /v1/mailboxes/gmail/authorization` returns a Google consent URL.
 - `POST /v1/mailboxes/outlook/authorization` returns a Microsoft consent URL.
 - `GET /v1/oauth/{provider}/callback` consumes the one-time OAuth state and
@@ -64,6 +84,7 @@ after ten minutes. A mailbox account can belong to only one user. The old
 `/v1/agents` bearer-token endpoints remain only for development compatibility.
 
 The database retains users, login identities and sessions, per-user flights,
+flight ingestion metadata, user notifications,
 encrypted provider refresh tokens, renewable webhook state, processed provider
 message IDs, and small match summaries.
 It never retains access tokens or message bodies. In the homelab overlay the
@@ -142,8 +163,11 @@ Create `tapy/tapy-frontend-secrets` with:
 
 - `TWILIO_ACCOUNT_SID`
 - `TWILIO_AUTH_TOKEN`
-- `AGENT_PHONE_NUMBER`
 - `GEMINI_API_KEY`
+
+The backend also reads the two Twilio credentials from this Secret because it
+owns the send/close/notify transaction. The frontend continues to use the
+Gemini credential only from its server-side chat action.
 
 The local source values belong in the repository-level gitignored `.env`; the
 same names are documented in `.env-template`. Capture the updated encrypted

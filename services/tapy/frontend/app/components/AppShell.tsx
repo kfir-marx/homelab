@@ -6,6 +6,7 @@ import AgentView from "./AgentView";
 import AgencyView from "./AgencyView";
 import AuthScreen from "./AuthScreen";
 import ChatBot from "./ChatBot";
+import NotificationMenu from "./NotificationMenu";
 import ToastStack from "./ToastStack";
 import { UserInfoPage, UserSettingsPage } from "./UserPages";
 
@@ -51,6 +52,7 @@ export default function AppShell() {
               <p className="text-xs font-semibold text-slate-900">{me.name}</p>
               <p className="text-[11px] text-slate-500">{t("nav.role")}</p>
             </div>
+            <NotificationMenu />
             <button
               type="button"
               onClick={() => setView(view === "profile" ? "agent" : "profile")}
