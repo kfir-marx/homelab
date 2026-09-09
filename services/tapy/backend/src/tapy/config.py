@@ -19,14 +19,11 @@ class Settings(BaseSettings):
     internal_llm_model: str = "local-llm"
     external_ai_queue: str = "external-ai.requests"
     external_ai_model: str = "alibaba:qwen-plus"
-    llm_order: Annotated[tuple[LlmBackend, ...], NoDecode] = (
-        "external-ai",
-        "internal-llm",
-    )
+    llm_order: Annotated[tuple[LlmBackend, ...], NoDecode] = ("external-ai",)
     request_timeout_seconds: float = Field(default=120, gt=0, le=300)
     match_threshold: float = Field(default=0.90, ge=0, le=1)
-    maximum_messages_per_scan: int = Field(default=20, ge=1, le=100)
-    gmail_query: str = Field(default="newer_than:365d", max_length=500)
+    maximum_messages_per_scan: int = Field(default=10000, ge=1, le=10000)
+    gmail_query: str = Field(default="", max_length=500)
     public_base_url: str = "http://localhost:8080"
     google_oauth_redirect_uri: str = ""
     microsoft_oauth_redirect_uri: str = ""
@@ -46,11 +43,9 @@ class Settings(BaseSettings):
     twilio_account_sid: str = ""
     twilio_auth_token: SecretStr = SecretStr("")
     twilio_whatsapp_from: str = "whatsapp:+14155238886"
-    hotel_offer_url: str = (
-        "https://app.letstay.co.il/results?place_id=ChIJOwg_06VPwokRYv534QaPC8g"
-        "&check_in=260530&check_out=260621&guests=2&rooms=1&private_travel=true"
-        "&utm_source=letstay"
-    )
+    hotel_offer_url: str = ""
+    jobs_queue: str = "tapy.jobs"
+    job_max_attempts: int = Field(default=3, ge=1, le=10)
 
     @field_validator("llm_order", mode="before")
     @classmethod

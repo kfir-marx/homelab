@@ -79,8 +79,8 @@ spec:
                     }
                     reconcile_user tapy "$RABBITMQ_TAPY_PASSWORD"
                     rabbitmqctl set_permissions --vhost homelab tapy \
-                      '^(internal-llm\.requests|external-ai\.requests|amq\.gen-.*|amq_[0-9a-f]{32})$' \
-                      '^amq\.default$' '^(amq\.gen-.*|amq_[0-9a-f]{32})$' >/dev/null
+                      '^(tapy\.jobs|internal-llm\.requests|external-ai\.requests|amq\.gen-.*|amq_[0-9a-f]{32})$' \
+                      '^amq\.default$' '^(tapy\.jobs|amq\.gen-.*|amq_[0-9a-f]{32})$' >/dev/null
                     reconcile_user external-ai "$RABBITMQ_EXTERNAL_AI_PASSWORD"
                     rabbitmqctl set_permissions --vhost homelab external-ai \
                       '^external-ai\.requests$' '^amq\.default$' \

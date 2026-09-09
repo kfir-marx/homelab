@@ -84,11 +84,6 @@ spec:
         - ports: [{port: "53", protocol: ANY}]
           rules:
             dns: [{matchPattern: "*"}]
-    - toFQDNs:
-        - {matchName: api.twilio.com}
-        - {matchName: generativelanguage.googleapis.com}
-      toPorts:
-        - ports: [{port: "443", protocol: TCP}]
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -101,3 +96,46 @@ spec:
     - fromEntities: [host, remote-node]
       toPorts:
         - ports: [{port: "3000", protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tapy-to-rabbitmq-worker
+spec:
+  podSelector:
+    matchLabels: {app: tapy, component: worker}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: rabbitmq}
+          podSelector:
+            matchLabels: {app: rabbitmq}
+      ports: [{port: 5672, protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tapy-external-egress-worker
+spec:
+  endpointSelector:
+    matchLabels: {app: tapy, component: worker}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports: [{port: "53", protocol: ANY}]
+          rules:
+            dns: [{matchPattern: "*"}]
+    - toFQDNs:
+        - {matchName: api.twilio.com}
+        - {matchName: accounts.google.com}
+        - {matchName: openidconnect.googleapis.com}
+        - {matchName: oauth2.googleapis.com}
+        - {matchName: gmail.googleapis.com}
+        - {matchName: login.microsoftonline.com}
+        - {matchName: graph.microsoft.com}
+      toPorts:
+        - ports: [{port: "443", protocol: TCP}]

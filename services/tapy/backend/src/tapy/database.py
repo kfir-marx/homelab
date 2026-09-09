@@ -699,3 +699,70 @@ def make_engine(settings: Settings) -> Engine:
 
 def make_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(engine, expire_on_commit=False)
+
+
+class EmailBookingEvent(Base):
+    """Versioned extracted facts; bodies remain at the mailbox provider."""
+
+    __tablename__ = "email_booking_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("tapy_users.id"), index=True)
+    mailbox_id: Mapped[str] = mapped_column(String(36), index=True)
+    message_id: Mapped[str] = mapped_column(String(512))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    source: Mapped[dict[str, object]] = mapped_column(JSON_DATA, default=dict)
+    facts: Mapped[dict[str, object]] = mapped_column(JSON_DATA, default=dict)
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ReconciliationDecision(Base):
+    __tablename__ = "reconciliation_decisions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    booking_id: Mapped[str] = mapped_column(ForeignKey("travel_bookings.id"), index=True)
+    opportunity_id: Mapped[str | None] = mapped_column(ForeignKey("upsell_opportunities.id"))
+    reason: Mapped[str] = mapped_column(String(100))
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON_DATA)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class BackgroundJob(Base):
+    __tablename__ = "background_jobs"
+    __table_args__ = (UniqueConstraint("user_id", "organization_id", "idempotency_key"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("tapy_users.id"), index=True)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    idempotency_key: Mapped[str] = mapped_column(String(200))
+    payload: Mapped[dict[str, object]] = mapped_column(JSON_DATA, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    progress: Mapped[dict[str, object]] = mapped_column(JSON_DATA, default=dict)
+    result: Mapped[dict[str, object]] = mapped_column(JSON_DATA, default=dict)
+    error: Mapped[str | None] = mapped_column(String(500))
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class PartnerOutcome(Base):
+    """Only verified partner events may populate these post-facto amounts."""
+
+    __tablename__ = "partner_outcomes"
+    __table_args__ = (UniqueConstraint("partner", "event_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    opportunity_id: Mapped[str] = mapped_column(ForeignKey("upsell_opportunities.id"), index=True)
+    partner: Mapped[str] = mapped_column(String(100))
+    event_id: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(30))
+    booking_value: Mapped[Decimal | None] = mapped_column(MONEY)
+    commission: Mapped[Decimal | None] = mapped_column(MONEY)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON_DATA, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

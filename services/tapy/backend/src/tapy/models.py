@@ -15,7 +15,7 @@ Provider = Literal["gmail", "outlook"]
 AuthProvider = Literal["google", "microsoft"]
 Scope = Literal["personal", "organization"]
 BookingStatus = Literal["confirmed", "modified", "cancelled"]
-OpportunityStatus = Literal["open", "contacted", "won", "declined", "expired", "closed"]
+OpportunityStatus = Literal["open", "contacted", "declined", "expired", "closed"]
 RecipientStatus = Literal["candidate", "selected", "excluded", "needs_contact"]
 
 
@@ -52,22 +52,23 @@ class ExtractedSegment(StrictModel):
     source_id: str = Field(min_length=1, max_length=100)
     airline: str | None = Field(default=None, max_length=160)
     flight_number: str | None = Field(default=None, max_length=32)
-    origin_code: str = Field(min_length=2, max_length=10)
-    destination_code: str = Field(min_length=2, max_length=10)
-    departure_at: datetime
+    origin_code: str | None = Field(default=None, min_length=2, max_length=10)
+    destination_code: str | None = Field(default=None, min_length=2, max_length=10)
+    destination_city: str | None = None
+    departure_at: datetime | None = None
     arrival_at: datetime | None = None
 
     @field_validator("departure_at", "arrival_at")
     @classmethod
     def timezone_required(cls, value: datetime | None) -> datetime | None:
         if value is not None and value.tzinfo is None:
-            raise ValueError("flight timestamps must include a timezone offset")
+            return None
         return value
 
 
 class ExtractedReservation(StrictModel):
     source_id: str = Field(min_length=1, max_length=100)
-    pnr: str = Field(min_length=1, max_length=100)
+    pnr: str | None = Field(default=None, min_length=1, max_length=100)
     status: BookingStatus = "confirmed"
     segments: list[ExtractedSegment] = Field(default_factory=list, max_length=30)
 
@@ -85,6 +86,7 @@ class FlightBooking(StrictModel):
     is_flight_booking_confirmation: bool
     booking_status: BookingStatus = "confirmed"
     booking_reference: str | None = Field(default=None, max_length=100)
+    provider: str | None = None
     people: list[ExtractedPerson] = Field(default_factory=list, max_length=100)
     reservations: list[ExtractedReservation] = Field(default_factory=list, max_length=20)
     tickets: list[ExtractedTicket] = Field(default_factory=list, max_length=200)
@@ -114,11 +116,19 @@ class HotelBooking(StrictModel):
     check_out_date: date | None = None
     guest_name: str | None = Field(default=None, max_length=150)
     confirmation_number: str | None = Field(default=None, max_length=100)
+    provider: str | None = None
+    airport_code: str | None = None
+    guest_names: list[str] = Field(default_factory=list)
+    guest_contacts: list[ExtractedContact] = Field(default_factory=list)
+    flight_booking_reference: str | None = None
 
 
 class EmailExtraction(StrictModel):
     """Facts only. Entity resolution and every business decision remain deterministic."""
 
+    booking_event_at: datetime | None = None
+    schema_version: int = 1
+    metadata: dict[str, object] = Field(default_factory=dict)
     hotel_booking: HotelBooking
     flight_booking: FlightBooking
 
@@ -236,7 +246,8 @@ class AuthorizationUrl(StrictModel):
 
 class ScanRequest(StrictModel):
     provider: Provider
-    maximum_messages: int | None = Field(default=None, ge=1, le=100)
+    maximum_messages: int | None = Field(default=None, ge=1, le=10000)
+    reprocess: bool = False
 
 
 class ScanResult(StrictModel):
@@ -384,10 +395,8 @@ class TicketCreate(StrictModel):
 
 
 class OpportunityUpdate(StrictModel):
-    status: OpportunityStatus
+    status: Literal["declined", "closed"]
     close_reason: str | None = Field(default=None, max_length=200)
-    won_revenue: Decimal | None = Field(default=None, ge=0)
-    won_commission: Decimal | None = Field(default=None, ge=0)
     version: int = Field(ge=1)
 
 
@@ -415,6 +424,7 @@ class RecipientView(StrictModel):
 
 
 class OpportunityView(StrictModel):
+    flight_details: dict[str, object] = Field(default_factory=dict)
     id: str
     organization_id: str
     booking_id: str
@@ -425,10 +435,6 @@ class OpportunityView(StrictModel):
     service_end: datetime | None
     status: str
     close_reason: str | None
-    potential_revenue: Decimal
-    potential_commission: Decimal
-    won_revenue: Decimal
-    won_commission: Decimal
     currency: str
     version: int
     tickets: list[TicketView]
@@ -504,3 +510,15 @@ class NotificationView(StrictModel):
 
 class NotificationsRead(StrictModel):
     notification_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class JobView(StrictModel):
+    id: str
+    kind: str
+    status: str
+    attempts: int
+    progress: dict[str, object]
+    result: dict[str, object]
+    error: str | None
+    created_at: datetime
+    updated_at: datetime

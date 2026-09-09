@@ -4,9 +4,11 @@
 
 Tapy keeps the same runtime architecture in development and
 production: the frontend serves the UI and proxies `/v1/*` to the private
-backend, which stores users, multi-tenant booking/opportunity graphs, individual
-deliveries, and encrypted mailbox grants in PostgreSQL, publishes OpenAI-compatible RPC requests through RabbitMQ, and
-tries the configured internal/external LLM queues in order. `external-ai`
+backend. A separate Tapy worker consumes durable `tapy.jobs`, scans mailboxes,
+reconciles extracted evidence in PostgreSQL, and submits Alibaba extraction RPCs
+through RabbitMQ. API/frontend have independent CPU HPAs; worker replicas scale
+independently. See [the Tapy runbook](tapy-runbook.md) for lifecycle and matching rules.
+`external-ai`
 retains its authenticated HTTP job API, durable PostgreSQL job state, RabbitMQ
 RPC worker, Codex state, and Alibaba Model Studio provider.
 
@@ -52,7 +54,7 @@ Cloud additionally requires:
 
 Deploy in this order: storage and CNI prerequisites; namespaces and Secrets;
 RabbitMQ (or verify the managed broker); PostgreSQL (or verify managed
-databases); internal-llm if used; external-ai; matcher and frontend;
+databases); external-ai; Tapy migration init containers, API, workers and frontend;
 Ingress/DNS/TLS; then OAuth end-to-end tests.
 
 ## Required customization

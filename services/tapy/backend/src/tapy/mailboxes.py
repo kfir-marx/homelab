@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import re
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from html import unescape
 from typing import Any, Protocol
 
@@ -16,6 +16,7 @@ class MailboxError(RuntimeError):
 
 
 class MailboxReader(Protocol):
+    def pages(self, access_token: str, limit: int) -> AsyncIterator[list[EmailForAnalysis]]: ...
     async def messages(self, access_token: str, limit: int) -> list[EmailForAnalysis]: ...
 
 
@@ -41,18 +42,50 @@ def _gmail_body(part: Mapping[str, Any]) -> str:
     return "\n".join(plain)
 
 
-class GmailReader:
+class PagedReader:
+    async def _page(
+        self, access_token: str, limit: int, cursor: str | None
+    ) -> tuple[list[EmailForAnalysis], str | None, int]:
+        raise NotImplementedError
+
+    async def pages(self, access_token: str, limit: int) -> AsyncIterator[list[EmailForAnalysis]]:
+        cursor = None
+        seen_cursors = set()
+        count = 0
+        while count < limit:
+            page, cursor, fetched = await self._page(access_token, min(100, limit - count), cursor)
+            count += fetched
+            yield page
+            if not cursor:
+                return
+            if cursor in seen_cursors:
+                raise MailboxError("Mailbox pagination repeated a cursor")
+            seen_cursors.add(cursor)
+        if cursor:
+            raise MailboxError("Scan limit reached; increase the configured scan limit")
+
+    async def messages(self, access_token: str, limit: int) -> list[EmailForAnalysis]:
+        return [email async for page in self.pages(access_token, limit) for email in page]
+
+
+class GmailReader(PagedReader):
     def __init__(self, client: httpx.AsyncClient, query: str) -> None:
         self._client = client
         self._query = query
 
-    async def messages(self, access_token: str, limit: int) -> list[EmailForAnalysis]:
+    async def _page(
+        self, access_token: str, limit: int, cursor: str | None
+    ) -> tuple[list[EmailForAnalysis], str | None, int]:
         headers = {"Authorization": f"Bearer {access_token}"}
         try:
             listed = await self._client.get(
                 "https://gmail.googleapis.com/gmail/v1/users/me/messages",
                 headers=headers,
-                params={"maxResults": limit, "q": self._query},
+                params={
+                    "maxResults": limit,
+                    "q": self._query,
+                    **({"pageToken": cursor} if cursor else {}),
+                },
             )
             listed.raise_for_status()
             references = listed.json().get("messages", [])[:limit]
@@ -82,25 +115,29 @@ class GmailReader:
                             body_text=body,
                         )
                     )
-            return result
+            return result, listed.json().get("nextPageToken"), len(references)
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise MailboxError("Gmail API request failed") from exc
 
 
-class OutlookReader:
+class OutlookReader(PagedReader):
     def __init__(self, client: httpx.AsyncClient) -> None:
         self._client = client
 
-    async def messages(self, access_token: str, limit: int) -> list[EmailForAnalysis]:
+    async def _page(
+        self, access_token: str, limit: int, cursor: str | None
+    ) -> tuple[list[EmailForAnalysis], str | None, int]:
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Prefer": 'outlook.body-content-type="text"',
         }
         try:
             response = await self._client.get(
-                "https://graph.microsoft.com/v1.0/me/messages",
+                cursor or "https://graph.microsoft.com/v1.0/me/messages",
                 headers=headers,
-                params={
+                params=None
+                if cursor
+                else {
                     "$top": limit,
                     "$orderby": "receivedDateTime desc",
                     "$select": "id,conversationId,subject,from,receivedDateTime,body",
@@ -128,7 +165,12 @@ class OutlookReader:
                             body_text=body_value,
                         )
                     )
-            return result
+            next_link = response.json().get("@odata.nextLink")
+            if next_link and not next_link.startswith(
+                "https://graph.microsoft.com/v1.0/me/messages?"
+            ):
+                raise MailboxError("Unexpected Outlook pagination URL")
+            return result, next_link, len(response.json().get("value", []))
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise MailboxError("Microsoft Graph request failed") from exc
 

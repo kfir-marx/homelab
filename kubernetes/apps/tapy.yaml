@@ -23,6 +23,7 @@ spec:
     syncOptions:
       - CreateNamespace=false
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
       - SkipDryRunOnMissingResource=true
   ignoreDifferences:
     - group: ""
@@ -33,3 +34,11 @@ spec:
       kind: Secret
       name: tapy-frontend-secrets
       jsonPointers: [/data]
+    - group: apps
+      kind: Deployment
+      name: tapy-backend
+      jsonPointers: [/spec/replicas]
+    - group: apps
+      kind: Deployment
+      name: tapy-frontend
+      jsonPointers: [/spec/replicas]

@@ -13,7 +13,7 @@ const PRODUCT_STEPS = [
   {
     number: "02",
     title: "Identify travel confirmations",
-    body: "Tapy examines a bounded set of recent messages to identify confirmed flights and hotels and extract the booking details needed for matching.",
+    body: "Tapy examines a bounded set of mailbox messages to identify confirmed flights and hotels and extract the booking details needed for matching.",
   },
   {
     number: "03",

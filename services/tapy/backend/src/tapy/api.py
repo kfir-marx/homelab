@@ -15,7 +15,6 @@ from typing import Annotated, Any, Literal, Protocol, cast
 import httpx
 import structlog
 from fastapi import (
-    BackgroundTasks,
     Cookie,
     Depends,
     FastAPI,
@@ -42,7 +41,6 @@ from .business import (
     booking_view,
     create_booking,
     ensure_agent,
-    ingest_flight_booking,
     metric_values,
     normalized_contact,
     opportunity_view,
@@ -51,6 +49,7 @@ from .business import (
 from .config import Settings
 from .database import (
     AuthIdentity,
+    BackgroundJob,
     BookingPerson,
     BookingPersonRole,
     ContactPoint,
@@ -61,10 +60,10 @@ from .database import (
     MessageDelivery,
     NotificationRecord,
     OpportunityRecipient,
-    OpportunityTicket,
     Organization,
     OrganizationMembership,
     ProcessedMessage,
+    ReconciliationDecision,
     TicketSegment,
     TravelBooking,
     UpsellOpportunity,
@@ -76,15 +75,14 @@ from .database import (
     new_agent,
     token_hash,
 )
-from .flights import score_booking
-from .llm import BookingExtractor, ExtractionError
-from .mailboxes import MailboxError, MailboxReader, readers
+from .jobs import JobFailure, JobQueue, job_view
+from .llm import BookingExtractor
+from .mailboxes import MailboxReader, readers
 from .migrations import upgrade_database
 from .models import (
     AgentCreated,
     AgentMetrics,
     AgentView,
-    AnalysisResponse,
     AuthorizationUrl,
     AuthProvider,
     AuthResult,
@@ -94,10 +92,9 @@ from .models import (
     ContactCreate,
     CurrencyMetrics,
     DeliveryView,
-    Destination,
     EmailExtraction,
     EmailForAnalysis,
-    Flight,
+    JobView,
     LoginRequest,
     MailboxView,
     MembershipCreate,
@@ -114,7 +111,6 @@ from .models import (
     RegisterRequest,
     RoleCreate,
     ScanRequest,
-    ScanResult,
     Scope,
     SendBatchView,
     TicketCreate,
@@ -122,6 +118,7 @@ from .models import (
     UserView,
 )
 from .oauth import OAuthError, OAuthService
+from .reconciliation import mailbox_organization, reconcile, record_email
 from .webhooks import WebhookService, webhook_active
 
 logger = structlog.get_logger()
@@ -132,8 +129,8 @@ HOME_PAGE = """<!doctype html><html lang=en><meta charset=utf-8><title>Tapy</tit
 <p><a href=/privacy>Privacy policy</a> · <a href=/terms>Terms</a></p></main></html>"""
 PRIVACY_PAGE = """<!doctype html><html lang=en><meta charset=utf-8><title>Tapy Privacy</title>
 <main><h1>Privacy Policy</h1><p>Tapy uses delegated read-only Gmail or Outlook access. Refresh
-tokens are encrypted. Message content is processed transiently for booking facts and is never
-stored; source identifiers and derived provenance are retained.
+tokens are encrypted. Message bodies are processed transiently and are not stored;
+extracted booking facts, source headers and decision history are retained.
 Contact: kfir.marx@gmail.com.</p></main></html>"""
 TERMS_PAGE = """<!doctype html><html lang=en><meta charset=utf-8><title>Tapy Terms</title>
 <main><h1>Proof-of-concept terms</h1><p>Verify bookings with the provider. Tapy does not make,
@@ -193,16 +190,19 @@ def create_app(
     extractor: Extractor | None = None,
     mailbox_readers: Mapping[Provider, MailboxReader] | None = None,
     flight_repository: object | None = None,
+    worker: bool = False,
 ) -> FastAPI:
     del flight_repository
     resolved = settings or Settings()
     if extractor is None:
         resolved.require_rabbitmq()
     engine = make_engine(resolved)
-    upgrade_database(engine)
+    if extractor is not None:
+        upgrade_database(engine)
     factory = make_factory(engine)
     configured_extractor = extractor or BookingExtractor.from_settings(resolved)
     event_hub = EventHub()
+    queue = JobQueue(resolved, factory)
 
     def ensure_context(session: Session, user: User) -> OrganizationMembership:
         membership = (
@@ -428,7 +428,8 @@ def create_app(
                     and (_utc(mailbox.webhook_expires_at) - datetime.now(UTC)).total_seconds()
                     < resolved.webhook_renewal_seconds * 2
                 ):
-                    await app.state.webhooks.ensure(mailbox)
+                    with suppress(Exception):
+                        await app.state.webhooks.ensure(mailbox)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -437,17 +438,30 @@ def create_app(
         app.state.oauth = OAuthService(resolved, factory, client)
         app.state.webhooks = WebhookService(resolved, factory, app.state.oauth, client)
         app.state.mailbox_readers = mailbox_readers or readers(client, resolved.gmail_query)
+        tasks = []
         if extractor is None:
-            assert isinstance(configured_extractor, BookingExtractor)
-            await configured_extractor.connect()
-        renewal_task = asyncio.create_task(renew_webhooks(app))
-        yield
-        renewal_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await renewal_task
-        if extractor is None:
-            assert isinstance(configured_extractor, BookingExtractor)
-            await configured_extractor.close()
+            await queue.connect()
+        if worker:
+            if extractor is None:
+                assert isinstance(configured_extractor, BookingExtractor)
+                await configured_extractor.connect()
+            tasks = [
+                asyncio.create_task(queue.consume(run_job)),
+                asyncio.create_task(renew_webhooks(app)),
+            ]
+        app.state.worker_tasks = tasks
+        try:
+            yield
+        finally:
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with suppress(asyncio.CancelledError):
+                    await task
+            if worker and extractor is None:
+                assert isinstance(configured_extractor, BookingExtractor)
+                await configured_extractor.close()
+            await queue.close()
         await client.aclose()
         engine.dispose()
 
@@ -496,7 +510,7 @@ def create_app(
     async def ready(response: Response) -> dict[str, object]:
         dependencies: dict[str, object] = {
             "database": "ready",
-            "rabbitmq": "ready" if configured_extractor.ready else "unavailable",
+            "rabbitmq": "ready" if queue.ready or extractor is not None else "unavailable",
         }
         try:
             with engine.connect() as connection:
@@ -504,7 +518,7 @@ def create_app(
         except Exception:
             response.status_code = 503
             dependencies["database"] = "unavailable"
-        if not configured_extractor.ready:
+        if not queue.ready and extractor is None:
             response.status_code = 503
         return {
             "status": "ready" if response.status_code != 503 else "not-ready",
@@ -882,65 +896,56 @@ def create_app(
         with factory() as session:
             return opportunity_view(session, accessible_opportunity(session, opportunity_id, user))
 
+    @app.get("/v1/opportunities/{opportunity_id}/audit")
+    async def opportunity_audit(
+        opportunity_id: str, user: User = Depends(authenticate)
+    ) -> list[dict[str, object]]:
+        with factory() as session:
+            accessible_opportunity(session, opportunity_id, user)
+            return [
+                {"reason": row.reason, "evidence": row.evidence, "created_at": row.created_at}
+                for row in session.scalars(
+                    select(ReconciliationDecision)
+                    .where(ReconciliationDecision.opportunity_id == opportunity_id)
+                    .order_by(ReconciliationDecision.created_at)
+                )
+            ]
+
     @app.post("/v1/opportunities", response_model=OpportunityView, status_code=201)
     async def create_opportunity(
         body: OpportunityCreate, user: User = Depends(authenticate)
     ) -> OpportunityView:  # noqa: B008
-        with factory.begin() as session:
-            booking = accessible_booking(session, body.booking_id, user)
-            agent_id = body.assigned_agent_id or booking.assigned_agent_id
-            ensure_agent(session, booking.organization_id, agent_id)
-            tickets = session.scalars(
-                select(FlightTicket).where(
-                    FlightTicket.id.in_(body.ticket_ids),
-                    FlightTicket.booking_id == booking.id,
-                    FlightTicket.organization_id == booking.organization_id,
-                )
-            ).all()
-            if len(tickets) != len(set(body.ticket_ids)):
-                raise HTTPException(422, "every covered ticket must belong to the booking")
-            record = UpsellOpportunity(
-                organization_id=booking.organization_id,
-                booking_id=booking.id,
-                assigned_agent_id=agent_id,
-                product_type=body.product_type,
-                destination=body.destination,
-                service_start=body.service_start,
-                service_end=body.service_end,
-                potential_revenue=body.potential_revenue,
-                potential_commission=body.potential_commission,
-                currency=body.currency,
-            )
-            session.add(record)
-            session.flush()
-            for ticket in tickets:
-                session.add(
-                    OpportunityTicket(
-                        opportunity_id=record.id,
-                        ticket_id=ticket.id,
-                        booking_id=booking.id,
-                        organization_id=booking.organization_id,
-                    )
-                )
-            session.flush()
-            view = opportunity_view(session, record)
-        publish_organization(booking.organization_id)
-        return view
+        raise HTTPException(
+            409, "Opportunities are derived from connected email; run a mailbox scan"
+        )
 
     @app.patch("/v1/opportunities/{opportunity_id}", response_model=OpportunityView)
     async def update_opportunity(
         opportunity_id: str, body: OpportunityUpdate, user: User = Depends(authenticate)
     ) -> OpportunityView:  # noqa: B008
         with factory.begin() as session:
+            session.scalar(
+                select(Organization)
+                .where(Organization.id == user.active_organization_id)
+                .with_for_update()
+            )
             record = accessible_opportunity(session, opportunity_id, user)
+            if record.status not in {"open", "contacted"}:
+                raise HTTPException(409, "opportunity is no longer actionable")
             if record.version != body.version:
                 raise HTTPException(409, "opportunity was changed; refresh and retry")
             record.status = body.status
-            record.close_reason = body.close_reason
-            if body.won_revenue is not None:
-                record.won_revenue = body.won_revenue
-            if body.won_commission is not None:
-                record.won_commission = body.won_commission
+            record.close_reason = "agent_dismissed"
+            session.add(
+                ReconciliationDecision(
+                    organization_id=record.organization_id,
+                    booking_id=record.booking_id,
+                    opportunity_id=record.id,
+                    reason="agent_dismissed",
+                    evidence={"actor_user_id": user.id},
+                    fingerprint=stable_hash(record.id, record.version, "dismissed"),
+                )
+            )
             record.version += 1
             record.updated_at = datetime.now(UTC)
             session.flush()
@@ -960,7 +965,14 @@ def create_app(
         if body.person_id != person_id:
             raise HTTPException(422, "person IDs do not match")
         with factory.begin() as session:
+            session.scalar(
+                select(Organization)
+                .where(Organization.id == user.active_organization_id)
+                .with_for_update()
+            )
             opportunity = accessible_opportunity(session, opportunity_id, user)
+            if opportunity.status != "open":
+                raise HTTPException(409, "opportunity is no longer actionable")
             person = session.scalar(
                 select(BookingPerson).where(
                     BookingPerson.id == person_id,
@@ -998,7 +1010,7 @@ def create_app(
                 session.add(recipient)
             recipient.contact_point_id = body.contact_point_id
             recipient.selection_status = body.selection_status
-            recipient.selection_method = body.selection_method
+            recipient.selection_method = "manual"
             recipient.selection_reason = body.selection_reason
             recipient.confidence = body.confidence
             recipient.priority = body.priority
@@ -1008,8 +1020,7 @@ def create_app(
         publish_organization(opportunity.organization_id)
         return view
 
-    @app.post("/v1/opportunities/{opportunity_id}/send", response_model=SendBatchView)
-    async def send_opportunity(
+    async def deliver_opportunity(
         opportunity_id: str,
         user: User = Depends(authenticate),
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
@@ -1024,6 +1035,12 @@ def create_app(
                 )
             )
             if replay:
+                if replay.opportunity_id != opportunity_id:
+                    raise HTTPException(409, "idempotency key belongs to another opportunity")
+                if replay.status == "processing":
+                    raise HTTPException(
+                        409, "Delivery outcome uncertain; inspect provider before retrying"
+                    )
                 deliveries = session.scalars(
                     select(MessageDelivery).where(MessageDelivery.batch_id == replay.id)
                 ).all()
@@ -1035,6 +1052,8 @@ def create_app(
                     idempotent_replay=True,
                     deliveries=[delivery_view(item) for item in deliveries],
                 )
+            if opportunity.status not in {"open", "contacted"}:
+                raise HTTPException(409, "opportunity is no longer actionable")
             recipients = session.scalars(
                 select(OpportunityRecipient)
                 .where(
@@ -1071,6 +1090,8 @@ def create_app(
                     .with_for_update()
                 )
                 assert locked
+                if locked.status not in {"open", "contacted"}:
+                    raise HTTPException(409, "opportunity is no longer actionable")
                 processing = session.scalar(
                     select(UpsellSendBatch.id).where(
                         UpsellSendBatch.opportunity_id == opportunity_id,
@@ -1129,9 +1150,13 @@ def create_app(
             if previous:
                 created.append(previous)
                 continue
+            with factory() as session:
+                current = session.get(UpsellOpportunity, opportunity_id)
+                if not current or current.status not in {"open", "contacted"}:
+                    raise HTTPException(409, "opportunity was invalidated before delivery")
             rendered = (
                 f"Hi {person.given_name or person.display_name}! "
-                f"Your Tapy travel offer is ready: {resolved.hotel_offer_url}"
+                f"Explore accommodation for your trip: {resolved.hotel_offer_url}"
             )
             provider_id = error_code = error_message = None
             delivery_status = "failed"
@@ -1362,151 +1387,266 @@ def create_app(
             if mailbox:
                 session.delete(mailbox)
 
-    async def scan(user: User, provider: Provider, maximum: int | None) -> ScanResult:
+    async def enqueue_job(
+        user: User, kind: str, payload: dict[str, object], key: str | None = None
+    ) -> JobView:
+        try:
+            job = queue.enqueue(
+                user_id=user.id,
+                organization_id=cast(str, user.active_organization_id),
+                kind=kind,
+                payload=payload,
+                key=key or secrets.token_urlsafe(24),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        with suppress(Exception):
+            await queue.publish(job.id)
+        return job
+
+    @app.get("/v1/jobs", response_model=list[JobView])
+    async def list_jobs(user: User = Depends(authenticate)) -> list[JobView]:
         with factory() as session:
-            organization_id, _ = authorize_scope(session, user, "personal")
+            return [
+                job_view(j)
+                for j in session.scalars(
+                    select(BackgroundJob)
+                    .where(
+                        BackgroundJob.user_id == user.id,
+                        BackgroundJob.organization_id == user.active_organization_id,
+                    )
+                    .order_by(BackgroundJob.created_at.desc())
+                    .limit(30)
+                )
+            ]
+
+    @app.get("/v1/jobs/{job_id}", response_model=JobView)
+    async def get_job(job_id: str, user: User = Depends(authenticate)) -> JobView:
+        with factory() as session:
+            job = session.get(BackgroundJob, job_id)
+            if (
+                not job
+                or job.user_id != user.id
+                or job.organization_id != user.active_organization_id
+            ):
+                raise HTTPException(404, "job not found")
+            return job_view(job)
+
+    @app.post("/v1/jobs/{job_id}/retry", response_model=JobView, status_code=202)
+    async def retry_job(job_id: str, user: User = Depends(authenticate)) -> JobView:
+        await get_job(job_id, user)
+        with factory.begin() as session:
+            job = session.scalar(
+                select(BackgroundJob).where(BackgroundJob.id == job_id).with_for_update()
+            )
+            assert job
+            if job.status != "failed" or job.kind == "send":
+                raise HTTPException(
+                    409,
+                    "Only failed scan jobs can be retried; "
+                    "inspect uncertain sends with the provider",
+                )
+            job.status, job.attempts, job.error = "queued", 0, None
+            job.available_at = datetime.now(UTC)
+            session.flush()
+            view = job_view(job)
+        with suppress(Exception):
+            await queue.publish(job_id)
+        return view
+
+    @app.post("/v1/opportunities/{opportunity_id}/send", response_model=JobView, status_code=202)
+    async def send_opportunity(
+        opportunity_id: str,
+        user: User = Depends(authenticate),
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> JobView:
+        with factory.begin() as session:
+            session.scalar(
+                select(Organization)
+                .where(Organization.id == user.active_organization_id)
+                .with_for_update()
+            )
+            opportunity = accessible_opportunity(session, opportunity_id, user)
+            if idempotency_key:
+                previous = session.scalar(
+                    select(BackgroundJob).where(
+                        BackgroundJob.user_id == user.id,
+                        BackgroundJob.organization_id == user.active_organization_id,
+                        BackgroundJob.idempotency_key == idempotency_key,
+                    )
+                )
+                if previous:
+                    if previous.kind != "send" or previous.payload != {
+                        "opportunity_id": opportunity_id
+                    }:
+                        raise HTTPException(409, "Idempotency key belongs to another request")
+                    return job_view(previous)
+            reconcile(session, opportunity.organization_id, opportunity.assigned_agent_id)
+            if opportunity.status != "open":
+                raise HTTPException(409, "opportunity is no longer actionable")
+            if not resolved.hotel_offer_url:
+                raise HTTPException(409, "A partner booking link must be configured before sending")
+            selected = session.scalar(
+                select(OpportunityRecipient.id).where(
+                    OpportunityRecipient.opportunity_id == opportunity_id,
+                    OpportunityRecipient.selection_status == "selected",
+                    OpportunityRecipient.contact_point_id.is_not(None),
+                )
+            )
+            if not selected:
+                raise HTTPException(
+                    422, "Select a traveler with a phone or WhatsApp contact before sending"
+                )
+            # Enqueue and reserve the workflow in one transaction; no gap can lose a send.
+            key = idempotency_key or secrets.token_urlsafe(24)
+            job = BackgroundJob(
+                user_id=user.id,
+                organization_id=cast(str, user.active_organization_id),
+                kind="send",
+                payload={"opportunity_id": opportunity_id},
+                idempotency_key=key,
+            )
+            session.add(job)
+            opportunity.status = "contacted"
+            opportunity.attributes = {**opportunity.attributes, "outreach_started": True}
+            opportunity.version += 1
+            session.add(
+                ReconciliationDecision(
+                    organization_id=opportunity.organization_id,
+                    booking_id=opportunity.booking_id,
+                    opportunity_id=opportunity.id,
+                    reason="outreach_queued",
+                    evidence={"actor_user_id": user.id, "job_key": key},
+                    fingerprint=stable_hash(opportunity.id, key),
+                )
+            )
+            session.flush()
+            view = job_view(job)
+        with suppress(Exception):
+            await queue.publish(view.id)
+        return view
+
+    @app.post("/v1/scans", response_model=JobView, status_code=202)
+    async def scan_mailbox(
+        body: ScanRequest,
+        user: User = Depends(authenticate),
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> JobView:
+        with factory() as session:
             mailbox = session.scalar(
                 select(MailboxConnection).where(
-                    MailboxConnection.user_id == user.id, MailboxConnection.provider == provider
+                    MailboxConnection.user_id == user.id,
+                    MailboxConnection.provider == body.provider,
                 )
             )
-        if not mailbox:
-            raise HTTPException(409, "mailbox is not connected")
-        limit = min(
-            maximum or resolved.maximum_messages_per_scan, resolved.maximum_messages_per_scan
-        )
-        try:
-            access_token = await app.state.oauth.access_token(mailbox)
-            messages = await app.state.mailbox_readers[provider].messages(access_token, limit)
-        except (OAuthError, MailboxError) as exc:
-            raise HTTPException(502, str(exc)) from exc
-        skipped = confirmations = flight_confirmations = tickets_found = created_count = 0
-        results: list[AnalysisResponse] = []
-        for email in messages:
-            with factory() as session:
-                if session.scalar(
-                    select(ProcessedMessage.id).where(
-                        ProcessedMessage.mailbox_id == mailbox.id,
-                        ProcessedMessage.provider_message_id == email.message_id,
-                    )
-                ):
-                    skipped += 1
-                    continue
-            try:
-                extracted = await configured_extractor.extract(email)
-            except ExtractionError as exc:
-                raise HTTPException(502, "all LLM backends failed") from exc
-            outcome_ids: list[str] = []
-            opportunity_ids: list[str] = []
-            if extracted.flight_booking.is_flight_booking_confirmation:
-                flight_confirmations += 1
-                tickets_found += len(extracted.flight_booking.tickets)
-                with factory.begin() as session:
-                    outcome = ingest_flight_booking(
-                        session,
-                        organization_id=organization_id,
-                        agent_id=user.id,
-                        mailbox_id=mailbox.id,
-                        provider=provider,
-                        email=email,
-                        facts=extracted.flight_booking,
-                    )
-                    outcome_ids = outcome.booking_ids
-                    opportunity_ids = outcome.opportunity_ids
-                    for booking_id in outcome_ids:
-                        notify(
-                            session,
-                            user.id,
-                            organization_id,
-                            "booking_ingested",
-                            "Booking ingested",
-                            "Booking facts were extracted from email.",
-                            booking_id=booking_id,
-                        )
-                created_count += len(opportunity_ids)
-            confirmations += int(extracted.hotel_booking.is_hotel_booking_confirmation)
-            matches = []
-            if extracted.hotel_booking.is_hotel_booking_confirmation:
-                with factory.begin() as session:
-                    opportunities = session.scalars(
-                        select(UpsellOpportunity).where(
-                            UpsellOpportunity.organization_id == organization_id,
-                            UpsellOpportunity.assigned_agent_id == user.id,
-                            UpsellOpportunity.status.in_(["open", "contacted"]),
-                        )
-                    ).all()
-                    projections = [
-                        Flight(
-                            id=row.id,
-                            label=row.destination or row.id,
-                            arrival_date=(row.service_start or datetime.now(UTC)).date(),
-                            departure_date=(
-                                row.service_end or row.service_start or datetime.now(UTC)
-                            ).date(),
-                            destination=Destination(
-                                city=row.destination or "",
-                                airport_codes=[row.destination] if row.destination else [],
-                            ),
-                        )
-                        for row in opportunities
-                    ]
-                    matches = score_booking(
-                        extracted.hotel_booking, projections, resolved.match_threshold
-                    )
-                    if matches and matches[0].related:
-                        matched = session.get(UpsellOpportunity, matches[0].flight_id)
-                        assert matched
-                        matched.status = "closed"
-                        matched.close_reason = "hotel_already_booked"
-                        matched.version += 1
-            with factory.begin() as session:
-                session.add(
-                    ProcessedMessage(
-                        mailbox_id=mailbox.id,
-                        organization_id=organization_id,
-                        provider_message_id=email.message_id,
-                        provider_thread_id=email.thread_id,
-                        event_type=extracted.flight_booking.booking_status,
-                        outcome="opportunities_created" if opportunity_ids else "analyzed",
-                        result_summary={
-                            "booking_ids": outcome_ids,
-                            "opportunity_ids": opportunity_ids,
-                            "hotel_match": matches[0].flight_id
-                            if matches and matches[0].related
-                            else None,
-                        },
-                    )
+            if not mailbox:
+                raise HTTPException(409, "mailbox is not connected")
+            bound = mailbox_organization(session, mailbox.id)
+            if bound and bound != user.active_organization_id:
+                raise HTTPException(
+                    409, "Switch to the organization where this mailbox was first scanned"
                 )
-            results.append(
-                AnalysisResponse(
-                    message_id=email.message_id,
-                    booking=extracted.hotel_booking,
-                    matches=matches,
-                    best_opportunity_id=matches[0].flight_id if matches else None,
-                    best_score=matches[0].score if matches else 0,
-                    tickets_found=len(extracted.flight_booking.tickets),
-                    bookings_changed=outcome_ids,
-                    opportunities_created=opportunity_ids,
-                )
-            )
-        if results:
-            publish_organization(organization_id)
-        return ScanResult(
-            provider=provider,
-            messages_seen=len(messages),
-            messages_skipped=skipped,
-            messages_analyzed=len(results),
-            confirmations_found=confirmations,
-            matches_found=sum(bool(r.matches and r.matches[0].related) for r in results),
-            flight_confirmations_found=flight_confirmations,
-            flight_tickets_found=tickets_found,
-            opportunities_created=created_count,
-            results=results,
+        return await enqueue_job(
+            user, "scan", {**body.model_dump(), "mailbox_id": mailbox.id}, idempotency_key
         )
 
-    @app.post("/v1/scans", response_model=ScanResult)
-    async def scan_mailbox(body: ScanRequest, user: User = Depends(authenticate)) -> ScanResult:
-        return await scan(user, body.provider, body.maximum_messages)  # noqa: B008
+    async def run_job(job: BackgroundJob) -> dict[str, object]:
+        with factory() as session:
+            user = session.get(User, job.user_id)
+            membership = session.get(OrganizationMembership, (job.organization_id, job.user_id))
+            if not user or not membership or membership.status != "active":
+                raise ValueError("agent membership is no longer active")
+            # Jobs stay in the tenant selected at submission, including after UI tenant switches.
+            user.active_organization_id = job.organization_id
+        if job.kind == "send":
+            result = await deliver_opportunity(str(job.payload["opportunity_id"]), user, job.id)
+            if result.status != "completed":
+                raise JobFailure(
+                    "Delivery failed or partial; inspect delivery details before retrying",
+                    result.model_dump(mode="json"),
+                )
+            return result.model_dump(mode="json")
+        with factory() as session:
+            mailbox = session.get(MailboxConnection, job.payload["mailbox_id"])
+            if not mailbox or mailbox.user_id != user.id:
+                raise ValueError("mailbox disconnected")
+        if job.kind == "watch":
+            registered = await app.state.webhooks.ensure(mailbox)
+            if not registered and (mailbox.provider != "gmail" or resolved.gmail_pubsub_topic):
+                raise ValueError("webhook registration failed")
+            with factory() as session:
+                current_mailbox = session.get(MailboxConnection, mailbox.id)
+                return {"webhook_active": bool(current_mailbox and webhook_active(current_mailbox))}
+        access_token = await app.state.oauth.access_token(mailbox)
+        maximum = int(
+            cast(int, job.payload.get("maximum_messages") or resolved.maximum_messages_per_scan)
+        )
+        counts = {
+            "messages_seen": 0,
+            "messages_analyzed": 0,
+            "messages_skipped": 0,
+            "opportunities_created": 0,
+        }
+        # Readers paginate; extraction is performed page by page in this RabbitMQ worker.
+        reader = app.state.mailbox_readers[mailbox.provider]
+        async for messages in reader.pages(access_token, maximum):
+            for email in messages:
+                counts["messages_seen"] += 1
+                with factory() as session:
+                    seen = session.scalar(
+                        select(ProcessedMessage).where(
+                            ProcessedMessage.mailbox_id == mailbox.id,
+                            ProcessedMessage.provider_message_id == email.message_id,
+                        )
+                    )
+                if (
+                    seen
+                    and seen.result_summary.get("schema_version") == 1
+                    and not job.payload.get("reprocess")
+                ):
+                    counts["messages_skipped"] += 1
+                else:
+                    extracted = await configured_extractor.extract(email)
+                    with factory.begin() as session:
+                        if not session.get(MailboxConnection, mailbox.id):
+                            raise ValueError("mailbox disconnected during scan")
+                        created = record_email(
+                            session,
+                            organization_id=job.organization_id,
+                            agent_id=user.id,
+                            mailbox_id=mailbox.id,
+                            provider=mailbox.provider,
+                            email=email,
+                            extraction=extracted,
+                        )
+                        processed = session.scalar(
+                            select(ProcessedMessage).where(
+                                ProcessedMessage.mailbox_id == mailbox.id,
+                                ProcessedMessage.provider_message_id == email.message_id,
+                            )
+                        )
+                        if not processed:
+                            processed = ProcessedMessage(
+                                mailbox_id=mailbox.id,
+                                organization_id=job.organization_id,
+                                provider_message_id=email.message_id,
+                                outcome="analyzed",
+                            )
+                            session.add(processed)
+                        processed.result_summary = {"opportunity_ids": created, "schema_version": 1}
+                    counts["messages_analyzed"] += 1
+                    counts["opportunities_created"] += len(created)
+                with factory.begin() as session:
+                    current = session.get(BackgroundJob, job.id)
+                    assert current
+                    current.progress = dict(counts)
+        with factory.begin() as session:
+            reconcile(session, job.organization_id, user.id)
+        return dict(counts)
+
+    app.state.run_job = run_job
+    app.state.job_queue = queue
+    app.state.factory = factory
 
     @app.get("/v1/oauth/{provider}/callback", response_class=HTMLResponse)
     async def oauth_callback(
@@ -1530,29 +1670,50 @@ def create_app(
                 _set_session_cookie(response, token, resolved)
                 return response
             mailbox = await request.app.state.oauth.complete(provider, state, code)
-            await request.app.state.webhooks.ensure(mailbox)
+            with factory() as session:
+                owner = session.get(User, mailbox.user_id)
+            assert owner
+            await enqueue_job(owner, "watch", {"mailbox_id": mailbox.id})
             event_hub.publish(mailbox.user_id)
         except OAuthError as exc:
             raise HTTPException(400, str(exc)) from exc
+        payload = json.dumps(
+            {
+                "type": "tapy-mailbox-connected",
+                "mailbox": {
+                    "provider": mailbox.provider,
+                    "email_address": mailbox.email_address,
+                    "webhook_active": webhook_active(mailbox),
+                },
+            }
+        ).replace("<", "\\u003c")
         return HTMLResponse(
             "<!doctype html><title>Mailbox connected</title><h1>Mailbox connected</h1>"
-            "<script>if(window.opener){window.opener.postMessage('tapy-mailbox-connected',"
+            f"<script>if(window.opener){{window.opener.postMessage({payload},"
             "window.location.origin);window.close()}else{window.location.replace('/')}</script>"
         )
 
     async def scan_from_webhook(user_id: str, provider: Provider) -> None:
         with factory() as session:
             user = session.get(User, user_id)
+            mailbox = session.scalar(
+                select(MailboxConnection).where(
+                    MailboxConnection.user_id == user_id, MailboxConnection.provider == provider
+                )
+            )
+            if user and mailbox:
+                user.active_organization_id = (
+                    mailbox_organization(session, mailbox.id) or user.active_organization_id
+                )
         if user:
-            with suppress(Exception):
-                await scan(user, provider, None)
+            await scan_mailbox(ScanRequest(provider=provider), user, None)
 
     @app.post("/v1/webhooks/gmail", status_code=202)
     async def gmail_webhook(
-        payload: dict[str, object], background: BackgroundTasks, token: str = Query(default="")
+        payload: dict[str, object], token: str = Query(default="")
     ) -> dict[str, str]:
         expected = resolved.webhook_verification_token.get_secret_value()
-        if expected and not hmac.compare_digest(token, expected):
+        if not expected or not hmac.compare_digest(token, expected):
             raise HTTPException(401, "invalid webhook token")
         try:
             message = cast(dict[str, object], payload["message"])
@@ -1569,18 +1730,17 @@ def create_app(
                 )
             )
         if mailbox:
-            background.add_task(scan_from_webhook, mailbox.user_id, "gmail")
+            await scan_from_webhook(mailbox.user_id, "gmail")
         return {"status": "accepted"}
 
     @app.post("/v1/webhooks/outlook")
     async def outlook_webhook(
-        background: BackgroundTasks,
         payload: dict[str, object] | None = None,
         validation_token: str | None = Query(default=None, alias="validationToken"),
         token: str = Query(default=""),
     ) -> StarletteResponse:
         expected = resolved.webhook_verification_token.get_secret_value()
-        if expected and not hmac.compare_digest(token, expected):
+        if not expected or not hmac.compare_digest(token, expected):
             raise HTTPException(401, "invalid webhook token")
         if validation_token is not None:
             return PlainTextResponse(validation_token)
@@ -1600,7 +1760,7 @@ def create_app(
                     )
                 )
             if mailbox:
-                background.add_task(scan_from_webhook, mailbox.user_id, "outlook")
+                await scan_from_webhook(mailbox.user_id, "outlook")
         return Response(status_code=202)
 
     return app

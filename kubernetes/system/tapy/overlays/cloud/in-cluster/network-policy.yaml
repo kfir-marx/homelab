@@ -13,3 +13,19 @@ spec:
           podSelector:
             matchLabels: {app: rabbitmq}
       ports: [{port: 5672, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tapy-to-rabbitmq-worker
+spec:
+  podSelector:
+    matchLabels: {app: tapy, component: worker}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: rabbitmq}
+          podSelector:
+            matchLabels: {app: rabbitmq}
+      ports: [{port: 5672, protocol: TCP}]

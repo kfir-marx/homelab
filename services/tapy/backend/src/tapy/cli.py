@@ -1,3 +1,5 @@
+import asyncio
+
 import typer
 import uvicorn
 
@@ -33,6 +35,19 @@ def migrate() -> None:
         upgrade_database(engine)
     finally:
         engine.dispose()
+
+
+@app.command()
+def worker() -> None:
+    """Run RabbitMQ jobs independently of the HTTP server."""
+    from .api import create_app
+
+    async def run() -> None:
+        application = create_app(worker=True)
+        async with application.router.lifespan_context(application):
+            await asyncio.gather(*application.state.worker_tasks)
+
+    asyncio.run(run())
 
 
 if __name__ == "__main__":

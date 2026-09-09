@@ -1,15 +1,15 @@
 # Tapy backend
 
-Tapy stores multi-tenant travel bookings, people, contact points, PNRs,
-segments, tickets, opportunities, recipients, send batches, and individual
-deliveries in PostgreSQL. Opportunity outcome, recipient selection, delivery,
-and booking lifecycles are deliberately independent.
+Email-derived flight and accommodation evidence drives audited, order-independent
+upsell reconciliation. Alibaba Qwen extracts facts; deterministic rules handle
+matching, deduplication and send/dismiss eligibility. Message bodies are not retained.
 
-The strict LLM schema extracts explicit facts only. Deterministic code owns
-deduplication, entity resolution, the current one-ticket-per-opportunity rule,
-recipient fallback, matching, and sending. Raw mail bodies are never persisted.
+Run `tapy migrate`, then `tapy serve` and `tapy worker` as separate processes.
+Scans and sends return durable jobs; RabbitMQ workers perform provider calls.
+PostgreSQL stores job progress, booking evidence, decisions and delivery receipts.
+Partner-attributed outcomes are separate from the immediate opportunity workflow.
 
-Alembic runs to the latest revision when the API starts. `tapy migrate` is also
-available as an explicit migration command. See
-[`docs/tapy-runbook.md`](../../../docs/tapy-runbook.md) for reset behavior,
-metric formulas, API scope rules, and deployment verification.
+See [the runbook](../../../docs/tapy-runbook.md) for matching limitations, migration,
+configuration, recovery and deployment. Run `ruff check .`, `ruff format --check .`,
+`mypy src tests`, and `pytest`. The opt-in integration test additionally accepts
+`TAPY_TEST_DATABASE_URL` and `TAPY_TEST_RABBITMQ_URL` for disposable local services.

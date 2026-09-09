@@ -71,3 +71,34 @@ async def test_outlook_reader_uses_delegated_me_messages() -> None:
     assert route.calls[0].request.headers["prefer"] == 'outlook.body-content-type="text"'
     assert messages[0].body_text == "Confirmed stay"
     assert messages[0].sender == "Hotel <hotel@example.com>"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_gmail_paginates_instead_of_repeating_newest_page() -> None:
+    from tapy.mailboxes import GmailReader
+
+    listing = respx.get("https://gmail.googleapis.com/gmail/v1/users/me/messages").mock(
+        side_effect=[
+            httpx.Response(200, json={"messages": [{"id": "first"}], "nextPageToken": "page2"}),
+            httpx.Response(200, json={"messages": [{"id": "second"}]}),
+        ]
+    )
+    for message_id in ("first", "second"):
+        respx.get(f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": message_id,
+                    "payload": {
+                        "mimeType": "text/plain",
+                        "body": {"data": "aGVsbG8="},
+                        "headers": [],
+                    },
+                },
+            )
+        )
+    async with httpx.AsyncClient() as client:
+        messages = await GmailReader(client, "").messages("inert", 200)
+    assert [m.message_id for m in messages] == ["first", "second"]
+    assert listing.calls[1].request.url.params["pageToken"] == "page2"

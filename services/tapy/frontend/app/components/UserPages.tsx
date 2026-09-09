@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import JobPanel from "./JobPanel";
 import { useDemo } from "../lib/store";
 
 export function UserInfoPage() {
@@ -39,14 +40,14 @@ export function UserSettingsPage() {
     } finally { setWorking(""); }
   }
 
-  async function scan(provider: "gmail" | "outlook", title: string) {
+  async function scan(provider: "gmail" | "outlook", title: string, reprocess = false) {
     setWorking(`scan-${provider}`);
     try {
-      const result = await scanMailbox(provider);
+      await scanMailbox(provider, reprocess);
       pushToast({
         tone: "success",
-        title: `${title} scan complete`,
-        body: `${result.messages_analyzed} message(s) analyzed; ${result.opportunities_created} opportunity(s) created.`,
+        title: `${title} scan queued`,
+        body: "Progress will appear in background activity.",
       });
       setView("personal");
     } catch (reason) {
@@ -62,6 +63,7 @@ export function UserSettingsPage() {
 
   return (
     <Page title="Settings" subtitle="Manage your profile and delegated email permissions.">
+      <JobPanel />
       <section className="rounded-2xl border border-slate-200 p-5">
         <h2 className="font-semibold text-slate-900">Profile</h2>
         <label className="mt-4 block text-sm font-medium text-slate-700">Display name
@@ -80,7 +82,7 @@ export function UserSettingsPage() {
 
       <section className="mt-5 rounded-2xl border border-slate-200 p-5">
         <h2 className="font-semibold text-slate-900">Email permissions</h2>
-        <p className="mt-1 text-sm leading-relaxed text-slate-500">Tapy asks for read-only email access in the provider&apos;s own consent window. When connected, Tapy reads a bounded set of recent messages and sends their subject, sender, date, and text to Alibaba Cloud Qwen to identify flight and hotel confirmations. Full message bodies are not saved in Tapy&apos;s product database. Tokens go directly to the backend, are encrypted there, and are never exposed to this page. Selecting <strong>Grant read access</strong> requests this processing. See the <a href="/privacy" className="font-medium text-indigo-600 underline underline-offset-2">Privacy Policy</a>.</p>
+        <p className="mt-1 text-sm leading-relaxed text-slate-500">Tapy asks for read-only email access in the provider&apos;s own consent window. When connected, Tapy reads a bounded set of mailbox messages and sends their subject, sender, date, and text to Alibaba Cloud Qwen to identify flight and hotel confirmations. Full message bodies are not saved in Tapy&apos;s product database. Tokens go directly to the backend, are encrypted there, and are never exposed to this page. Selecting <strong>Grant read access</strong> requests this processing. See the <a href="/privacy" className="font-medium text-indigo-600 underline underline-offset-2">Privacy Policy</a>.</p>
         <div className="mt-5 space-y-3">
           <MailboxRow provider="gmail" title="Gmail" />
           <MailboxRow provider="outlook" title="Microsoft Outlook" />
@@ -100,10 +102,11 @@ export function UserSettingsPage() {
         {mailbox ? (
           <div className="flex gap-2">
             <button type="button" disabled={working === `scan-${provider}`} onClick={() => void scan(provider, title)} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{working === `scan-${provider}` ? "Scanning…" : "Scan now"}</button>
-            <button type="button" onClick={() => void disconnectMailbox(provider)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Disconnect</button>
+            <button type="button" disabled={working === `scan-${provider}`} onClick={() => void scan(provider, title, true)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Reprocess</button>
+            <button type="button" onClick={() => void disconnectMailbox(provider).catch((error) => pushToast({ tone: "error", title: "Disconnect failed", body: error.message }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Disconnect</button>
           </div>
         ) : (
-          <button type="button" onClick={() => void connectMailbox(provider)} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white">Grant read access</button>
+          <button type="button" onClick={() => void connectMailbox(provider).catch((error) => pushToast({ tone: "error", title: "Connection failed", body: error.message }))} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white">Grant read access</button>
         )}
       </div>
     );

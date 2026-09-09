@@ -1,7 +1,6 @@
 export type OpportunityStatus =
   | "open"
   | "contacted"
-  | "won"
   | "declined"
   | "expired"
   | "closed";
@@ -83,6 +82,7 @@ export type Recipient = {
 };
 
 export type Opportunity = {
+  flight_details: { start?: string; end?: string; booking_reference?: string; travelers?: string[]; pnrs?: string[]; segments?: Segment[] };
   id: string;
   organization_id: string;
   booking_id: string;
@@ -93,10 +93,6 @@ export type Opportunity = {
   service_end: string | null;
   status: OpportunityStatus;
   close_reason: string | null;
-  potential_revenue: string;
-  potential_commission: string;
-  won_revenue: string;
-  won_commission: string;
   currency: string;
   version: number;
   tickets: Ticket[];
@@ -170,3 +166,13 @@ export type User = {
 };
 
 export type View = "personal" | "organization" | "profile" | "settings";
+
+export type Job = {
+  id: string;
+  kind: "scan" | "send" | "watch";
+  status: "queued" | "running" | "retrying" | "completed" | "failed";
+  attempts: number;
+  progress: Record<string, number>;
+  result: { deliveries?: Array<{ destination_snapshot: string; status: string; error_message: string | null }> };
+  error: string | null;
+};

@@ -43,7 +43,7 @@ class WebhookService:
                 "mailbox_webhook_registration_failed",
                 provider=mailbox.provider,
                 mailbox_id=mailbox.id,
-                error=str(exc),
+                error=type(exc).__name__,
             )
             return False
 
@@ -53,8 +53,6 @@ class WebhookService:
             headers={"Authorization": f"Bearer {access_token}"},
             json={
                 "topicName": self._settings.gmail_pubsub_topic,
-                "labelIds": ["INBOX"],
-                "labelFilterBehavior": "include",
             },
         )
         response.raise_for_status()
@@ -78,11 +76,20 @@ class WebhookService:
             "expirationDateTime": expires.isoformat().replace("+00:00", "Z"),
             "clientState": client_state,
         }
-        response = await self._client.post(
-            "https://graph.microsoft.com/v1.0/subscriptions",
-            headers={"Authorization": f"Bearer {access_token}"},
-            json=body,
-        )
+        if mailbox.webhook_subscription_id:
+            response = await self._client.patch(
+                f"https://graph.microsoft.com/v1.0/subscriptions/{mailbox.webhook_subscription_id}",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json={"expirationDateTime": body["expirationDateTime"]},
+            )
+        else:
+            response = None
+        if response is None or response.status_code == 404:
+            response = await self._client.post(
+                "https://graph.microsoft.com/v1.0/subscriptions",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json=body,
+            )
         response.raise_for_status()
         payload = response.json()
         with self._factory.begin() as session:

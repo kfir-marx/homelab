@@ -6,8 +6,9 @@ import re
 from dataclasses import dataclass
 from datetime import UTC
 from decimal import Decimal
+from typing import cast
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .database import (
@@ -22,6 +23,7 @@ from .database import (
     OpportunityRecipient,
     OpportunityTicket,
     OrganizationMembership,
+    PartnerOutcome,
     TicketSegment,
     TravelBooking,
     UpsellOpportunity,
@@ -122,6 +124,12 @@ def create_booking(
         session.add(reservation)
         session.flush()
         for sequence, segment_item in enumerate(reservation_item.segments, 1):
+            if not (
+                segment_item.departure_at
+                and segment_item.origin_code
+                and segment_item.destination_code
+            ):
+                continue
             departure = segment_item.departure_at.astimezone(UTC)
             segment = FlightSegment(
                 organization_id=organization_id,
@@ -163,7 +171,7 @@ def ingest_flight_booking(
     email: EmailForAnalysis,
     facts: FlightBooking,
 ) -> IngestionOutcome:
-    """Resolve one booking graph; current policy creates one opportunity per ticket."""
+    """Project complete flight facts; reconciliation owns opportunity decisions."""
     ensure_agent(session, organization_id, agent_id)
     seen = session.scalar(
         select(IngestionSource.id).where(
@@ -174,7 +182,7 @@ def ingest_flight_booking(
     if seen:
         return IngestionOutcome([], [])
 
-    pnrs = sorted(reservation.pnr.strip() for reservation in facts.reservations)
+    pnrs = sorted(reservation.pnr.strip() for reservation in facts.reservations if reservation.pnr)
     booking_reference = facts.booking_reference or ("|".join(pnrs) if pnrs else None)
     booking = (
         session.scalar(
@@ -207,19 +215,11 @@ def ingest_flight_booking(
                 select(FlightReservation).where(FlightReservation.booking_id == booking.id)
             ):
                 reservation.status = "cancelled"
-            for opportunity in session.scalars(
-                select(UpsellOpportunity).where(
-                    UpsellOpportunity.booking_id == booking.id,
-                    UpsellOpportunity.status.in_(["open", "contacted"]),
-                )
-            ):
-                opportunity.status = "closed"
-                opportunity.close_reason = "booking_cancelled"
 
     people: dict[str, BookingPerson] = {}
     contacts: dict[str, ContactPoint] = {}
     for item in facts.people:
-        identity_key = stable_hash("provider-person", item.source_id)
+        identity_key = stable_hash("person-name", " ".join(item.display_name.casefold().split()))
         person = session.scalar(
             select(BookingPerson).where(
                 BookingPerson.booking_id == booking.id,
@@ -303,6 +303,8 @@ def ingest_flight_booking(
     reservations: dict[str, FlightReservation] = {}
     segments: dict[tuple[str, str], FlightSegment] = {}
     for reservation_item in facts.reservations:
+        if not reservation_item.pnr:
+            continue
         resolved_reservation = session.scalar(
             select(FlightReservation).where(
                 FlightReservation.booking_id == booking.id,
@@ -322,6 +324,12 @@ def ingest_flight_booking(
             resolved_reservation.status = reservation_item.status
         reservations[reservation_item.source_id] = resolved_reservation
         for sequence, segment_item in enumerate(reservation_item.segments, 1):
+            if not (
+                segment_item.departure_at
+                and segment_item.origin_code
+                and segment_item.destination_code
+            ):
+                continue
             departure = segment_item.departure_at.astimezone(UTC)
             fingerprint = stable_hash(
                 segment_item.airline,
@@ -353,10 +361,28 @@ def ingest_flight_booking(
                 )
                 session.add(segment)
                 session.flush()
+            else:
+                segment.sequence = sequence
+                segment.arrival_at = (
+                    segment_item.arrival_at.astimezone(UTC) if segment_item.arrival_at else None
+                )
             segments[(reservation_item.source_id, segment_item.source_id)] = segment
+
+    # Old itinerary segments must not survive a corrected snapshot.
+    current_segments = {segment.id for segment in segments.values()}
+    for old_segment in session.scalars(
+        select(FlightSegment)
+        .join(FlightReservation)
+        .where(FlightReservation.booking_id == booking.id)
+    ):
+        if old_segment.id not in current_segments:
+            session.delete(old_segment)
+    session.flush()
 
     opportunity_ids: list[str] = []
     for ticket_item in facts.tickets:
+        if ticket_item.reservation_source_id not in reservations:
+            continue
         ticket = session.scalar(
             select(FlightTicket).where(
                 FlightTicket.organization_id == organization_id,
@@ -377,64 +403,26 @@ def ingest_flight_booking(
             )
             session.add(ticket)
             session.flush()
-            covered_segments = ticket_item.segment_source_ids or [
-                source_id
-                for reservation_source_id, source_id in segments
-                if reservation_source_id == ticket_item.reservation_source_id
-            ]
-            for source_id in covered_segments:
-                segment = segments[(ticket_item.reservation_source_id, source_id)]
-                session.add(
-                    TicketSegment(
-                        ticket_id=ticket.id, segment_id=segment.id, organization_id=organization_id
-                    )
-                )
-
-        opportunity_id = session.scalar(
-            select(OpportunityTicket.opportunity_id).where(OpportunityTicket.ticket_id == ticket.id)
-        )
-        if not opportunity_id and facts.booking_status != "cancelled":
-            segment_values = [
-                segments[(ticket_item.reservation_source_id, source_id)]
-                for source_id in ticket_item.segment_source_ids
-            ]
-            opportunity = UpsellOpportunity(
-                organization_id=organization_id,
-                booking_id=booking.id,
-                assigned_agent_id=agent_id,
-                destination=segment_values[-1].destination_code if segment_values else None,
-                service_start=segment_values[0].departure_at if segment_values else None,
-                service_end=segment_values[-1].arrival_at if segment_values else None,
-                currency=ticket.currency,
-            )
-            session.add(opportunity)
-            session.flush()
+        if ticket.booking_id != booking.id:
+            continue  # An organization-wide ticket ID must never cross booking ownership.
+        ticket.person_id = people[ticket_item.passenger_source_id].id
+        ticket.reservation_id = reservations[ticket_item.reservation_source_id].id
+        ticket.amount, ticket.currency = ticket_item.amount, ticket_item.currency
+        session.execute(delete(TicketSegment).where(TicketSegment.ticket_id == ticket.id))
+        covered_segments = ticket_item.segment_source_ids or [
+            source_id
+            for reservation_source_id, source_id in segments
+            if reservation_source_id == ticket_item.reservation_source_id
+        ]
+        for source_id in covered_segments:
+            segment = segments.get((ticket_item.reservation_source_id, source_id))
+            if segment is None:
+                continue
             session.add(
-                OpportunityTicket(
-                    opportunity_id=opportunity.id,
-                    ticket_id=ticket.id,
-                    booking_id=booking.id,
-                    organization_id=organization_id,
+                TicketSegment(
+                    ticket_id=ticket.id, segment_id=segment.id, organization_id=organization_id
                 )
             )
-            person = people[ticket_item.passenger_source_id]
-            contact = contacts.get(ticket_item.passenger_source_id)
-            session.add(
-                OpportunityRecipient(
-                    organization_id=organization_id,
-                    booking_id=booking.id,
-                    opportunity_id=opportunity.id,
-                    person_id=person.id,
-                    contact_point_id=contact.id if contact else None,
-                    selection_status="selected" if contact else "needs_contact",
-                    selection_method="legacy_ticket_holder",
-                    selection_reason=(
-                        "Current product fallback selects the ticket holder; "
-                        "no group leadership was inferred"
-                    ),
-                )
-            )
-            opportunity_ids.append(opportunity.id)
 
     fingerprint = stable_hash(json.dumps(facts.model_dump(mode="json"), sort_keys=True))
     session.add(
@@ -526,7 +514,11 @@ def booking_view(session: Session, booking: TravelBooking) -> BookingView:
         organization_id=booking.organization_id,
         assigned_agent_id=booking.assigned_agent_id,
         internal_reference=booking.internal_reference,
-        external_reference=booking.external_reference,
+        external_reference=cast(dict[str, str | None], booking.attributes.get("facts", {})).get(
+            "booking_reference"
+        )
+        if booking.attributes.get("email_key")
+        else booking.external_reference,
         status=booking.status,
         people=[person_view(session, row) for row in people],
         reservations=reservation_views,
@@ -564,6 +556,7 @@ def opportunity_view(session: Session, opportunity: UpsellOpportunity) -> Opport
             )
         )
     return OpportunityView(
+        flight_details=cast(dict[str, object], opportunity.attributes.get("flight_details", {})),
         id=opportunity.id,
         organization_id=opportunity.organization_id,
         booking_id=opportunity.booking_id,
@@ -574,10 +567,6 @@ def opportunity_view(session: Session, opportunity: UpsellOpportunity) -> Opport
         service_end=opportunity.service_end,
         status=opportunity.status,
         close_reason=opportunity.close_reason,
-        potential_revenue=opportunity.potential_revenue,
-        potential_commission=opportunity.potential_commission,
-        won_revenue=opportunity.won_revenue,
-        won_commission=opportunity.won_commission,
         currency=opportunity.currency,
         version=opportunity.version,
         tickets=[ticket_view(session, row) for row in ticket_rows],
@@ -621,12 +610,21 @@ def metric_values(session: Session, organization_id: str, user_id: str | None) -
         name: sum(row.status == name for row in opportunities)
         for name in ("open", "contacted", "won", "declined", "expired", "closed")
     }
-    won = statuses["won"]
-    decided = won + statuses["declined"] + statuses["expired"] + statuses["closed"]
+    outcomes = session.scalars(
+        select(PartnerOutcome)
+        .where(PartnerOutcome.opportunity_id.in_(opportunity_ids))
+        .order_by(PartnerOutcome.occurred_at)
+    ).all()
+    latest = {(row.partner, row.opportunity_id): row for row in outcomes}
+    confirmed = [row for row in latest.values() if row.status == "confirmed"]
+    won = len({row.opportunity_id for row in confirmed})
+    statuses["won"] = won  # compatibility field, now based exclusively on partner evidence
     monetary_totals: dict[str, dict[str, Decimal]] = {}
-    for row in opportunities:
+    for outcome in confirmed:
+        if not outcome.currency:
+            continue
         totals = monetary_totals.setdefault(
-            row.currency,
+            outcome.currency,
             {
                 "potential_revenue": Decimal("0"),
                 "potential_commission": Decimal("0"),
@@ -634,17 +632,14 @@ def metric_values(session: Session, organization_id: str, user_id: str | None) -
                 "won_commission": Decimal("0"),
             },
         )
-        if row.status in {"open", "contacted"}:
-            totals["potential_revenue"] += row.potential_revenue
-            totals["potential_commission"] += row.potential_commission
-        elif row.status == "won":
-            totals["won_revenue"] += row.won_revenue
-            totals["won_commission"] += row.won_commission
+        totals["won_revenue"] += outcome.booking_value or Decimal("0")
+        totals["won_commission"] += outcome.commission or Decimal("0")
+    contacted = sum(bool(row.attributes.get("outreach_started")) for row in opportunities)
     return {
         "total": len(opportunities),
         "statuses": statuses,
         "delivery_successes": delivery_successes,
         "delivery_failures": delivery_failures,
-        "conversion_rate": won / decided if decided else 0,
+        "conversion_rate": won / contacted if contacted else 0,
         "monetary_totals": monetary_totals,
     }

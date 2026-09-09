@@ -8,15 +8,8 @@ from tapy.business import ingest_flight_booking
 from tapy.config import Settings
 from tapy.database import (
     FlightReservation,
-    IngestionSource,
     MailboxConnection,
-    OpportunityRecipient,
-    OpportunityTicket,
-    Organization,
-    OrganizationMembership,
-    TravelBooking,
     UpsellOpportunity,
-    User,
     make_engine,
     make_factory,
 )
@@ -91,108 +84,36 @@ def extracted(status: str = "confirmed") -> FlightBooking:
     )
 
 
-def test_ingestion_shared_pnr_idempotency_modification_and_cancellation(tmp_path: Path) -> None:
-    engine = make_engine(
-        Settings(database_url=SecretStr(f"sqlite+pysqlite:///{tmp_path / 'ingestion.sqlite'}"))
-    )
+def test_projection_does_not_decide_opportunities(tmp_path: Path) -> None:
+    from tapy.database import new_agent
+
+    engine = make_engine(Settings(database_url=SecretStr(f"sqlite+pysqlite:///{tmp_path / 'db'}")))
     upgrade_database(engine)
     factory = make_factory(engine)
     with factory.begin() as session:
-        user = User(email="agent@example.com", name="Agent")
-        organization = Organization(name="Agency", slug="agency")
-        session.add_all([user, organization])
-        session.flush()
-        session.add(
-            OrganizationMembership(organization_id=organization.id, user_id=user.id, role="agent")
-        )
-        user.active_organization_id = organization.id
+        user, _ = new_agent(session)
         mailbox = MailboxConnection(
             user_id=user.id,
             provider="gmail",
-            provider_account_id="account-1",
-            email_address=user.email,
-            refresh_token="encrypted",  # noqa: S106 - inert database fixture
-            scopes="gmail.readonly",
+            provider_account_id="a",
+            email_address="a@example.com",
+            refresh_token="encrypted",  # noqa: S106 - inert fixture
+            scopes="readonly",
         )
         session.add(mailbox)
         session.flush()
-        ids = (organization.id, user.id, mailbox.id)
-
-    def email(message_id: str) -> EmailForAnalysis:
-        return EmailForAnalysis(
-            message_id=message_id,
-            thread_id="thread-1",
-            subject="Booking update",
-            sender="airline@example.com",
-            body_text="This raw email body must never be persisted.",
-        )
-
-    with factory.begin() as session:
-        first = ingest_flight_booking(
+        assert user.active_organization_id
+        result = ingest_flight_booking(
             session,
-            organization_id=ids[0],
-            agent_id=ids[1],
-            mailbox_id=ids[2],
+            organization_id=user.active_organization_id,
+            agent_id=user.id,
+            mailbox_id=mailbox.id,
             provider="gmail",
-            email=email("message-1"),
+            email=EmailForAnalysis(message_id="1", body_text="not stored"),
             facts=extracted(),
         )
-        assert len(first.opportunity_ids) == 2
-
-    with factory.begin() as session:
-        duplicate = ingest_flight_booking(
-            session,
-            organization_id=ids[0],
-            agent_id=ids[1],
-            mailbox_id=ids[2],
-            provider="gmail",
-            email=email("message-1"),
-            facts=extracted(),
-        )
-        assert duplicate.booking_ids == []
-        assert duplicate.opportunity_ids == []
-
-    with factory.begin() as session:
-        modified = ingest_flight_booking(
-            session,
-            organization_id=ids[0],
-            agent_id=ids[1],
-            mailbox_id=ids[2],
-            provider="gmail",
-            email=email("message-2"),
-            facts=extracted("modified"),
-        )
-        assert modified.opportunity_ids == []
-
-    with factory.begin() as session:
-        cancelled = ingest_flight_booking(
-            session,
-            organization_id=ids[0],
-            agent_id=ids[1],
-            mailbox_id=ids[2],
-            provider="gmail",
-            email=email("message-3"),
-            facts=extracted("cancelled"),
-        )
-        assert cancelled.opportunity_ids == []
-
-    with factory() as session:
-        bookings = session.scalars(select(TravelBooking)).all()
-        reservations = session.scalars(select(FlightReservation)).all()
-        opportunities = session.scalars(select(UpsellOpportunity)).all()
-        recipients = session.scalars(select(OpportunityRecipient)).all()
-        links = session.scalars(select(OpportunityTicket)).all()
-        sources = session.scalars(select(IngestionSource)).all()
-        assert len(bookings) == 1
-        assert [item.pnr for item in reservations] == ["SHARED-PNR"]
-        assert len(opportunities) == 2
-        assert len(links) == 2
-        assert len({item.opportunity_id for item in links}) == 2
-        assert all(item.status == "closed" for item in opportunities)
-        assert all(item.close_reason == "booking_cancelled" for item in opportunities)
-        assert {item.selection_method for item in recipients} == {"legacy_ticket_holder"}
-        assert {item.selection_status for item in recipients} == {"selected"}
-        assert len(sources) == 3
-        assert all("body" not in column.name for column in IngestionSource.__table__.columns)
-        assert all("raw email body" not in str(item.extracted_fingerprint) for item in sources)
-    engine.dispose()
+        assert len(result.booking_ids) == 1
+        assert not result.opportunity_ids
+        assert not session.scalars(select(UpsellOpportunity)).all()
+        reservation = session.scalar(select(FlightReservation))
+        assert reservation and reservation.pnr == "SHARED-PNR"

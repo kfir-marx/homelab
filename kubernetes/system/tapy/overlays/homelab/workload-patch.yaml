@@ -15,3 +15,12 @@ spec:
   template:
     spec:
       priorityClassName: homelab-tapy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tapy-worker
+spec:
+  template:
+    spec:
+      priorityClassName: homelab-tapy

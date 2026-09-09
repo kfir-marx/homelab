@@ -4,5 +4,6 @@ kind: Kustomization
 resources:
   - config.yaml
   - workload.yaml
+  - autoscaling.yaml
   - frontend.yaml
   - network-policy.yaml

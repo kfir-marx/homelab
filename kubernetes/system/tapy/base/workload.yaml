@@ -39,6 +39,22 @@ spec:
         runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: migrate
+          image: ghcr.io/kfir-marx/tapy:sha-b46c7d3e2126d2871c6d644ff2ebbfba18754aee
+          args: [migrate]
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MATCHER_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: DATABASE_URL}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 25m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
       containers:
         - name: api
           image: ghcr.io/kfir-marx/tapy:sha-b46c7d3e2126d2871c6d644ff2ebbfba18754aee
@@ -122,6 +138,9 @@ spec:
             - name: MATCHER_MAXIMUM_MESSAGES_PER_SCAN
               valueFrom:
                 configMapKeyRef: {name: tapy, key: MAXIMUM_MESSAGES_PER_SCAN}
+            - name: MATCHER_HOTEL_OFFER_URL
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: HOTEL_OFFER_URL}
             - name: MATCHER_GMAIL_QUERY
               valueFrom:
                 configMapKeyRef: {name: tapy, key: GMAIL_QUERY}
@@ -138,6 +157,149 @@ spec:
           livenessProbe:
             httpGet: {path: /health/live, port: http}
             periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tapy-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tapy
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: tapy
+        component: worker
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: migrate
+          image: ghcr.io/kfir-marx/tapy:sha-b46c7d3e2126d2871c6d644ff2ebbfba18754aee
+          args: [migrate]
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MATCHER_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: DATABASE_URL}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 25m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+      containers:
+        - name: worker
+          image: ghcr.io/kfir-marx/tapy:sha-b46c7d3e2126d2871c6d644ff2ebbfba18754aee
+          args: [worker]
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MATCHER_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: DATABASE_URL}
+            - name: MATCHER_RABBITMQ_URL
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: RABBITMQ_URL}
+            - name: MATCHER_OAUTH_TOKEN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: OAUTH_TOKEN_ENCRYPTION_KEY}
+            - name: MATCHER_GOOGLE_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: GOOGLE_OAUTH_CLIENT_SECRET}
+            - name: MATCHER_MICROSOFT_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: tapy-secrets, key: MICROSOFT_OAUTH_CLIENT_SECRET}
+            - name: MATCHER_WEBHOOK_VERIFICATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tapy-secrets
+                  key: WEBHOOK_VERIFICATION_TOKEN
+                  optional: true
+            - name: MATCHER_TWILIO_ACCOUNT_SID
+              valueFrom:
+                secretKeyRef: {name: tapy-frontend-secrets, key: TWILIO_ACCOUNT_SID}
+            - name: MATCHER_TWILIO_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: tapy-frontend-secrets, key: TWILIO_AUTH_TOKEN}
+            - name: MATCHER_GOOGLE_OAUTH_CLIENT_ID
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: GOOGLE_OAUTH_CLIENT_ID}
+            - name: MATCHER_MICROSOFT_OAUTH_CLIENT_ID
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: MICROSOFT_OAUTH_CLIENT_ID}
+            - name: MATCHER_MICROSOFT_TENANT
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: MICROSOFT_TENANT}
+            - name: MATCHER_PUBLIC_BASE_URL
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: PUBLIC_BASE_URL}
+            - name: MATCHER_GOOGLE_OAUTH_REDIRECT_URI
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: GOOGLE_OAUTH_REDIRECT_URI}
+            - name: MATCHER_MICROSOFT_OAUTH_REDIRECT_URI
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: MICROSOFT_OAUTH_REDIRECT_URI}
+            - name: MATCHER_GMAIL_PUBSUB_TOPIC
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: GMAIL_PUBSUB_TOPIC}
+            - name: MATCHER_WEBHOOK_PUBLIC_BASE_URL
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: WEBHOOK_PUBLIC_BASE_URL}
+            - name: MATCHER_SECURE_COOKIES
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: SECURE_COOKIES}
+            - name: MATCHER_LLM_ORDER
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: LLM_ORDER}
+            - name: MATCHER_INTERNAL_LLM_QUEUE
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: INTERNAL_LLM_QUEUE}
+            - name: MATCHER_INTERNAL_LLM_MODEL
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: INTERNAL_LLM_MODEL}
+            - name: MATCHER_EXTERNAL_AI_QUEUE
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: EXTERNAL_AI_QUEUE}
+            - name: MATCHER_EXTERNAL_AI_MODEL
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: EXTERNAL_AI_MODEL}
+            - name: MATCHER_REQUEST_TIMEOUT_SECONDS
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: REQUEST_TIMEOUT_SECONDS}
+            - name: MATCHER_MATCH_THRESHOLD
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: MATCH_THRESHOLD}
+            - name: MATCHER_MAXIMUM_MESSAGES_PER_SCAN
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: MAXIMUM_MESSAGES_PER_SCAN}
+            - name: MATCHER_HOTEL_OFFER_URL
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: HOTEL_OFFER_URL}
+            - name: MATCHER_GMAIL_QUERY
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: GMAIL_QUERY}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

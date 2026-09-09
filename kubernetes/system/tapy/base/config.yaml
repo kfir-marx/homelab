@@ -12,12 +12,13 @@ data:
   GMAIL_PUBSUB_TOPIC: ""
   WEBHOOK_PUBLIC_BASE_URL: ""
   SECURE_COOKIES: "true"
-  LLM_ORDER: internal-llm,external-ai
+  LLM_ORDER: external-ai
   INTERNAL_LLM_QUEUE: internal-llm.requests
   INTERNAL_LLM_MODEL: local-llm
   EXTERNAL_AI_QUEUE: external-ai.requests
   EXTERNAL_AI_MODEL: alibaba:qwen-plus
   REQUEST_TIMEOUT_SECONDS: "120"
   MATCH_THRESHOLD: "0.90"
-  MAXIMUM_MESSAGES_PER_SCAN: "20"
-  GMAIL_QUERY: newer_than:365d
+  MAXIMUM_MESSAGES_PER_SCAN: "10000"
+  GMAIL_QUERY: ""
+  HOTEL_OFFER_URL: ""

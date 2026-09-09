@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-import httpx
-import respx
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -144,107 +142,21 @@ def test_personal_and_organization_authorization(tmp_path: Path) -> None:
         assert agent["active_organization_id"] != admin["active_organization_id"]
 
 
-@respx.mock
-def test_multi_ticket_recipients_partial_delivery_and_idempotent_retry(tmp_path: Path) -> None:
-    route = respx.post("https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json").mock(
-        side_effect=[
-            httpx.Response(201, json={"sid": "SM-FIRST"}),
-            httpx.Response(500),
-            httpx.Response(201, json={"sid": "SM-SECOND"}),
-        ]
-    )
-    with TestClient(
-        create_app(settings(tmp_path, twilio=True), extractor=FakeExtractor())
-    ) as client:
+def test_manual_opportunity_and_success_are_rejected(tmp_path: Path) -> None:
+    with TestClient(create_app(settings(tmp_path), extractor=FakeExtractor())) as client:
         register(client, "Admin", "admin@example.com")
         booking = client.post("/v1/bookings", json=booking_payload()).json()
-        first_ticket = add_ticket(client, booking, 0, "TICKET-1")
-        booking = client.get(f"/v1/bookings/{booking['id']}").json()
-        second_ticket = add_ticket(client, booking, 1, "TICKET-2")
-        opportunity = client.post(
-            "/v1/opportunities",
-            json={
-                "booking_id": booking["id"],
-                "ticket_ids": [first_ticket, second_ticket],
-                "destination": "LHR",
-                "potential_revenue": "2000.00",
-                "potential_commission": "200.00",
-                "currency": "EUR",
-            },
-        ).json()
-        for index, selection in enumerate(("selected", "selected", "excluded")):
-            person = booking["people"][index]
-            contact_id = person["contacts"][0]["id"] if person["contacts"] else None
-            response = client.put(
-                f"/v1/opportunities/{opportunity['id']}/recipients/{person['id']}",
-                json={
-                    "person_id": person["id"],
-                    "contact_point_id": contact_id,
-                    "selection_status": selection,
-                    "selection_method": "manual",
-                    "selection_reason": "Parents lead; child excluded",
-                },
-            )
-            assert response.status_code == 200, response.text
-
-        partial = client.post(
-            f"/v1/opportunities/{opportunity['id']}/send",
-            headers={"Idempotency-Key": "send-1"},
+        ticket = add_ticket(client, booking, 0, "T1")
+        response = client.post(
+            "/v1/opportunities", json={"booking_id": booking["id"], "ticket_ids": [ticket]}
         )
-        assert partial.status_code == 200, partial.text
-        assert partial.json()["status"] == "partial"
-        assert {item["status"] for item in partial.json()["deliveries"]} == {
-            "submitted",
-            "failed",
-        }
-        replay = client.post(
-            f"/v1/opportunities/{opportunity['id']}/send",
-            headers={"Idempotency-Key": "send-1"},
-        ).json()
-        assert replay["idempotent_replay"] is True
-        assert route.call_count == 2
-        first_attempts = [call.request.content.decode() for call in route.calls[:2]]
-        assert any("whatsapp%3A%2B972501111111" in body for body in first_attempts)
-        assert any("whatsapp%3A%2B972502222222" in body for body in first_attempts)
-
-        retry = client.post(
-            f"/v1/opportunities/{opportunity['id']}/send",
-            headers={"Idempotency-Key": "send-2"},
+        assert response.status_code == 409
+        assert (
+            client.patch(
+                "/v1/opportunities/missing", json={"status": "won", "version": 1}
+            ).status_code
+            == 422
         )
-        assert retry.json()["status"] == "completed"
-        assert route.call_count == 3
-        detail = client.get(f"/v1/opportunities/{opportunity['id']}").json()
-        assert len(detail["tickets"]) == 2
-        assert [item["selection_status"] for item in detail["recipients"]].count("selected") == 2
-        assert detail["status"] == "contacted"
-
-        metrics = client.get("/v1/metrics").json()
-        assert metrics["total_opportunities"] == 1
-        assert metrics["delivery_successes"] == 2
-        assert metrics["conversion_rate"] == 0
-        won = client.patch(
-            f"/v1/opportunities/{opportunity['id']}",
-            json={
-                "status": "won",
-                "version": detail["version"],
-                "won_revenue": "1800.00",
-                "won_commission": "180.00",
-            },
-        )
-        assert won.status_code == 200
-        metrics = client.get("/v1/metrics").json()
-        assert metrics["total_opportunities"] == 1
-        assert metrics["won_opportunities"] == 1
-        assert metrics["conversion_rate"] == 1
-        assert metrics["monetary_totals"] == [
-            {
-                "currency": "EUR",
-                "potential_revenue": "0",
-                "potential_commission": "0",
-                "won_revenue": "1800.00",
-                "won_commission": "180.00",
-            }
-        ]
 
 
 def test_shared_pnr_is_not_mutated(tmp_path: Path) -> None:

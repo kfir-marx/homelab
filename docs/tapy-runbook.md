@@ -19,28 +19,98 @@ user's explicit active organization. Personal scope filters bookings and
 opportunities by assigned agent; organization scope requires an active `admin`
 membership and is rejected with HTTP 403 for an `agent`.
 
-The strict `EmailExtraction` schema represents multiple people, explicit roles
-and contacts, multiple PNRs, timezone-aware segments, and passenger tickets.
-The LLM extracts facts only and must not infer group leadership or select a
-recipient. Deterministic code resolves the graph using provider message IDs,
-ticket numbers, unchanged PNRs, segment fingerprints, and stable source IDs.
-The current application rule creates one opportunity per newly resolved ticket.
-`opportunity_tickets` is many-to-many, so manual and future logic can attach
-multiple tickets to one opportunity without a schema change.
+Email is the sole source of upsell decisions. Alibaba Qwen extracts flight/hotel/neither
+facts through the external-ai RabbitMQ RPC worker. The versioned extraction envelope
+allows missing PNRs, tickets, locations and times, and retains extension metadata.
+`email_booking_events` stores every changed interpretation plus provider/message/thread
+identifiers, subject, sender and event time. Full message bodies remain at the provider.
+Reprocessing fetches them again; it does not require a back-office integration.
 
-The current recipient fallback records the ticket holder as
-`legacy_ticket_holder`. If that person has no extracted contact, the recipient
-is `needs_contact`; no group-leader fact is invented. Agents can manually add
-multiple selected or excluded people, choose each contact, and record selection
-reason and confidence.
+`reconciliation.py` evaluates the latest interpretation of every processed email for an
+agent in a tenant-locked transaction. It folds booking changes by reference and event
+time, then evaluates flights against all retained accommodation evidence. It runs after
+every booking email, after scans, and again before sending. Repeated processing creates
+neither duplicate cards nor duplicate identical audit decisions. Flight bookings without
+issued ticket numbers are supported. One booking produces at most one group opportunity.
+Hotel-first evidence suppresses a later flight card; hotel-later evidence immediately
+closes an existing actionable card. Cancellation and reclassification also invalidate it.
 
-Sending creates one `upsell_send_batch` with completion policy `all_selected`
-and one immutable `message_delivery` snapshot per attempted recipient. Twilio
-acceptance records `submitted`; it changes an open opportunity to `contacted`,
-never `won`. A mixture of accepted and failed deliveries makes the batch
-`partial`. Reusing the same idempotency key replays the batch, and a new retry
-skips recipients with an earlier `submitted` or `delivered` result. Conversion
-requires an explicit opportunity transition to `won`.
+Matching requires a matching normalized traveler name or explicit contact, matching
+city/airport text, and hotel dates covering the stay. A round trip uses the outbound
+arrival destination and return departure as the stay window, not the final home airport.
+Connections shorter than 24 hours are not separate stays. Unknown arrival dates,
+multiple substantial stops and partially accommodated groups are withheld for review
+and recorded in `reconciliation_decisions`. A one-way flight requires hotel coverage of
+the known arrival night. Airport-to-city aliases, transliteration, fuzzy identities,
+multi-room coverage and multi-city splitting are not inferred. This favors missing an
+uncertain match over sending to the wrong traveler. Reference-less duplicates require
+identical extracted facts; reference-less corrections cannot reliably be associated.
+Provider names/references must remain consistent. A forwarded original event timestamp
+is used only when explicitly extracted; otherwise the message date orders events.
+A confirmation alone never reinstates a cancelled booking; explicit modification is
+required. Missing facts in partial modification/cancellation messages preserve prior
+facts; reprocessing a source message replaces its interpretation.
+
+Lifecycle:
+
+- `open`: flight evidence supports a potential accommodation upsell; send or dismiss.
+- `contacted`: outreach has been queued or attempted. Job/delivery state separately
+  distinguishes queued, submitted, partial, failed or uncertain delivery. It is never
+  a claim that a hotel was booked.
+- `declined`, or `closed` with `agent_dismissed`: agent dismissal; reconciliation never
+  reopens it.
+- `closed` with an evidence reason: hotel booked, flight cancelled, source reclassified,
+  or insufficient evidence. It can reopen if the evidence changes and no outreach was
+  attempted. Prior outreach remains `contacted` if evidence changes again.
+- `expired`: known trip window has passed.
+
+The card displays only known traveler/flight facts and send/dismiss controls. There is
+no expected commission or manual success action. `partner_outcomes` is a separate,
+append-only partner-event model for attributed booking values and actual commission.
+There is currently no authenticated partner callback adapter; no outcomes are invented.
+
+Sending queues a durable job and reserves the workflow in the same transaction. The
+worker rechecks actionability before delivery. A send batch snapshots each recipient,
+contact and rendered partner link. A partial failure remains visible in job delivery
+results. An uncertain provider response or worker interruption is not automatically
+resent: operators must inspect the provider to avoid duplicate customer messages.
+A small external-send race remains if evidence arrives after the last eligibility check
+and the provider accepts the message; already submitted messages cannot be recalled.
+Configure `HOTEL_OFFER_URL` with a real partner/affiliate link before sending. The old
+hard-coded destination, dates and guest count have been removed. No unsupported partner
+query parameters or attribution promises are fabricated.
+
+## Asynchronous execution and scaling
+
+`tapy serve` only handles HTTP; `tapy worker` consumes durable `tapy.jobs` messages.
+Scans, extraction, watch registration and sends execute in workers. HTTP scan/send
+requests return `202` and a persisted job view. The database outbox commits before
+publisher confirmation; workers recover unpublished jobs every ten seconds. Leases,
+heartbeats and bounded retry backoff cover crashes and duplicate broker deliveries.
+Scan retries skip committed messages. Jobs preserve the tenant and mailbox captured
+at submission even if the user changes organizations. A mailbox remains bound to
+the organization where it was first processed; webhook routing follows that evidence
+rather than the user's currently selected organization. Disconnected mailboxes cannot
+continue ingestion. Gmail/Outlook readers paginate (100 messages per page) through the
+configured scan scope, defaulting to at most 10,000 messages. Reaching a page cap is a
+visible failure, not a false completed scan. Gmail no longer filters the default scan
+to the most recent year. Full rescans for webhooks remain a cost bottleneck on large
+mailboxes; provider history/delta cursors are a future optimization.
+
+Backend and frontend have separate deployments, images and CPU HPAs (1–3 replicas,
+70% utilization; requires metrics-server). Argo CD respects ignored replica fields
+for those two deployments so self-heal does not undo HPA scaling. Workers have their own deployment and
+replica setting, with one prefetched job per consumer. Scale worker replicas from
+queue depth/oldest-job age using the cluster's external metrics system; a KEDA
+installation is not assumed. PostgreSQL and tenant reconciliation locks remain shared
+capacity constraints. Browser polling reconciles cross-process changes; local SSE is
+an optional latency optimization, not the correctness mechanism.
+
+Gmail watches include all mailbox changes, consistent with scans, per the
+[watch API](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/watch).
+Outlook renewal uses [PATCH subscription](https://learn.microsoft.com/en-us/graph/api/subscription-update?view=graph-rest-1.0),
+recreating only when the subscription no longer exists. Queue delivery follows
+[RabbitMQ acknowledgement and publisher-confirmation semantics](https://www.rabbitmq.com/docs/confirms).
 
 ## Backend API
 
@@ -60,23 +130,28 @@ scopes. Login and mailbox grants remain separate operations.
   `POST /v1/bookings/{id}/tickets` expose the normalized booking graph.
   Person role/contact subresources support manual corrections without replacing
   the person or using a mutable name as identity.
-- `GET/POST /v1/opportunities`, `GET/PATCH /v1/opportunities/{id}`, and
-  `PUT /v1/opportunities/{id}/recipients/{person_id}` manage opportunities,
-  covered tickets, outcomes, and recipient selection.
-- `POST /v1/opportunities/{id}/send` sends all selected valid recipients and
-  returns the batch plus individual delivery outcomes. Supply `Idempotency-Key`.
+- `GET /v1/opportunities`, `GET/PATCH /v1/opportunities/{id}`, and
+  `PUT /v1/opportunities/{id}/recipients/{person_id}` list opportunities, dismiss them
+  and select contacts. Manual opportunity creation returns 409.
+- `GET /v1/opportunities/{id}/audit` explains derived and agent decisions.
+- `POST /v1/opportunities/{id}/send` returns a queued job. Supply `Idempotency-Key`;
+  replaying the same request returns that job without a second send.
+- `GET /v1/jobs`, `GET /v1/jobs/{id}` expose progress, attempts, errors and delivery results.
+  `POST /v1/jobs/{id}/retry` retries failed scans; uncertain sends need provider review.
 - `GET /v1/metrics?scope=personal|organization` returns opportunity metrics;
   organization scope also contains per-agent rows.
-- `GET /v1/events` streams invalidations; the frontend also refreshes on focus
-  and every 30 seconds as a recovery path.
+- `GET /v1/events` streams local invalidations; the frontend polls every five seconds
+  as a recovery path and immediately applies confirmed action responses locally.
 - `GET /v1/notifications` lists the current user's notifications and
   `POST /v1/notifications/read` marks the current set read.
 - `POST /v1/mailboxes/gmail/authorization` returns a Google consent URL.
 - `POST /v1/mailboxes/outlook/authorization` returns a Microsoft consent URL.
 - `GET /v1/oauth/{provider}/callback` consumes the one-time OAuth state and
-  stores the encrypted refresh token and registers a renewable provider watch.
+  stores the encrypted refresh token and queues renewable provider-watch registration.
+  The popup sends confirmed mailbox metadata so Scan/Disconnect render immediately.
 - `POST /v1/scans` with `{"provider":"gmail"}` or `{"provider":"outlook"}`
-  remains available for manual recovery/testing. A connected mailbox's
+  returns a queued job. Add `"reprocess":true` to fetch and re-extract older messages,
+  including after upgrading from the previous schema. A connected mailbox's
   **Scan now** control in Settings exposes this bounded scan for users and
   provider reviewers.
 - `POST /v1/webhooks/gmail` accepts Google Pub/Sub pushes and
@@ -289,9 +364,8 @@ changes.
    expiry, and test rotation without disconnecting users. See Microsoft's
    [credential guidance](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials).
 6. Expose the production Graph webhook directly over valid public HTTPS and
-   verify the validation-token handshake. Before production, change Tapy to
-   renew the existing subscription with `PATCH /subscriptions/{id}` instead of
-   attempting a duplicate `POST`, add a lifecycle-notification URL, and handle
+   verify the validation-token handshake. Tapy renews existing subscriptions with `PATCH`. Before production,
+   add a lifecycle-notification URL and handle
    `reauthorizationRequired`, `subscriptionRemoved`, and `missed` events. Graph
    can delay or drop notifications from slow endpoints, so queue promptly,
    return `202`, monitor response latency and renewal failures, and retain the
@@ -319,11 +393,11 @@ organization scope includes the active tenant and is admin-only.
 - Lifecycle counts are exact counts by opportunity status.
 - Delivery successes count `submitted` plus `delivered` delivery rows; failures
   count `failed` rows. These do not imply conversion.
-- Conversion rate is `won / (won + declined + expired + closed)`. Open and
-  contacted opportunities are not decided and are excluded from the denominator.
-- Potential revenue/commission sums open and contacted opportunities.
-- Won revenue/commission sums only won opportunities.
-- Organization per-agent metrics use the same formula and assignment boundary.
+- Legacy API fields named `won_*` now derive only from the latest verified partner
+  events; manual opportunity fields never contribute. Conversion is attributed
+  opportunities divided by opportunities with outreach, not agent dismissals.
+- Potential revenue/commission compatibility metrics are zero. The UI omits them.
+- Without partner callbacks, actual booking and commission reporting is unavailable.
 
 Monetary totals are grouped by ISO currency. Tapy never adds EUR to USD or
 silently converts either; exchange-rate conversion is intentionally outside the
@@ -332,8 +406,15 @@ current product boundary.
 ## Database migration and reset
 
 Alembic replaces runtime `create_all()` as the deployment migration authority.
-The API upgrades to the latest revision before accepting traffic; operators can
-also run `tapy migrate` explicitly. Revision `20260908_01` is a pre-production
+Deployment init containers run `tapy migrate` before API/worker startup; PostgreSQL
+advisory locking serializes concurrent migrations. API replicas do not migrate on
+request startup. Revision `20260909_02` adds evidence, audit, jobs and outcomes without
+dropping existing data. It closes old actionable cards as `legacy_requires_reprocessing`,
+because their hotel evidence was never retained. Run a reprocess scan after deployment
+to rebuild eligible email-derived opportunities. Matching legacy email bookings are
+adopted and duplicate per-ticket cards are retired, preserving prior dismissal and
+outreach. Normal scans also automatically re-extract legacy processed messages.
+The Settings UI provides a reprocess control. Revision `20260908_01` is a pre-production
 reset migration: when it detects the old `tapy_flights` table it drops only the
 enumerated Tapy tables and creates the normalized schema. It does not delete the
 PVC/PV or touch other schemas/workloads.
@@ -351,7 +432,7 @@ safety rules.
 The ConfigMap owns `LLM_ORDER`, both queue names and model names,
 `MICROSOFT_TENANT`, optional explicit redirect URIs, `MATCH_THRESHOLD`, scan
 limit, Gmail query and Pub/Sub topic, public/webhook URLs, secure-cookie mode,
-and non-secret OAuth client IDs. The matcher
+`HOTEL_OFFER_URL`, and non-secret OAuth client IDs. The matcher
 uses only the durable queues selected by `LLM_ORDER`; it receives RabbitMQ
 credentials, not either LLM's HTTP credential. The homelab overlay selects
 only `external-ai.requests`.
@@ -392,7 +473,7 @@ token. Tapy's dedicated RabbitMQ user is `tapy`. Its AMQP URL uses the
 reconciles that user from `rabbitmq/rabbitmq-tapy-user` after every blank-pod
 start with configure permission for the two request queues and narrowly matched
 `amq.gen-*` or `amq_<32 lowercase hex>` callback queues, write permission only
-for the default exchange, and read permission only for those callback queues.
+for the default exchange, and read/configure permission for `tapy.jobs` and those callback queues.
 Capture both Secrets with
 `scripts/secrets.sh capture-k8s tapy/tapy-secrets rabbitmq/rabbitmq-tapy-user`.
 
@@ -404,7 +485,7 @@ filesystem itself. Also add `RABBITMQ_URL` and `ALIBABA_API_KEY` to
 ## Namespace cutover
 
 The homelab Application targets the dedicated `tapy` namespace. Its workload
-names are `tapy-backend` and `tapy-frontend`; its Services have the same names.
+names are `tapy-backend`, `tapy-worker` and `tapy-frontend`; only API/frontend have Services.
 The namespace migration reuses `/mnt/storage2-bulk/tapy/postgres` through the
 new retained `tapy-postgres-tapy-pv`. Stop the old PostgreSQL writer before
 binding or starting the new one, and never run both against that directory.

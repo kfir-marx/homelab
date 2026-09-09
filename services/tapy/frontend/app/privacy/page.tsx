@@ -48,8 +48,8 @@ export default function PrivacyPolicy() {
           </li>
           <li>
             <strong>Email content used for matching:</strong> the subject, sender, sent date, and
-            up to 40,000 characters of plain-text content from a bounded set of recent Gmail or
-            Outlook messages. A scan processes no more than 20 messages by default. Messages may
+            up to 40,000 characters of plain-text content from a bounded set of Gmail or
+            Outlook messages. A scan processes up to 10,000 messages by default, in pages. Messages may
             include unrelated content because classification is needed to determine whether a
             message is a relevant booking confirmation.
           </li>
@@ -79,7 +79,7 @@ export default function PrivacyPolicy() {
           <li>create and secure accounts and maintain authenticated sessions;</li>
           <li>connect a mailbox after the user grants read-only access;</li>
           <li>
-            classify recent messages and extract explicit flight and hotel booking details;
+            classify mailbox messages and extract explicit flight and hotel booking details;
           </li>
           <li>
             deduplicate and match bookings, display dashboards, and notify users about changes;
@@ -155,7 +155,8 @@ export default function PrivacyPolicy() {
           We retain account and derived booking data while the pilot account is active and for as
           long as reasonably needed to provide the service, meet legal obligations, resolve
           disputes, and maintain security. We do not keep full mailbox message bodies in the Tapy
-          product database. Operational logs are retained only for a limited troubleshooting and
+          product database. We retain extracted booking facts, source headers such as subject,
+          sender and date, and decision history so matches can be explained and corrected. Operational logs are retained only for a limited troubleshooting and
           security period. Residual copies may remain in protected backups until those backups are
           overwritten through the normal backup cycle.
         </p>
