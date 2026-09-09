@@ -40,38 +40,18 @@ only the production Web client in this project when practical. Google's video
 requirements cover every OAuth client assigned to the project, so remove unused
 clients or demonstrate each remaining client.
 
-## Paste-ready scope justification
+## Paste-ready combined scope justification
 
-Use this for `gmail.readonly`, adjusting only if the deployed behavior changes:
+Paste this single paragraph for the requested scopes. It is **994 characters**,
+including spaces, and leaves a small margin below Google's 1,000-character
+limit. Adjust it only if the deployed behavior changes:
 
-> Tapy is a workspace for travel professionals. After an authenticated user
-> opens Settings, reads the mailbox-processing disclosure, and selects “Grant
-> read access,” Tapy uses `gmail.readonly` to list at most 20 recent messages
-> matching `newer_than:365d` per scan and retrieve their full payloads. Tapy
-> processes each selected message's subject, sender, date, and up to 40,000
-> characters of plain-text body to identify flight and hotel confirmations.
-> It sends that content to Alibaba Cloud Model Studio (Qwen) solely for
-> classification and booking-fact extraction, then displays derived bookings
-> and hotel opportunities to the user. Tapy does not send, edit, or delete
-> Gmail messages, does not store full message bodies or access tokens in its
-> product database, and does not use Google data for advertising, credit
-> decisions, sale, or generalized AI training. Read access is required because
-> the user-facing feature must inspect message bodies. `gmail.metadata` cannot
-> provide those bodies, while write-capable scopes are broader than necessary.
+> Tapy serves travel professionals. Google sign-in uses openid, userinfo.email, and userinfo.profile only to authenticate users, link the Google subject to a Tapy account, verify email, and set the display name; it does not read Gmail. Separately, after the user reads the mailbox disclosure in Settings and selects "Grant read access," Tapy uses gmail.readonly to list up to 20 messages matching newer_than:365d and read the subject, sender, date, and up to 40,000 characters of plain-text body. This identifies flight and hotel confirmations; gmail.metadata excludes message bodies, and write scopes are unnecessary. Content is sent to Alibaba Cloud Model Studio (Qwen) only to classify messages and extract booking details. Tapy shows derived bookings and hotel opportunities to the user. It cannot send, edit, or delete mail; does not store full message bodies or access tokens in its product database; and does not use Google data for ads, sale, credit decisions, or generalized AI training.
 
 If the form asks for the permitted application type, select the option closest
 to **reporting or monitoring that improves the email experience**, specifically
 automated travel itineraries or flight tracking. Do not describe Tapy as a
 generic data-export or AI-training tool.
-
-For the identity scopes, use:
-
-> Tapy offers optional Google sign-in. `openid`, `userinfo.email`, and
-> `userinfo.profile` are used only to authenticate the user, associate the
-> stable Google subject with a Tapy account, verify the account email, and
-> initialize the display name. Google sign-in alone does not connect or read
-> the user's mailbox; Gmail access is requested later, separately, and only
-> after the in-product mailbox disclosure.
 
 ## Paste-ready reviewer instructions
 
