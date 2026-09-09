@@ -76,7 +76,9 @@ scopes. Login and mailbox grants remain separate operations.
 - `GET /v1/oauth/{provider}/callback` consumes the one-time OAuth state and
   stores the encrypted refresh token and registers a renewable provider watch.
 - `POST /v1/scans` with `{"provider":"gmail"}` or `{"provider":"outlook"}`
-  remains available for manual recovery/testing.
+  remains available for manual recovery/testing. A connected mailbox's
+  **Scan now** control in Settings exposes this bounded scan for users and
+  provider reviewers.
 - `POST /v1/webhooks/gmail` accepts Google Pub/Sub pushes and
   `POST /v1/webhooks/outlook` accepts Microsoft Graph notifications.
 
@@ -218,6 +220,11 @@ Before either provider is promoted:
    travel itineraries and flight tracking as an approved Gmail use case, but
    this does not waive verification. Submit the production app using Google's
    [verification procedure](https://support.google.com/cloud/answer/13461325).
+   Use the repository-local
+   [Google OAuth verification packet](tapy-google-oauth-verification.md) for the
+   paste-ready justification, reviewer instructions, privacy evidence matrix,
+   synthetic test message, and demo-video shot list. Reconcile it with the
+   deployed production revision and current Google requirements before use.
 5. Unless Tapy qualifies for and documents an exception, its server-side use
    and transmission of restricted Gmail data requires a Google-approved CASA
    security assessment and annual reassessment. Budget lead time and assessor

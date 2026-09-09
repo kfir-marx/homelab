@@ -60,6 +60,17 @@ export type Booking = {
   updated_at: string;
 };
 
+export type MailboxScanResult = {
+  provider: "gmail" | "outlook";
+  messages_seen: number;
+  messages_skipped: number;
+  messages_analyzed: number;
+  confirmations_found: number;
+  flight_confirmations_found: number;
+  flight_tickets_found: number;
+  opportunities_created: number;
+};
+
 export type Recipient = {
   id: string;
   person: Person;

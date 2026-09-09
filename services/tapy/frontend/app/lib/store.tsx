@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { DICTIONARIES, LOCALES, type Lang, tr } from "./i18n";
-import type { Booking, Metrics, Notification, Opportunity, OpportunityStatus, User, View } from "./types";
+import type { Booking, MailboxScanResult, Metrics, Notification, Opportunity, OpportunityStatus, User, View } from "./types";
 
 type Toast = { id: number; title: string; body: string; tone: "success" | "info" | "error" };
 type NewBooking = {
@@ -44,6 +44,7 @@ type Store = {
   updateProfile: (input: { name?: string; language?: Lang; active_organization_id?: string }) => Promise<void>;
   connectMailbox: (provider: "gmail" | "outlook") => Promise<void>;
   disconnectMailbox: (provider: "gmail" | "outlook") => Promise<void>;
+  scanMailbox: (provider: "gmail" | "outlook") => Promise<MailboxScanResult>;
   addBooking: (input: NewBooking) => Promise<void>;
   updateOpportunity: (opportunity: Opportunity, status: OpportunityStatus) => Promise<void>;
   updateRecipient: (opportunityId: string, personId: string, contactId: string | null, selectionStatus: string) => Promise<void>;
@@ -133,6 +134,14 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
   const setLang = useCallback((next: Lang) => { setLangState(next); if (user) void updateProfile({ language: next }); }, [updateProfile, user]);
   const connectMailbox = useCallback(async (provider: "gmail" | "outlook") => { const value = await api<{ authorization_url: string }>(`/v1/mailboxes/${provider}/authorization`, { method: "POST" }); const popup = open(value.authorization_url, `tapy-${provider}`, "popup,width=560,height=720"); if (!popup) location.assign(value.authorization_url); }, []);
   const disconnectMailbox = useCallback(async (provider: "gmail" | "outlook") => { await api(`/v1/mailboxes/${provider}`, { method: "DELETE" }); await load(); }, [load]);
+  const scanMailbox = useCallback(async (provider: "gmail" | "outlook") => {
+    const result = await api<MailboxScanResult>("/v1/scans", {
+      method: "POST",
+      body: JSON.stringify({ provider }),
+    });
+    await load("personal");
+    return result;
+  }, [load]);
   const addBooking = useCallback(async (input: NewBooking) => {
     const booking = await api<Booking>("/v1/bookings", { method: "POST", body: JSON.stringify({ external_reference: input.reference || null, people: [{ display_name: input.passenger, roles: [{ role: "traveler", source_method: "manual" }], contacts: [input.phone ? { channel: "whatsapp", value: input.phone, is_primary: true } : { channel: "email", value: input.email, is_primary: true }] }], reservations: [{ pnr: input.pnr, segments: [{ origin_code: input.origin, destination_code: input.destination, departure_at: input.departureAt, arrival_at: input.arrivalAt || null }] }] }) });
     const person = booking.people[0]; const reservation = booking.reservations[0];
@@ -150,7 +159,7 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
   const t = useCallback((key: string, vars?: Record<string, string | number>) => tr(DICTIONARIES[lang], key, vars), [lang]);
   const money = useCallback((value: string | number, currency = "USD") => new Intl.NumberFormat(LOCALES[lang], { style: "currency", currency }).format(Number(value)), [lang]);
   const unreadNotificationCount = notifications.filter((item) => !item.read_at).length;
-  const value = useMemo<Store>(() => ({ loading, user, bookings, opportunities, metrics, notifications, unreadNotificationCount, view, setView, login, register, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox, addBooking, updateOpportunity, updateRecipient, sendOpportunity, refresh, markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, money }), [loading, user, bookings, opportunities, metrics, notifications, unreadNotificationCount, view, setView, login, register, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox, addBooking, updateOpportunity, updateRecipient, sendOpportunity, refresh, markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, money]);
+  const value = useMemo<Store>(() => ({ loading, user, bookings, opportunities, metrics, notifications, unreadNotificationCount, view, setView, login, register, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox, scanMailbox, addBooking, updateOpportunity, updateRecipient, sendOpportunity, refresh, markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, money }), [loading, user, bookings, opportunities, metrics, notifications, unreadNotificationCount, view, setView, login, register, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox, scanMailbox, addBooking, updateOpportunity, updateRecipient, sendOpportunity, refresh, markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, money]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

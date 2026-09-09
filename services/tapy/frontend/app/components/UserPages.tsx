@@ -22,7 +22,7 @@ export function UserInfoPage() {
 }
 
 export function UserSettingsPage() {
-  const { user, updateProfile, connectMailbox, disconnectMailbox, pushToast } = useDemo();
+  const { user, updateProfile, connectMailbox, disconnectMailbox, scanMailbox, setView, pushToast } = useDemo();
   const [name, setName] = useState(user?.name ?? "");
   const [working, setWorking] = useState("");
   useEffect(() => setName(user?.name ?? ""), [user?.name]);
@@ -37,6 +37,27 @@ export function UserSettingsPage() {
     } catch (reason) {
       pushToast({ tone: "error", title: "Could not save", body: reason instanceof Error ? reason.message : "Try again." });
     } finally { setWorking(""); }
+  }
+
+  async function scan(provider: "gmail" | "outlook", title: string) {
+    setWorking(`scan-${provider}`);
+    try {
+      const result = await scanMailbox(provider);
+      pushToast({
+        tone: "success",
+        title: `${title} scan complete`,
+        body: `${result.messages_analyzed} message(s) analyzed; ${result.opportunities_created} opportunity(s) created.`,
+      });
+      setView("personal");
+    } catch (reason) {
+      pushToast({
+        tone: "error",
+        title: `${title} scan failed`,
+        body: reason instanceof Error ? reason.message : "Try again.",
+      });
+    } finally {
+      setWorking("");
+    }
   }
 
   return (
@@ -77,7 +98,10 @@ export function UserSettingsPage() {
           <p className="mt-0.5 text-xs text-slate-500">{mailbox ? `${mailbox.email_address} · ${mailbox.webhook_active ? "live notifications active" : "connected; webhook configuration pending"}` : "Not connected"}</p>
         </div>
         {mailbox ? (
-          <button type="button" onClick={() => void disconnectMailbox(provider)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Disconnect</button>
+          <div className="flex gap-2">
+            <button type="button" disabled={working === `scan-${provider}`} onClick={() => void scan(provider, title)} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{working === `scan-${provider}` ? "Scanning…" : "Scan now"}</button>
+            <button type="button" onClick={() => void disconnectMailbox(provider)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Disconnect</button>
+          </div>
         ) : (
           <button type="button" onClick={() => void connectMailbox(provider)} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white">Grant read access</button>
         )}
