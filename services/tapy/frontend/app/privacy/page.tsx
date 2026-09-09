@@ -132,10 +132,6 @@ export default function PrivacyPolicy() {
             authorize use of this content for generalized model training.
           </li>
           <li>
-            <strong>Google Gemini API</strong> receives a user&apos;s assistant conversation and a
-            current dashboard snapshot only when that user chooses to use the assistant.
-          </li>
-          <li>
             <strong>Twilio and WhatsApp</strong> receive the traveler&apos;s phone number, offer text,
             and related delivery data when a Tapy user chooses to send an upsell message.
           </li>

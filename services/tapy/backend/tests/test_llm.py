@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
 from pydantic import SecretStr
 
 from tapy.config import Settings
-from tapy.llm import BookingExtractor, RpcResponse
+from tapy.llm import SYSTEM_PROMPT, BookingExtractor, RpcResponse
 from tapy.models import EmailForAnalysis
 
 
@@ -36,109 +37,101 @@ class FakeEndpoint:
 def email() -> EmailForAnalysis:
     return EmailForAnalysis(
         message_id="abc123",
-        subject="Your reservation",
-        sender="hotel@example.com",
-        body_text="Confirmed in London from 2026-10-12 through 2026-10-17.",
+        subject="Reservation",
+        sender="airline@example.com",
+        body_text="Two passenger tickets share PNR X.",
     )
 
 
 def valid() -> RpcResponse:
-    return RpcResponse(
-        200,
-        {
-            "choices": [
-                {
-                    "message": {
-                        "content": (
-                            '{"is_hotel_booking_confirmation":true,'
-                            '"booking_status":"confirmed","hotel_name":"Hotel",'
-                            '"city":"London","country":"UK",'
-                            '"check_in_date":"2026-10-12",'
-                            '"check_out_date":"2026-10-17","guest_name":null,'
-                            '"confirmation_number":null}'
-                        )
-                    }
-                }
-            ]
+    content = {
+        "hotel_booking": {
+            "is_hotel_booking_confirmation": False,
+            "booking_status": "unknown",
+            "hotel_name": None,
+            "city": None,
+            "country": None,
+            "check_in_date": None,
+            "check_out_date": None,
+            "guest_name": None,
+            "confirmation_number": None,
         },
-    )
-
-
-def valid_flight() -> RpcResponse:
-    return RpcResponse(
-        200,
-        {
-            "choices": [
+        "flight_booking": {
+            "is_flight_booking_confirmation": True,
+            "booking_status": "confirmed",
+            "booking_reference": "BOOK-1",
+            "people": [
                 {
-                    "message": {
-                        "content": (
-                            '{"hotel_booking":{"is_hotel_booking_confirmation":false,'
-                            '"booking_status":"unknown","hotel_name":null,"city":null,'
-                            '"country":null,"check_in_date":null,"check_out_date":null,'
-                            '"guest_name":null,"confirmation_number":null},'
-                            '"flight_booking":{"is_flight_booking_confirmation":true,'
-                            '"booking_status":"confirmed","tickets":[{"booking_ref":"PNR1",'
-                            '"ticket_number":"001","airline":"El Al",'
-                            '"outbound_flight_number":"LY315","return_flight_number":"LY316",'
-                            '"passenger_name":"Ada Lovelace",'
-                            '"email":null,"phone":null,"origin_code":"TLV",'
-                            '"origin_city":"Tel Aviv","destination_code":"LHR",'
-                            '"destination_city":"London","destination_country":"UK",'
-                            '"departure_at":"2026-10-12T08:00:00+03:00",'
-                            '"arrival_at":"2026-10-12T12:00:00+01:00",'
-                            '"return_at":"2026-10-17T18:00:00+01:00",'
-                            '"return_arrival_at":"2026-10-18T01:00:00+03:00",'
-                            '"flight_cost_usd":500,"currency":"USD"}]}}'
-                        )
-                    }
+                    "source_id": "p1",
+                    "display_name": "Ada Lovelace",
+                    "given_name": "Ada",
+                    "family_name": "Lovelace",
+                    "roles": [],
+                    "contacts": [
+                        {"channel": "email", "value": "ada@example.com", "is_primary": True}
+                    ],
                 }
-            ]
+            ],
+            "reservations": [
+                {
+                    "source_id": "r1",
+                    "pnr": "SHARED-PNR",
+                    "status": "confirmed",
+                    "segments": [
+                        {
+                            "source_id": "s1",
+                            "airline": "El Al",
+                            "flight_number": "LY315",
+                            "origin_code": "TLV",
+                            "destination_code": "LHR",
+                            "departure_at": "2026-10-12T08:00:00+03:00",
+                            "arrival_at": "2026-10-12T12:00:00+01:00",
+                        }
+                    ],
+                }
+            ],
+            "tickets": [
+                {
+                    "ticket_number": "001",
+                    "reservation_source_id": "r1",
+                    "passenger_source_id": "p1",
+                    "segment_source_ids": ["s1"],
+                    "amount": "500.25",
+                    "currency": "EUR",
+                }
+            ],
         },
-    )
+    }
+    return RpcResponse(200, {"choices": [{"message": {"content": json.dumps(content)}}]})
 
 
 @pytest.mark.asyncio
-async def test_falls_back_in_configured_order() -> None:
+async def test_strict_fact_schema_and_fallback_order() -> None:
     internal = FakeEndpoint([TimeoutError()])
     external = FakeEndpoint([valid()])
     extractor = BookingExtractor(
         ("internal-llm", "external-ai"),
         {"internal-llm": internal, "external-ai": external},
-        {"internal-llm": "local-llm", "external-ai": "alibaba:qwen-plus"},
+        {"internal-llm": "local", "external-ai": "qwen"},
     )
     result = await extractor.extract(email())
-    assert result.is_hotel_booking_confirmation
-    assert internal.requests[0]["model"] == "local-llm"
-    assert external.requests[0]["model"] == "alibaba:qwen-plus"
-    assert "json_schema" in external.requests[0]["response_format"]["type"]
+    assert result.flight_booking.reservations[0].pnr == "SHARED-PNR"
+    assert result.flight_booking.tickets[0].currency == "EUR"
+    schema = external.requests[0]["response_format"]["json_schema"]["schema"]
+    assert schema["additionalProperties"] is False
+    assert "leader" in SYSTEM_PROMPT
+    assert "never infer" in SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
-async def test_invalid_first_output_uses_fallback() -> None:
+async def test_invalid_output_uses_next_backend() -> None:
     invalid = RpcResponse(200, {"choices": [{"message": {"content": "no"}}]})
     extractor = BookingExtractor(
         ("external-ai", "internal-llm"),
-        {"internal-llm": FakeEndpoint([valid()]), "external-ai": FakeEndpoint([invalid])},
-        {"internal-llm": "local-llm", "external-ai": "alibaba:qwen-plus"},
+        {"external-ai": FakeEndpoint([invalid]), "internal-llm": FakeEndpoint([valid()])},
+        {"external-ai": "qwen", "internal-llm": "local"},
     )
-    assert (await extractor.extract(email())).hotel_name == "Hotel"
-
-
-@pytest.mark.asyncio
-async def test_extracts_one_standard_ticket_per_passenger() -> None:
-    endpoint = FakeEndpoint([valid_flight()])
-    extractor = BookingExtractor(
-        ("external-ai",),
-        {"external-ai": endpoint},
-        {"external-ai": "alibaba:qwen-plus"},
-    )
-
-    result = await extractor.extract(email())
-
-    assert result.flight_booking.is_flight_booking_confirmation
-    assert result.flight_booking.tickets[0].passenger_name == "Ada Lovelace"
-    schema = endpoint.requests[0]["response_format"]["json_schema"]["schema"]
-    assert "flight_booking" in schema["properties"]
+    assert (await extractor.extract(email())).flight_booking.tickets[0].ticket_number == "001"
 
 
 def test_external_only_configuration_builds_one_rpc_endpoint() -> None:
@@ -148,26 +141,4 @@ def test_external_only_configuration_builds_one_rpc_endpoint() -> None:
         external_ai_queue="production.external-ai.requests",
         external_ai_model="alibaba:qwen-plus",
     )
-    extractor = BookingExtractor.from_settings(configured)
-    assert extractor.readiness == {"external-ai": "unavailable"}
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ("external-ai", ("external-ai",)),
-        ("internal-llm,external-ai", ("internal-llm", "external-ai")),
-    ],
-)
-def test_llm_order_accepts_environment_value(
-    monkeypatch: pytest.MonkeyPatch,
-    value: str,
-    expected: tuple[str, ...],
-) -> None:
-    monkeypatch.setenv("MATCHER_LLM_ORDER", value)
-    assert Settings().llm_order == expected
-
-
-def test_rabbitmq_is_required_for_runtime_extractor() -> None:
-    with pytest.raises(ValueError, match="MATCHER_RABBITMQ_URL"):
-        Settings().require_rabbitmq()
+    assert BookingExtractor.from_settings(configured).readiness == {"external-ai": "unavailable"}

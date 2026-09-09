@@ -1,142 +1,38 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import type { Agent, Flight, FlightStatus, Notification, User, View } from "./types";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { DICTIONARIES, LOCALES, type Lang, tr } from "./i18n";
-import {
-  formatDate as fmtDate,
-  formatDateRange as fmtDateRange,
-  formatNumber as fmtNumber,
-  formatPercent as fmtPercent,
-  formatUsd as fmtUsd,
-} from "./format";
+import type { Booking, Metrics, Notification, Opportunity, OpportunityStatus, User, View } from "./types";
 
-type Toast = {
-  id: number;
-  title: string;
-  body: string;
-  tone: "success" | "info" | "error";
-};
-
-type Formatters = {
-  usd: (n: number, opts?: { decimals?: boolean }) => string;
-  date: (iso: string) => string;
-  dateRange: (start: string, end: string) => string;
-  percent: (n: number, digits?: number) => string;
-  number: (n: number) => string;
-};
-
-export type NewFlightInput = {
-  bookingRef?: string;
-  passengerName: string;
-  partySize: number;
+type Toast = { id: number; title: string; body: string; tone: "success" | "info" | "error" };
+type NewBooking = {
+  reference: string;
+  passenger: string;
+  phone: string;
+  email: string;
+  pnr: string;
+  ticketNumber: string;
   origin: string;
-  originCity: string;
   destination: string;
-  destinationCity: string;
-  destinationCountry: string;
-  departureDate: string;
-  returnDate: string;
-  email: string;
-  phone: string;
-  flightCostUsd: number;
-  hotelCostUsd: number;
+  departureAt: string;
+  arrivalAt: string;
+  amount: number;
+  currency: string;
 };
 
-export type AgencyMetrics = {
-  totalFlights: number;
-  upsoldCount: number;
-  openCount: number;
-  declinedCount: number;
-  pastCount: number;
-  closingRate: number;
-  netProfit: number;
-  potentialProfit: number;
-  totalHotelRevenue: number;
+const EMPTY_METRICS: Metrics = {
+  scope: "personal", total_opportunities: 0, open_opportunities: 0,
+  contacted_opportunities: 0, won_opportunities: 0, declined_opportunities: 0,
+  expired_opportunities: 0, closed_opportunities: 0, delivery_successes: 0,
+  delivery_failures: 0, conversion_rate: 0, monetary_totals: [], per_agent: [],
 };
 
-const EMPTY_METRICS: AgencyMetrics = {
-  totalFlights: 0,
-  upsoldCount: 0,
-  openCount: 0,
-  declinedCount: 0,
-  pastCount: 0,
-  closingRate: 0,
-  netProfit: 0,
-  potentialProfit: 0,
-  totalHotelRevenue: 0,
-};
-
-type ApiUser = {
-  id: string;
-  name: string;
-  email: string;
-  language: Lang;
-  auth_providers: string[];
-  mailboxes: Array<{
-    provider: "gmail" | "outlook";
-    email_address: string;
-    webhook_active: boolean;
-  }>;
-};
-
-type ApiFlight = {
-  id: string;
-  booking_ref: string;
-  passenger_name: string;
-  party_size: number;
-  email: string;
-  phone: string;
-  origin: string;
-  origin_city: string;
-  destination_code: string;
-  destination: { city: string };
-  arrival_date: string;
-  departure_date: string;
-  flight_cost_usd: number;
-  hotel_cost_usd: number;
-  user_id: string;
-  status: FlightStatus;
-  closed_reason: string | null;
-  matched_hotel: Record<string, unknown> | null;
-};
-
-type ApiMetrics = {
-  total_flights: number;
-  upsold_count: number;
-  open_count: number;
-  declined_count: number;
-  hotel_on_file_count: number;
-  closing_rate: number;
-  net_profit: number;
-  potential_profit: number;
-  total_hotel_revenue: number;
-};
-
-type ApiNotification = {
-  id: string;
-  kind: Notification["kind"];
-  title: string;
-  message: string;
-  flight_id: string | null;
-  created_at: string;
-  read_at: string | null;
-};
-
-type TapyStore = {
+type Store = {
   loading: boolean;
   user: User | null;
-  flights: Flight[];
-  agents: Agent[];
-  activeAgentId: string;
-  metrics: AgencyMetrics;
+  bookings: Booking[];
+  opportunities: Opportunity[];
+  metrics: Metrics;
   notifications: Notification[];
   unreadNotificationCount: number;
   view: View;
@@ -145,13 +41,13 @@ type TapyStore = {
   register: (name: string, email: string, password: string) => Promise<void>;
   socialLogin: (provider: "google" | "microsoft") => Promise<void>;
   logout: () => Promise<void>;
-  updateProfile: (input: { name?: string; language?: Lang }) => Promise<void>;
+  updateProfile: (input: { name?: string; language?: Lang; active_organization_id?: string }) => Promise<void>;
   connectMailbox: (provider: "gmail" | "outlook") => Promise<void>;
   disconnectMailbox: (provider: "gmail" | "outlook") => Promise<void>;
-  sendUpsell: (flightId: string) => Promise<void>;
-  markDeclined: (flightId: string) => Promise<void>;
-  markOpen: (flightId: string) => Promise<void>;
-  addFlight: (input: NewFlightInput) => Promise<Flight>;
+  addBooking: (input: NewBooking) => Promise<void>;
+  updateOpportunity: (opportunity: Opportunity, status: OpportunityStatus) => Promise<void>;
+  updateRecipient: (opportunityId: string, personId: string, contactId: string | null, selectionStatus: string) => Promise<void>;
+  sendOpportunity: (opportunityId: string) => Promise<void>;
   refresh: () => Promise<void>;
   markNotificationsRead: () => Promise<void>;
   pushToast: (toast: Omit<Toast, "id">) => void;
@@ -160,365 +56,106 @@ type TapyStore = {
   lang: Lang;
   setLang: (lang: Lang) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
-  fmt: Formatters;
+  money: (value: string | number, currency?: string) => string;
 };
 
-const TapyContext = createContext<TapyStore | null>(null);
+const Context = createContext<Store | null>(null);
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     credentials: "same-origin",
-    headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers,
-    },
+    headers: { ...(init?.body ? { "Content-Type": "application/json" } : {}), ...init?.headers },
   });
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
-    try {
-      const body = (await response.json()) as { detail?: string };
-      if (body.detail) message = body.detail;
-    } catch {}
+    try { message = ((await response.json()) as { detail?: string }).detail || message; } catch {}
     throw new Error(message);
   }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
-}
-
-function mapUser(value: ApiUser): User {
-  return {
-    id: value.id,
-    name: value.name,
-    email: value.email,
-    language: value.language,
-    authProviders: value.auth_providers,
-    mailboxes: value.mailboxes.map((mailbox) => ({
-      provider: mailbox.provider,
-      emailAddress: mailbox.email_address,
-      webhookActive: mailbox.webhook_active,
-    })),
-  };
-}
-
-function mapFlight(value: ApiFlight): Flight {
-  return {
-    id: value.id,
-    bookingRef: value.booking_ref,
-    passengerName: value.passenger_name,
-    partySize: value.party_size,
-    email: value.email,
-    phone: value.phone,
-    origin: value.origin,
-    originCity: value.origin_city,
-    destination: value.destination_code,
-    destinationCity: value.destination.city,
-    departureDate: value.arrival_date,
-    returnDate: value.departure_date,
-    flightCostUsd: value.flight_cost_usd,
-    hotelCostUsd: value.hotel_cost_usd,
-    agentId: value.user_id,
-    status: value.status,
-    closedReason: value.closed_reason,
-    matchedHotel: value.matched_hotel,
-  };
-}
-
-function mapMetrics(value: ApiMetrics): AgencyMetrics {
-  return {
-    totalFlights: value.total_flights,
-    upsoldCount: value.upsold_count,
-    openCount: value.open_count,
-    declinedCount: value.declined_count,
-    pastCount: value.hotel_on_file_count,
-    closingRate: value.closing_rate,
-    netProfit: value.net_profit,
-    potentialProfit: value.potential_profit,
-    totalHotelRevenue: value.total_hotel_revenue,
-  };
-}
-
-function mapNotification(value: ApiNotification): Notification {
-  return {
-    id: value.id,
-    kind: value.kind,
-    title: value.title,
-    message: value.message,
-    flightId: value.flight_id,
-    createdAt: value.created_at,
-    readAt: value.read_at,
-  };
+  return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
 
 export function DemoProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
-  const [flights, setFlights] = useState<Flight[]>([]);
-  const [metrics, setMetrics] = useState<AgencyMetrics>(EMPTY_METRICS);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [view, setView] = useState<View>("agent");
+  const [view, setViewState] = useState<View>("personal");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [lang, setLangState] = useState<Lang>("en");
 
-  const refresh = useCallback(async () => {
+  const load = useCallback(async (requestedView?: View) => {
     try {
-      const [nextUser, nextFlights, nextMetrics, nextNotifications] = await Promise.all([
-        api<ApiUser>("/v1/users/me"),
-        api<ApiFlight[]>("/v1/flights"),
-        api<ApiMetrics>("/v1/metrics"),
-        api<ApiNotification[]>("/v1/notifications"),
+      const me = await api<User>("/v1/users/me");
+      const nextView = requestedView ?? view;
+      const scope = nextView === "organization" && me.active_organization_role === "admin" ? "organization" : "personal";
+      const [nextBookings, nextOpportunities, nextMetrics, nextNotifications] = await Promise.all([
+        api<Booking[]>(`/v1/bookings?scope=${scope}&limit=100`),
+        api<Opportunity[]>(`/v1/opportunities?scope=${scope}&limit=100`),
+        api<Metrics>(`/v1/metrics?scope=${scope}`),
+        api<Notification[]>("/v1/notifications"),
       ]);
-      const mapped = mapUser(nextUser);
-      setUser(mapped);
-      setLangState(mapped.language);
-      setFlights(nextFlights.map(mapFlight));
-      setMetrics(mapMetrics(nextMetrics));
-      setNotifications(nextNotifications.map(mapNotification));
+      setUser(me); setLangState(me.language); setBookings(nextBookings);
+      setOpportunities(nextOpportunities); setMetrics(nextMetrics); setNotifications(nextNotifications);
     } catch (error) {
-      if (error instanceof Error && error.message.includes("authentication")) {
-        setUser(null);
-        setFlights([]);
-        setMetrics(EMPTY_METRICS);
-        setNotifications([]);
-      } else if (error instanceof Error && error.message.includes("session")) {
-        setUser(null);
-        setFlights([]);
-        setMetrics(EMPTY_METRICS);
-        setNotifications([]);
-      } else {
-        throw error;
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      if (error instanceof Error && /(authentication|session)/.test(error.message)) {
+        setUser(null); setBookings([]); setOpportunities([]); setMetrics(EMPTY_METRICS); setNotifications([]);
+      } else { throw error; }
+    } finally { setLoading(false); }
+  }, [view]);
 
+  const refresh = useCallback(() => load(), [load]);
+  useEffect(() => { const timer = window.setTimeout(() => void load().catch(() => setLoading(false)), 0); return () => clearTimeout(timer); }, [load]);
   useEffect(() => {
-    const timer = window.setTimeout(() => void refresh().catch(() => setLoading(false)), 0);
-    return () => window.clearTimeout(timer);
-  }, [refresh]);
-
-  const userId = user?.id;
+    if (!user) return;
+    const source = new EventSource("/v1/events");
+    source.addEventListener("refresh", () => void load());
+    const timer = window.setInterval(() => void load(), 30_000);
+    return () => { source.close(); clearInterval(timer); };
+  }, [load, user]);
+  useEffect(() => { document.documentElement.lang = lang; document.documentElement.dir = lang === "he" ? "rtl" : "ltr"; }, [lang]);
   useEffect(() => {
-    if (!userId) return;
-    const events = new EventSource("/v1/events");
-    events.addEventListener("refresh", () => void refresh());
-    const interval = window.setInterval(() => void refresh(), 30_000);
-    const onFocus = () => void refresh();
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onFocus);
-    return () => {
-      events.close();
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onFocus);
-    };
-  }, [refresh, userId]);
+    const connected = (event: MessageEvent) => { if (event.origin === location.origin && event.data === "tapy-mailbox-connected") void load(); };
+    addEventListener("message", connected); return () => removeEventListener("message", connected);
+  }, [load]);
 
-  useEffect(() => {
-    document.documentElement.lang = lang;
-    document.documentElement.dir = lang === "he" ? "rtl" : "ltr";
-  }, [lang]);
-
-  useEffect(() => {
-    const connected = (event: MessageEvent) => {
-      if (event.origin === window.location.origin && event.data === "tapy-mailbox-connected") {
-        void refresh();
-      }
-    };
-    window.addEventListener("message", connected);
-    return () => window.removeEventListener("message", connected);
-  }, [refresh]);
-
-  const pushToast = useCallback((toast: Omit<Toast, "id">) => {
-    const id = Date.now() + Math.random();
-    setToasts((previous) => [...previous, { ...toast, id }]);
-    window.setTimeout(
-      () => setToasts((previous) => previous.filter((item) => item.id !== id)),
-      4200,
-    );
-  }, []);
-
-  const dismissToast = useCallback((id: number) => {
-    setToasts((previous) => previous.filter((item) => item.id !== id));
-  }, []);
-
-  const login = useCallback(async (email: string, password: string) => {
-    await api("/v1/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
-    await refresh();
-  }, [refresh]);
-
-  const register = useCallback(async (name: string, email: string, password: string) => {
-    await api("/v1/auth/register", {
-      method: "POST",
-      body: JSON.stringify({ name, email, password }),
-    });
-    await refresh();
-  }, [refresh]);
-
-  const socialLogin = useCallback(async (provider: "google" | "microsoft") => {
-    const result = await api<{ authorization_url: string }>(
-      `/v1/auth/${provider}/authorization`,
-    );
-    window.location.assign(result.authorization_url);
-  }, []);
-
-  const logout = useCallback(async () => {
-    await api("/v1/auth/logout", { method: "POST" });
-    setUser(null);
-    setFlights([]);
-    setMetrics(EMPTY_METRICS);
-    setNotifications([]);
-    setView("agent");
-  }, []);
-
-  const updateProfile = useCallback(async (input: { name?: string; language?: Lang }) => {
-    const next = await api<ApiUser>("/v1/users/me", {
-      method: "PATCH",
-      body: JSON.stringify(input),
-    });
-    const mapped = mapUser(next);
-    setUser(mapped);
-    setLangState(mapped.language);
-  }, []);
-
-  const setLang = useCallback((next: Lang) => {
-    setLangState(next);
-    if (user) void updateProfile({ language: next });
-  }, [updateProfile, user]);
-
-  const connectMailbox = useCallback(async (provider: "gmail" | "outlook") => {
-    const result = await api<{ authorization_url: string }>(
-      `/v1/mailboxes/${provider}/authorization`,
-      { method: "POST" },
-    );
-    const popup = window.open(result.authorization_url, `tapy-${provider}`, "popup,width=560,height=720");
-    if (!popup) window.location.assign(result.authorization_url);
-  }, []);
-
-  const disconnectMailbox = useCallback(async (provider: "gmail" | "outlook") => {
-    await api(`/v1/mailboxes/${provider}`, { method: "DELETE" });
-    await refresh();
-  }, [refresh]);
-
-  const updateStatus = useCallback(async (flightId: string, status: "open" | "declined") => {
-    const previous = flights;
-    setFlights((items) => items.map((item) => item.id === flightId ? { ...item, status } : item));
-    try {
-      await api(`/v1/flights/${flightId}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
-      });
-      await refresh();
-    } catch (error) {
-      setFlights(previous);
-      throw error;
-    }
-  }, [flights, refresh]);
-
-  const sendUpsell = useCallback(async (flightId: string) => {
-    await api(`/v1/flights/${flightId}/send-upsell`, { method: "POST" });
-    await refresh();
-  }, [refresh]);
-
-  const markNotificationsRead = useCallback(async () => {
-    const unreadIds = notifications.filter((item) => !item.readAt).map((item) => item.id);
-    if (unreadIds.length === 0) return;
-    const readAt = new Date().toISOString();
-    const unreadSet = new Set(unreadIds);
-    setNotifications((items) => items.map((item) => unreadSet.has(item.id) ? { ...item, readAt } : item));
-    try {
-      await api("/v1/notifications/read", {
-        method: "POST",
-        body: JSON.stringify({ notification_ids: unreadIds }),
-      });
-    } catch (error) {
-      await refresh();
-      throw error;
-    }
-  }, [notifications, refresh]);
-
-  const addFlight = useCallback(async (input: NewFlightInput): Promise<Flight> => {
-    const value = await api<ApiFlight>("/v1/flights", {
-      method: "POST",
-      body: JSON.stringify({
-        booking_ref: input.bookingRef || null,
-        passenger_name: input.passengerName,
-        party_size: input.partySize,
-        email: input.email,
-        phone: input.phone,
-        origin: input.origin,
-        origin_city: input.originCity,
-        destination_code: input.destination,
-        destination_city: input.destinationCity,
-        destination_country: input.destinationCountry,
-        arrival_date: input.departureDate,
-        departure_date: input.returnDate,
-        flight_cost_usd: input.flightCostUsd,
-        hotel_cost_usd: input.hotelCostUsd,
-      }),
-    });
-    const created = mapFlight(value);
-    setFlights((items) => [...items, created]);
-    await refresh();
-    return created;
-  }, [refresh]);
-
-  const t = useCallback(
-    (key: string, vars?: Record<string, string | number>) => tr(DICTIONARIES[lang], key, vars),
-    [lang],
-  );
-
-  const fmt = useMemo<Formatters>(() => {
-    const locale = LOCALES[lang];
-    return {
-      usd: (n, opts) => fmtUsd(n, { ...opts, locale }),
-      date: (iso) => fmtDate(iso, locale),
-      dateRange: (start, end) => fmtDateRange(start, end, locale),
-      percent: (n, digits) => fmtPercent(n, digits, locale),
-      number: (n) => fmtNumber(n, locale),
-    };
-  }, [lang]);
-
-  const agents = useMemo<Agent[]>(() => user ? [{
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    initials: user.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(),
-    avatarTint: "from-indigo-500 to-violet-500",
-  }] : [], [user]);
-
-  const unreadNotificationCount = useMemo(
-    () => notifications.filter((notification) => !notification.readAt).length,
-    [notifications],
-  );
-
-  const value = useMemo<TapyStore>(() => ({
-    loading, user, flights, agents, activeAgentId: user?.id ?? "", metrics,
-    notifications, unreadNotificationCount, view, setView,
-    login, register, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox,
-    sendUpsell,
-    markDeclined: (id) => updateStatus(id, "declined"),
-    markOpen: (id) => updateStatus(id, "open"),
-    addFlight, refresh, markNotificationsRead, pushToast, toasts, dismissToast,
-    lang, setLang, t, fmt,
-  }), [loading, user, flights, agents, metrics, view, login, register, socialLogin, logout,
-    updateProfile, connectMailbox, disconnectMailbox, updateStatus, sendUpsell, addFlight, refresh,
-    markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, fmt,
-    notifications, unreadNotificationCount]);
-
-  return <TapyContext.Provider value={value}>{children}</TapyContext.Provider>;
+  const setView = useCallback((next: View) => {
+    if (next === "organization" && user?.active_organization_role !== "admin") return;
+    setViewState(next); void load(next);
+  }, [load, user]);
+  const login = useCallback(async (email: string, password: string) => { await api("/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }); await load("personal"); }, [load]);
+  const register = useCallback(async (name: string, email: string, password: string) => { await api("/v1/auth/register", { method: "POST", body: JSON.stringify({ name, email, password }) }); await load("personal"); }, [load]);
+  const socialLogin = useCallback(async (provider: "google" | "microsoft") => { const value = await api<{ authorization_url: string }>(`/v1/auth/${provider}/authorization`); location.assign(value.authorization_url); }, []);
+  const logout = useCallback(async () => { await api("/v1/auth/logout", { method: "POST" }); setUser(null); setBookings([]); setOpportunities([]); setViewState("personal"); }, []);
+  const updateProfile = useCallback(async (input: { name?: string; language?: Lang; active_organization_id?: string }) => { const me = await api<User>("/v1/users/me", { method: "PATCH", body: JSON.stringify(input) }); setUser(me); setLangState(me.language); await load("personal"); }, [load]);
+  const setLang = useCallback((next: Lang) => { setLangState(next); if (user) void updateProfile({ language: next }); }, [updateProfile, user]);
+  const connectMailbox = useCallback(async (provider: "gmail" | "outlook") => { const value = await api<{ authorization_url: string }>(`/v1/mailboxes/${provider}/authorization`, { method: "POST" }); const popup = open(value.authorization_url, `tapy-${provider}`, "popup,width=560,height=720"); if (!popup) location.assign(value.authorization_url); }, []);
+  const disconnectMailbox = useCallback(async (provider: "gmail" | "outlook") => { await api(`/v1/mailboxes/${provider}`, { method: "DELETE" }); await load(); }, [load]);
+  const addBooking = useCallback(async (input: NewBooking) => {
+    const booking = await api<Booking>("/v1/bookings", { method: "POST", body: JSON.stringify({ external_reference: input.reference || null, people: [{ display_name: input.passenger, roles: [{ role: "traveler", source_method: "manual" }], contacts: [input.phone ? { channel: "whatsapp", value: input.phone, is_primary: true } : { channel: "email", value: input.email, is_primary: true }] }], reservations: [{ pnr: input.pnr, segments: [{ origin_code: input.origin, destination_code: input.destination, departure_at: input.departureAt, arrival_at: input.arrivalAt || null }] }] }) });
+    const person = booking.people[0]; const reservation = booking.reservations[0];
+    const withTicket = await api<Booking>(`/v1/bookings/${booking.id}/tickets`, { method: "POST", body: JSON.stringify({ reservation_id: reservation.id, person_id: person.id, ticket_number: input.ticketNumber, segment_ids: reservation.segments.map((item) => item.id), amount: input.amount, currency: input.currency }) });
+    const ticket = withTicket.reservations[0].tickets[0];
+    await api("/v1/opportunities", { method: "POST", body: JSON.stringify({ booking_id: booking.id, ticket_ids: [ticket.id], destination: input.destination, service_start: input.departureAt, service_end: input.arrivalAt || input.departureAt, currency: input.currency }) });
+    await load();
+  }, [load]);
+  const updateOpportunity = useCallback(async (item: Opportunity, status: OpportunityStatus) => { await api(`/v1/opportunities/${item.id}`, { method: "PATCH", body: JSON.stringify({ status, version: item.version }) }); await load(); }, [load]);
+  const updateRecipient = useCallback(async (opportunityId: string, personId: string, contactId: string | null, selectionStatus: string) => { await api(`/v1/opportunities/${opportunityId}/recipients/${personId}`, { method: "PUT", body: JSON.stringify({ person_id: personId, contact_point_id: contactId, selection_status: selectionStatus, selection_method: "manual", selection_reason: "Selected by the assigned travel agent" }) }); await load(); }, [load]);
+  const sendOpportunity = useCallback(async (id: string) => { await api(`/v1/opportunities/${id}/send`, { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() } }); await load(); }, [load]);
+  const markNotificationsRead = useCallback(async () => { const ids = notifications.filter((item) => !item.read_at).map((item) => item.id); if (!ids.length) return; await api("/v1/notifications/read", { method: "POST", body: JSON.stringify({ notification_ids: ids }) }); await load(); }, [load, notifications]);
+  const pushToast = useCallback((toast: Omit<Toast, "id">) => { const id = Date.now() + Math.random(); setToasts((items) => [...items, { ...toast, id }]); setTimeout(() => setToasts((items) => items.filter((item) => item.id !== id)), 4200); }, []);
+  const dismissToast = useCallback((id: number) => setToasts((items) => items.filter((item) => item.id !== id)), []);
+  const t = useCallback((key: string, vars?: Record<string, string | number>) => tr(DICTIONARIES[lang], key, vars), [lang]);
+  const money = useCallback((value: string | number, currency = "USD") => new Intl.NumberFormat(LOCALES[lang], { style: "currency", currency }).format(Number(value)), [lang]);
+  const unreadNotificationCount = notifications.filter((item) => !item.read_at).length;
+  const value = useMemo<Store>(() => ({ loading, user, bookings, opportunities, metrics, notifications, unreadNotificationCount, view, setView, login, register, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox, addBooking, updateOpportunity, updateRecipient, sendOpportunity, refresh, markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, money }), [loading, user, bookings, opportunities, metrics, notifications, unreadNotificationCount, view, setView, login, register, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox, addBooking, updateOpportunity, updateRecipient, sendOpportunity, refresh, markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, money]);
+  return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
-export function useDemo(): TapyStore {
-  const context = useContext(TapyContext);
-  if (!context) throw new Error("useDemo must be used inside <DemoProvider>");
-  return context;
-}
-
-export function useAgencyMetrics(): AgencyMetrics {
-  return useDemo().metrics;
+export function useDemo(): Store {
+  const value = useContext(Context);
+  if (!value) throw new Error("useDemo must be inside DemoProvider");
+  return value;
 }

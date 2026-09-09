@@ -1,40 +1,14 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Tapy frontend
 
-## Getting Started
+The Next.js UI uses the same-origin `/v1/*` backend API and its HttpOnly session
+cookie. It provides personal booking/opportunity data to every user and an
+organization scope only when the backend reports an active admin membership.
+Organization metrics and per-agent rows come from the backend; there is no
+seeded or demo aggregation.
 
-The server-side chat action reads `GEMINI_API_KEY`. The backend owns Twilio
-delivery and reads `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`; their local
-values live in the repository-level `.env`, not in this directory. Load that
-file into the shell before starting development:
+The frontend can create a basic booking/ticket/opportunity, edit opportunity
+outcomes and recipient selections, and send an opportunity to all selected
+recipients. Server-sent events plus periodic refresh keep views reconciled.
 
-```bash
-set -a
-source ../../../.env
-set +a
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-The UI expects `/v1/*` on the same origin; Next.js proxies those requests to
-the private backend service. Authentication uses an HttpOnly session cookie.
-Flights and metrics are loaded from the backend, updated optimistically, and
-reconciled through server-sent events plus periodic/focus refreshes.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deployment
-
-The production container and Kubernetes deployment are managed by the Tapy
-workflow and `kubernetes/system/tapy`.
+Run `npm run lint` and `npm run build`. Deployment is owned by
+`kubernetes/system/tapy`.

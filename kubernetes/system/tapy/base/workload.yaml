@@ -125,8 +125,6 @@ spec:
             - name: MATCHER_GMAIL_QUERY
               valueFrom:
                 configMapKeyRef: {name: tapy, key: GMAIL_QUERY}
-            - name: MATCHER_FLIGHTS_CONFIG_PATH
-              value: /config/flights.json
           ports:
             - name: http
               containerPort: 8080
@@ -148,12 +146,7 @@ spec:
             requests: {cpu: 50m, memory: 128Mi}
             limits: {cpu: "1", memory: 512Mi}
           volumeMounts:
-            - {name: config, mountPath: /config, readOnly: true}
             - {name: tmp, mountPath: /tmp}
       volumes:
-        - name: config
-          configMap:
-            name: tapy
-            items: [{key: flights.json, path: flights.json}]
         - name: tmp
           emptyDir: {sizeLimit: 64Mi}

@@ -4,11 +4,13 @@ import asyncio
 import base64
 import hmac
 import json
+import re
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
-from typing import Annotated, Literal, Protocol, cast
+from decimal import Decimal
+from typing import Annotated, Any, Literal, Protocol, cast
 
 import httpx
 import structlog
@@ -24,73 +26,98 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.exception_handlers import request_validation_exception_handler
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (
     HTMLResponse,
-    JSONResponse,
     PlainTextResponse,
     RedirectResponse,
     StreamingResponse,
 )
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 from starlette.responses import Response as StarletteResponse
 
 from .auth import bearer_token, new_session, password_hash, password_matches
+from .business import (
+    booking_view,
+    create_booking,
+    ensure_agent,
+    ingest_flight_booking,
+    metric_values,
+    normalized_contact,
+    opportunity_view,
+    stable_hash,
+)
 from .config import Settings
 from .database import (
     AuthIdentity,
-    FlightIngestionRecord,
-    FlightRecord,
+    BookingPerson,
+    BookingPersonRole,
+    ContactPoint,
+    FlightReservation,
+    FlightSegment,
+    FlightTicket,
     MailboxConnection,
+    MessageDelivery,
     NotificationRecord,
+    OpportunityRecipient,
+    OpportunityTicket,
+    Organization,
+    OrganizationMembership,
     ProcessedMessage,
+    TicketSegment,
+    TravelBooking,
+    UpsellOpportunity,
+    UpsellSendBatch,
     User,
     UserSession,
-    initialize,
     make_engine,
     make_factory,
     new_agent,
     token_hash,
 )
-from .flights import (
-    DatabaseFlightRepository,
-    FlightRepository,
-    load_flights,
-    record_to_flight,
-    record_to_view,
-    score_booking,
-)
+from .flights import score_booking
 from .llm import BookingExtractor, ExtractionError
 from .mailboxes import MailboxError, MailboxReader, readers
+from .migrations import upgrade_database
 from .models import (
     AgentCreated,
+    AgentMetrics,
     AgentView,
     AnalysisResponse,
     AuthorizationUrl,
     AuthProvider,
     AuthResult,
+    BookingCreate,
+    BookingUpdate,
+    BookingView,
+    ContactCreate,
+    CurrencyMetrics,
+    DeliveryView,
+    Destination,
     EmailExtraction,
     EmailForAnalysis,
-    FlightCreate,
-    FlightMatch,
-    FlightStatusUpdate,
-    FlightTicket,
-    FlightView,
-    HotelBooking,
+    Flight,
     LoginRequest,
     MailboxView,
+    MembershipCreate,
+    MembershipView,
     MetricsView,
-    NotificationKind,
     NotificationsRead,
     NotificationView,
+    OpportunityCreate,
+    OpportunityUpdate,
+    OpportunityView,
+    OrganizationCreate,
     Provider,
+    RecipientUpdate,
     RegisterRequest,
+    RoleCreate,
     ScanRequest,
     ScanResult,
-    UpsellResult,
+    Scope,
+    SendBatchView,
+    TicketCreate,
     UserUpdate,
     UserView,
 )
@@ -100,28 +127,23 @@ from .webhooks import WebhookService, webhook_active
 logger = structlog.get_logger()
 SESSION_COOKIE = "tapy_session"
 
-HOME_PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1"><title>Tapy</title>
-<main><h1>Tapy</h1><p>Tapy identifies flight and hotel confirmations after you grant
-read-only mailbox access.</p><p><a href=/privacy>Privacy policy</a> ·
-<a href=/terms>Terms</a></p></main></html>"""
-
+HOME_PAGE = """<!doctype html><html lang=en><meta charset=utf-8><title>Tapy</title>
+<main><h1>Tapy</h1><p>Travel-agency booking and opportunity workspace.</p>
+<p><a href=/privacy>Privacy policy</a> · <a href=/terms>Terms</a></p></main></html>"""
 PRIVACY_PAGE = """<!doctype html><html lang=en><meta charset=utf-8><title>Tapy Privacy</title>
-<main><h1>Privacy Policy</h1><p>Tapy requests delegated read-only Gmail or Outlook access through
-the provider consent screen. Refresh tokens are encrypted. Message text is processed transiently
-to identify flight and hotel confirmations and is not persisted. Users can revoke provider access
-at any time. Contact: kfir.marx@gmail.com.</p></main></html>"""
-
+<main><h1>Privacy Policy</h1><p>Tapy uses delegated read-only Gmail or Outlook access. Refresh
+tokens are encrypted. Message content is processed transiently for booking facts and is never
+stored; source identifiers and derived provenance are retained.
+Contact: kfir.marx@gmail.com.</p></main></html>"""
 TERMS_PAGE = """<!doctype html><html lang=en><meta charset=utf-8><title>Tapy Terms</title>
-<main><h1>Proof-of-concept terms</h1><p>Results are heuristic. Verify bookings directly with the
-provider. Tapy does not make, change, or cancel reservations.</p></main></html>"""
+<main><h1>Proof-of-concept terms</h1><p>Verify bookings with the provider. Tapy does not make,
+change, or cancel reservations.</p></main></html>"""
 
 
 class Extractor(Protocol):
     @property
     def ready(self) -> bool: ...
-
-    async def extract(self, email: EmailForAnalysis) -> EmailExtraction | HotelBooking: ...
+    async def extract(self, email: EmailForAnalysis) -> EmailExtraction: ...
 
 
 class EventHub:
@@ -134,30 +156,23 @@ class EventHub:
         return queue
 
     def unsubscribe(self, user_id: str, queue: asyncio.Queue[str]) -> None:
-        queues = self._queues.get(user_id)
-        if queues:
-            queues.discard(queue)
-            if not queues:
-                self._queues.pop(user_id, None)
+        self._queues.get(user_id, set()).discard(queue)
 
-    def publish(self, user_id: str, event: str = "refresh") -> None:
+    def publish(self, user_id: str) -> None:
         for queue in self._queues.get(user_id, set()):
             if queue.full():
                 with suppress(asyncio.QueueEmpty):
                     queue.get_nowait()
-            queue.put_nowait(event)
-
-
-def _best(matches: list[FlightMatch]) -> FlightMatch | None:
-    return matches[0] if matches else None
+            queue.put_nowait("refresh")
 
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _normalized(value: str | None) -> str:
-    return " ".join((value or "").casefold().split())
+def _slug(name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-") or "agency"
+    return f"{base[:60]}-{secrets.token_hex(4)}"
 
 
 def _set_session_cookie(response: StarletteResponse, token: str, settings: Settings) -> None:
@@ -172,217 +187,234 @@ def _set_session_cookie(response: StarletteResponse, token: str, settings: Setti
     )
 
 
-def _user_view(factory: sessionmaker[Session], user: User) -> UserView:
-    with factory() as session:
-        providers = session.scalars(
-            select(AuthIdentity.provider).where(AuthIdentity.user_id == user.id)
-        ).all()
-        mailboxes = session.scalars(
-            select(MailboxConnection).where(MailboxConnection.user_id == user.id)
-        ).all()
-    auth_providers = [str(item) for item in providers]
-    if user.password_hash:
-        auth_providers.insert(0, "password")
-    return UserView(
-        id=user.id,
-        name=user.name,
-        email=user.email,
-        language=cast(Literal["en", "he"], user.language),
-        auth_providers=auth_providers,
-        mailboxes=[
-            MailboxView(
-                provider=cast(Provider, mailbox.provider),
-                email_address=mailbox.email_address,
-                webhook_active=webhook_active(mailbox),
-            )
-            for mailbox in mailboxes
-        ],
-    )
-
-
 def create_app(
     settings: Settings | None = None,
     *,
     extractor: Extractor | None = None,
     mailbox_readers: Mapping[Provider, MailboxReader] | None = None,
-    flight_repository: FlightRepository | None = None,
+    flight_repository: object | None = None,
 ) -> FastAPI:
+    del flight_repository
     resolved = settings or Settings()
     if extractor is None:
         resolved.require_rabbitmq()
     engine = make_engine(resolved)
-    initialize(engine)
+    upgrade_database(engine)
     factory = make_factory(engine)
     configured_extractor = extractor or BookingExtractor.from_settings(resolved)
-    database_flights = DatabaseFlightRepository(factory)
-    configured_flights = flight_repository or database_flights
-    legacy_flights = None
-    if resolved.flights_config_path.exists():
-        with suppress(ValueError, OSError):
-            legacy_flights = load_flights(resolved.flights_config_path)
     event_hub = EventHub()
 
-    def add_notification(
+    def ensure_context(session: Session, user: User) -> OrganizationMembership:
+        membership = (
+            session.get(OrganizationMembership, (user.active_organization_id, user.id))
+            if user.active_organization_id
+            else None
+        )
+        if membership and membership.status == "active":
+            return membership
+        membership = session.scalar(
+            select(OrganizationMembership).where(
+                OrganizationMembership.user_id == user.id,
+                OrganizationMembership.status == "active",
+            )
+        )
+        if not membership:
+            organization = Organization(name=f"{user.name}'s agency", slug=_slug(user.name))
+            session.add(organization)
+            session.flush()
+            membership = OrganizationMembership(
+                organization_id=organization.id, user_id=user.id, role="admin"
+            )
+            session.add(membership)
+        user.active_organization_id = membership.organization_id
+        session.flush()
+        return membership
+
+    def membership_for(
+        session: Session, user_id: str, organization_id: str
+    ) -> OrganizationMembership:
+        membership = session.get(OrganizationMembership, (organization_id, user_id))
+        if not membership or membership.status != "active":
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "active organization membership is required"
+            )
+        return membership
+
+    def authorize_scope(
+        session: Session, user: User, scope: Scope
+    ) -> tuple[str, OrganizationMembership]:
+        organization_id = user.active_organization_id
+        if not organization_id:
+            raise HTTPException(status.HTTP_409_CONFLICT, "select an active organization")
+        membership = membership_for(session, user.id, organization_id)
+        if scope == "organization" and membership.role != "admin":
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "organization scope requires an admin role"
+            )
+        return organization_id, membership
+
+    def authenticate(
+        authorization: Annotated[str | None, Header()] = None,
+        tapy_session: Annotated[str | None, Cookie()] = None,
+    ) -> User:
+        supplied = tapy_session or bearer_token(authorization)
+        if not supplied:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication is required")
+        with factory.begin() as session:
+            if supplied.startswith("ses_"):
+                record = session.get(UserSession, token_hash(supplied))
+                user = (
+                    session.get(User, record.user_id)
+                    if record and _utc(record.expires_at) > datetime.now(UTC)
+                    else None
+                )
+            else:
+                user = session.scalar(
+                    select(User).where(User.access_token_hash == token_hash(supplied))
+                )
+            if not user:
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or expired session")
+            ensure_context(session, user)
+            return user
+
+    def user_view(user: User) -> UserView:
+        with factory() as session:
+            memberships = session.execute(
+                select(OrganizationMembership, Organization)
+                .join(Organization, Organization.id == OrganizationMembership.organization_id)
+                .where(
+                    OrganizationMembership.user_id == user.id,
+                    OrganizationMembership.status == "active",
+                )
+            ).all()
+            active = next(
+                (
+                    membership
+                    for membership, _ in memberships
+                    if membership.organization_id == user.active_organization_id
+                ),
+                None,
+            )
+            if not active:
+                raise HTTPException(status.HTTP_409_CONFLICT, "active organization is unavailable")
+            providers = session.scalars(
+                select(AuthIdentity.provider).where(AuthIdentity.user_id == user.id)
+            ).all()
+            mailboxes = session.scalars(
+                select(MailboxConnection).where(MailboxConnection.user_id == user.id)
+            ).all()
+        auth_providers = [str(item) for item in providers]
+        if user.password_hash:
+            auth_providers.insert(0, "password")
+        return UserView(
+            id=user.id,
+            name=user.name,
+            email=user.email,
+            language=cast(Literal["en", "he"], user.language),
+            active_organization_id=active.organization_id,
+            active_organization_role=cast(Literal["admin", "agent"], active.role),
+            memberships=[
+                MembershipView(
+                    organization_id=m.organization_id,
+                    organization_name=o.name,
+                    role=cast(Literal["admin", "agent"], m.role),
+                )
+                for m, o in memberships
+            ],
+            auth_providers=auth_providers,
+            mailboxes=[
+                MailboxView(
+                    provider=cast(Provider, item.provider),
+                    email_address=item.email_address,
+                    webhook_active=webhook_active(item),
+                )
+                for item in mailboxes
+            ],
+        )
+
+    def notify(
         session: Session,
         user_id: str,
-        kind: NotificationKind,
+        organization_id: str,
+        kind: str,
         title: str,
         message: str,
-        flight_id: str | None = None,
-    ) -> NotificationRecord:
-        notification = NotificationRecord(
-            user_id=user_id,
-            flight_id=flight_id,
-            kind=kind,
-            title=title,
-            message=message,
-        )
-        session.add(notification)
-        return notification
-
-    def is_duplicate_flight(
-        session: Session,
-        user_id: str,
-        body: FlightCreate,
-        departure_at: datetime | None,
-    ) -> bool:
-        candidates = session.scalars(
-            select(FlightRecord).where(
-                FlightRecord.user_id == user_id,
-                FlightRecord.arrival_date == body.arrival_date,
-            )
-        ).all()
-        for candidate in candidates:
-            same_person = _normalized(candidate.passenger_name) == _normalized(body.passenger_name)
-            codes_known = candidate.destination_code != "UNK" and body.destination_code != "UNK"
-            same_destination = (
-                candidate.destination_code.casefold() == body.destination_code.casefold()
-                if codes_known
-                else _normalized(candidate.destination_city) == _normalized(body.destination_city)
-            )
-            if not (same_person and same_destination):
-                continue
-            metadata = session.get(FlightIngestionRecord, candidate.id)
-            if departure_at and metadata and metadata.departure_at:
-                if _utc(metadata.departure_at) == _utc(departure_at):
-                    return True
-                continue
-            return True
-        return False
-
-    def available_booking_ref(
-        session: Session, user_id: str, requested: str | None, *, allow_suffix: bool
-    ) -> str:
-        base = (
-            requested.strip()
-            if requested and requested.strip()
-            else f"TPY-{secrets.token_hex(4).upper()}"
-        )
-        candidate = base[:64]
-        number = 2
-        while session.scalar(
-            select(FlightRecord.id).where(
-                FlightRecord.user_id == user_id,
-                FlightRecord.booking_ref == candidate,
-            )
-        ):
-            if not allow_suffix:
-                raise ValueError("this booking reference already exists")
-            suffix = f"-{number}"
-            candidate = base[: 64 - len(suffix)] + suffix
-            number += 1
-        return candidate
-
-    def insert_flight(
-        session: Session,
-        user_id: str,
-        body: FlightCreate,
         *,
-        source: Literal["manual", "email"],
-        mailbox_id: str | None = None,
-        provider_message_id: str | None = None,
-        ticket_number: str | None = None,
-        departure_at: datetime | None = None,
-        return_at: datetime | None = None,
-        source_details: dict[str, object] | None = None,
-    ) -> FlightRecord | None:
-        if is_duplicate_flight(session, user_id, body, departure_at):
-            return None
-        record = FlightRecord(
-            user_id=user_id,
-            booking_ref=available_booking_ref(
-                session, user_id, body.booking_ref, allow_suffix=source == "email"
-            ),
-            passenger_name=body.passenger_name.strip(),
-            party_size=body.party_size,
-            email=body.email.strip(),
-            phone=body.phone.strip(),
-            origin=body.origin.strip().upper(),
-            origin_city=body.origin_city.strip(),
-            destination_code=body.destination_code.strip().upper(),
-            destination_city=body.destination_city.strip(),
-            destination_country=body.destination_country.strip(),
-            arrival_date=body.arrival_date,
-            departure_date=body.departure_date,
-            flight_cost_usd=body.flight_cost_usd,
-            hotel_cost_usd=body.hotel_cost_usd,
-            is_open_for_upsell=True,
-        )
-        session.add(record)
-        session.flush()
+        booking_id: str | None = None,
+        opportunity_id: str | None = None,
+    ) -> None:
         session.add(
-            FlightIngestionRecord(
-                flight_id=record.id,
-                source=source,
-                mailbox_id=mailbox_id,
-                provider_message_id=provider_message_id,
-                ticket_number=ticket_number,
-                departure_at=_utc(departure_at) if departure_at else None,
-                return_at=_utc(return_at) if return_at else None,
-                details=source_details or {},
+            NotificationRecord(
+                user_id=user_id,
+                organization_id=organization_id,
+                booking_id=booking_id,
+                opportunity_id=opportunity_id,
+                kind=kind,
+                title=title,
+                message=message,
             )
         )
-        return record
 
-    def flight_from_ticket(ticket: FlightTicket) -> FlightCreate:
-        missing: list[str] = []
-        if not ticket.passenger_name:
-            missing.append("passenger_name")
-        if not (ticket.destination_code or ticket.destination_city):
-            missing.append("destination")
-        if not ticket.departure_at:
-            missing.append("departure_at")
-        if missing:
-            raise ValueError("missing " + ", ".join(missing))
-        assert ticket.passenger_name and ticket.departure_at
-        departure_at = _utc(ticket.departure_at)
-        return_at = _utc(ticket.return_at) if ticket.return_at else departure_at
-        return FlightCreate(
-            booking_ref=ticket.booking_ref or ticket.ticket_number,
-            passenger_name=ticket.passenger_name,
-            party_size=1,
-            email=ticket.email or "",
-            phone=ticket.phone or "",
-            origin=ticket.origin_code or "UNK",
-            origin_city=ticket.origin_city or ticket.origin_code or "Unknown",
-            destination_code=ticket.destination_code or "UNK",
-            destination_city=ticket.destination_city or ticket.destination_code or "Unknown",
-            destination_country=ticket.destination_country or "",
-            arrival_date=departure_at.date(),
-            departure_date=return_at.date(),
-            flight_cost_usd=ticket.flight_cost_usd or 0,
-            hotel_cost_usd=0,
+    def publish_organization(organization_id: str) -> None:
+        with factory() as session:
+            user_ids = session.scalars(
+                select(OrganizationMembership.user_id).where(
+                    OrganizationMembership.organization_id == organization_id,
+                    OrganizationMembership.status == "active",
+                )
+            ).all()
+        for member_user_id in user_ids:
+            event_hub.publish(member_user_id)
+
+    def business_filter(
+        model: type[TravelBooking] | type[UpsellOpportunity],
+        organization_id: str,
+        user: User,
+        scope: Scope,
+    ) -> list[Any]:
+        filters: list[Any] = [model.organization_id == organization_id]
+        if scope == "personal":
+            filters.append(model.assigned_agent_id == user.id)
+        return filters
+
+    def accessible_booking(session: Session, booking_id: str, user: User) -> TravelBooking:
+        organization_id, membership = authorize_scope(session, user, "personal")
+        booking = session.scalar(
+            select(TravelBooking).where(
+                TravelBooking.id == booking_id, TravelBooking.organization_id == organization_id
+            )
         )
+        if not booking or (booking.assigned_agent_id != user.id and membership.role != "admin"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "booking was not found")
+        return booking
 
-    def notification_view(record: NotificationRecord) -> NotificationView:
-        return NotificationView(
-            id=record.id,
-            kind=cast(NotificationKind, record.kind),
-            title=record.title,
-            message=record.message,
-            flight_id=record.flight_id,
-            created_at=record.created_at,
-            read_at=record.read_at,
+    def accessible_opportunity(
+        session: Session, opportunity_id: str, user: User
+    ) -> UpsellOpportunity:
+        organization_id, membership = authorize_scope(session, user, "personal")
+        opportunity = session.scalar(
+            select(UpsellOpportunity).where(
+                UpsellOpportunity.id == opportunity_id,
+                UpsellOpportunity.organization_id == organization_id,
+            )
+        )
+        if not opportunity or (
+            opportunity.assigned_agent_id != user.id and membership.role != "admin"
+        ):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "opportunity was not found")
+        return opportunity
+
+    def delivery_view(item: MessageDelivery) -> DeliveryView:
+        return DeliveryView(
+            id=item.id,
+            recipient_id=item.recipient_id,
+            channel=item.channel,
+            provider=item.provider,
+            provider_message_id=item.provider_message_id,
+            status=item.status,
+            error_code=item.error_code,
+            error_message=item.error_message,
+            destination_snapshot=item.destination_snapshot,
         )
 
     async def renew_webhooks(app: FastAPI) -> None:
@@ -401,10 +433,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         client = httpx.AsyncClient(timeout=resolved.request_timeout_seconds)
-        oauth = OAuthService(resolved, factory, client)
         app.state.http_client = client
-        app.state.oauth = oauth
-        app.state.webhooks = WebhookService(resolved, factory, oauth, client)
+        app.state.oauth = OAuthService(resolved, factory, client)
+        app.state.webhooks = WebhookService(resolved, factory, app.state.oauth, client)
         app.state.mailbox_readers = mailbox_readers or readers(client, resolved.gmail_query)
         if extractor is None:
             assert isinstance(configured_extractor, BookingExtractor)
@@ -422,7 +453,7 @@ def create_app(
 
     app = FastAPI(
         title="Tapy",
-        version="0.3.0",
+        version="1.0.0",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -434,277 +465,16 @@ def create_app(
         request: Request, call_next: Callable[[Request], Awaitable[StarletteResponse]]
     ) -> StarletteResponse:
         response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
-            if request.url.path.startswith("/v1/oauth/")
-            else "default-src 'none'; style-src 'unsafe-inline'"
+        response.headers.update(
+            {
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY",
+            }
         )
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
         return response
-
-    def authenticate(
-        authorization: Annotated[str | None, Header()] = None,
-        tapy_session: Annotated[str | None, Cookie()] = None,
-    ) -> User:
-        supplied = tapy_session or bearer_token(authorization)
-        if not supplied:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication is required")
-        now = datetime.now(UTC)
-        with factory() as session:
-            if supplied.startswith("ses_"):
-                record = session.get(UserSession, token_hash(supplied))
-                user = (
-                    session.get(User, record.user_id)
-                    if record and _utc(record.expires_at) > now
-                    else None
-                )
-            else:
-                user = session.scalar(
-                    select(User).where(User.access_token_hash == token_hash(supplied))
-                )
-            if not user:
-                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or expired session")
-            return user
-
-    @app.exception_handler(RequestValidationError)
-    async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-        if request.method == "POST" and request.url.path == "/v1/flights":
-            try:
-                user = authenticate(
-                    request.headers.get("authorization"),
-                    request.cookies.get(SESSION_COOKIE),
-                )
-            except HTTPException:
-                user = None
-            if user:
-                with factory.begin() as session:
-                    add_notification(
-                        session,
-                        user.id,
-                        "flight_add_failed",
-                        "Could not add flight",
-                        "The supplied flight details were invalid. Review them and try again.",
-                    )
-                event_hub.publish(user.id)
-        return await request_validation_exception_handler(request, exc)
-
-    def flight_records(user_id: str) -> list[FlightRecord]:
-        with factory() as session:
-            return list(
-                session.scalars(
-                    select(FlightRecord)
-                    .where(FlightRecord.user_id == user_id)
-                    .order_by(FlightRecord.arrival_date, FlightRecord.created_at)
-                ).all()
-            )
-
-    async def scan(user_id: str, provider: Provider, maximum: int | None = None) -> ScanResult:
-        with factory() as session:
-            mailbox = session.scalar(
-                select(MailboxConnection).where(
-                    MailboxConnection.user_id == user_id,
-                    MailboxConnection.provider == provider,
-                )
-            )
-        if not mailbox:
-            raise HTTPException(status.HTTP_409_CONFLICT, "mailbox is not connected")
-        limit = min(
-            maximum or resolved.maximum_messages_per_scan, resolved.maximum_messages_per_scan
-        )
-        try:
-            access_token = await app.state.oauth.access_token(mailbox)
-            messages = await app.state.mailbox_readers[provider].messages(access_token, limit)
-        except (OAuthError, MailboxError) as exc:
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
-
-        results: list[AnalysisResponse] = []
-        skipped = confirmations = matched = 0
-        flight_confirmations = tickets_found = flights_added = 0
-        flights = configured_flights.for_agent(user_id)
-        for email in messages:
-            with factory() as session:
-                seen = session.scalar(
-                    select(ProcessedMessage.id).where(
-                        ProcessedMessage.mailbox_id == mailbox.id,
-                        ProcessedMessage.provider_message_id == email.message_id,
-                    )
-                )
-            if seen:
-                skipped += 1
-                continue
-            try:
-                extracted = await configured_extractor.extract(email)
-            except ExtractionError as exc:
-                logger.warning("email_extraction_failed", provider=provider, user_id=user_id)
-                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "all LLM backends failed") from exc
-            if isinstance(extracted, HotelBooking):
-                booking = extracted
-                flight_booking = None
-            else:
-                booking = extracted.hotel_booking
-                flight_booking = extracted.flight_booking
-
-            added_ids: list[str] = []
-            email_tickets = (
-                flight_booking.tickets
-                if flight_booking
-                and flight_booking.is_flight_booking_confirmation
-                and flight_booking.booking_status == "confirmed"
-                else []
-            )
-            if email_tickets:
-                flight_confirmations += 1
-                tickets_found += len(email_tickets)
-            for ticket in email_tickets:
-                try:
-                    body = flight_from_ticket(ticket)
-                    with factory.begin() as session:
-                        record = insert_flight(
-                            session,
-                            user_id,
-                            body,
-                            source="email",
-                            mailbox_id=mailbox.id,
-                            provider_message_id=email.message_id,
-                            ticket_number=ticket.ticket_number,
-                            departure_at=ticket.departure_at,
-                            return_at=ticket.return_at,
-                            source_details=ticket.model_dump(mode="json"),
-                        )
-                        if record:
-                            add_notification(
-                                session,
-                                user_id,
-                                "flight_added",
-                                "New flight added",
-                                f"{record.passenger_name}: {record.origin} → "
-                                f"{record.destination_code} was extracted from email.",
-                                record.id,
-                            )
-                            session.flush()
-                    if record:
-                        added_ids.append(record.id)
-                        flights_added += 1
-                        if configured_flights is database_flights:
-                            flights = [*flights, record_to_flight(record)]
-                except (IntegrityError, ValueError) as exc:
-                    logger.warning(
-                        "email_flight_add_failed",
-                        user_id=user_id,
-                        provider=provider,
-                        message_id=email.message_id,
-                        error=str(exc),
-                    )
-                    with factory.begin() as session:
-                        add_notification(
-                            session,
-                            user_id,
-                            "flight_add_failed",
-                            "Could not add flight",
-                            "A flight ticket in an email could not be added. Review the email "
-                            "and enter the flight manually.",
-                        )
-                    event_hub.publish(user_id)
-            if added_ids:
-                event_hub.publish(user_id)
-            matches = score_booking(booking, flights, resolved.match_threshold)
-            best = _best(matches)
-            is_confirmation = booking.is_hotel_booking_confirmation
-            is_match = bool(best and best.related)
-            confirmations += int(is_confirmation)
-            matched += int(is_match)
-            results.append(
-                AnalysisResponse(
-                    message_id=email.message_id,
-                    booking=booking,
-                    matches=matches,
-                    best_flight_id=best.flight_id if best else None,
-                    best_score=best.score if best else 0,
-                    flight_tickets_found=len(email_tickets),
-                    flights_added=added_ids,
-                )
-            )
-            if is_match and best:
-                flight_changed = False
-                with factory.begin() as session:
-                    record = session.get(FlightRecord, best.flight_id)
-                    if record and record.user_id == user_id:
-                        if record.matched_hotel:
-                            logger.info(
-                                "flight_already_has_hotel_match",
-                                user_id=user_id,
-                                flight_id=record.id,
-                                message_id=email.message_id,
-                            )
-                        else:
-                            record.matched_hotel = booking.model_dump(mode="json")
-                            record.is_open_for_upsell = False
-                            record.closed_reason = "hotel_match"
-                            print(
-                                "found hotel booking matching flight details "
-                                f"user_id={user_id} flight_id={record.id} "
-                                f"message_id={email.message_id}",
-                                flush=True,
-                            )
-                            flight_changed = True
-                    else:
-                        flight = next(item for item in flights if item.id == best.flight_id)
-                        print(
-                            "found hotel booking "
-                            f"{booking.model_dump(mode='json')} matching flight details "
-                            f"{flight.model_dump(mode='json')}",
-                            flush=True,
-                        )
-                if flight_changed:
-                    event_hub.publish(user_id)
-            with factory.begin() as session:
-                session.add(
-                    ProcessedMessage(
-                        mailbox_id=mailbox.id,
-                        provider_message_id=email.message_id,
-                        outcome=(
-                            "flight_added"
-                            if added_ids
-                            else "matched"
-                            if is_match
-                            else "confirmation"
-                            if is_confirmation
-                            else "other"
-                        ),
-                        best_score=str(best.score) if best else None,
-                        result_summary={
-                            "is_hotel_booking_confirmation": is_confirmation,
-                            "is_flight_booking_confirmation": bool(
-                                flight_booking and flight_booking.is_flight_booking_confirmation
-                            ),
-                            "flights_added": added_ids,
-                            "matched_flight_id": best.flight_id if is_match and best else None,
-                        },
-                    )
-                )
-        return ScanResult(
-            provider=provider,
-            messages_seen=len(messages),
-            messages_skipped=skipped,
-            messages_analyzed=len(results),
-            confirmations_found=confirmations,
-            matches_found=matched,
-            flight_confirmations_found=flight_confirmations,
-            flight_tickets_found=tickets_found,
-            flights_added=flights_added,
-            results=results,
-        )
-
-    async def scan_from_webhook(user_id: str, provider: Provider) -> None:
-        try:
-            await scan(user_id, provider)
-        except Exception as exc:
-            logger.warning(
-                "webhook_scan_failed", user_id=user_id, provider=provider, error=str(exc)
-            )
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def home() -> str:
@@ -732,16 +502,12 @@ def create_app(
             with engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
         except Exception:
-            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            response.status_code = 503
             dependencies["database"] = "unavailable"
-        if isinstance(configured_extractor, BookingExtractor):
-            dependencies["llm_backends"] = configured_extractor.readiness
         if not configured_extractor.ready:
-            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            response.status_code = 503
         return {
-            "status": "ready"
-            if response.status_code != status.HTTP_503_SERVICE_UNAVAILABLE
-            else "not-ready",
+            "status": "ready" if response.status_code != 503 else "not-ready",
             "dependencies": dependencies,
         }
 
@@ -756,28 +522,38 @@ def create_app(
                 )
                 session.add(user)
                 session.flush()
+                organization = Organization(
+                    name=body.organization_name or f"{body.name.strip()}'s agency",
+                    slug=_slug(body.organization_name or body.name),
+                )
+                session.add(organization)
+                session.flush()
+                session.add(
+                    OrganizationMembership(
+                        organization_id=organization.id, user_id=user.id, role="admin"
+                    )
+                )
+                user.active_organization_id = organization.id
                 token, _ = new_session(session, user.id, resolved.session_days)
         except IntegrityError as exc:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT, "an account already exists for this email"
-            ) from exc
+            raise HTTPException(409, "an account already exists for this email") from exc
         _set_session_cookie(response, token, resolved)
-        return AuthResult(user=_user_view(factory, user))
+        return AuthResult(user=user_view(user))
 
     @app.post("/v1/auth/login", response_model=AuthResult)
     async def login(body: LoginRequest, response: Response) -> AuthResult:
         with factory.begin() as session:
             user = session.scalar(select(User).where(User.email == str(body.email).casefold()))
             if not user or not password_matches(body.password, user.password_hash):
-                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "email or password is incorrect")
+                raise HTTPException(401, "email or password is incorrect")
+            ensure_context(session, user)
             token, _ = new_session(session, user.id, resolved.session_days)
         _set_session_cookie(response, token, resolved)
-        return AuthResult(user=_user_view(factory, user))
+        return AuthResult(user=user_view(user))
 
     @app.post("/v1/auth/logout", status_code=204)
     async def logout(
-        response: Response,
-        tapy_session: Annotated[str | None, Cookie()] = None,
+        response: Response, tapy_session: Annotated[str | None, Cookie()] = None
     ) -> None:
         if tapy_session:
             with factory.begin() as session:
@@ -791,17 +567,14 @@ def create_app(
         try:
             return AuthorizationUrl(authorization_url=request.app.state.oauth.login_url(provider))
         except OAuthError as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+            raise HTTPException(503, str(exc)) from exc
 
     @app.get("/v1/users/me", response_model=UserView)
-    async def get_user(user: User = Depends(authenticate)) -> UserView:  # noqa: B008
-        return _user_view(factory, user)
+    async def get_user(user: User = Depends(authenticate)) -> UserView:
+        return user_view(user)  # noqa: B008
 
     @app.patch("/v1/users/me", response_model=UserView)
-    async def update_user(
-        body: UserUpdate,
-        user: User = Depends(authenticate),  # noqa: B008
-    ) -> UserView:
+    async def update_user(body: UserUpdate, user: User = Depends(authenticate)) -> UserView:  # noqa: B008
         with factory.begin() as session:
             current = session.get(User, user.id)
             assert current
@@ -809,214 +582,733 @@ def create_app(
                 current.name = body.name.strip()
             if body.language is not None:
                 current.language = body.language
+            if body.active_organization_id is not None:
+                membership_for(session, user.id, body.active_organization_id)
+                current.active_organization_id = body.active_organization_id
             session.flush()
             user = current
         event_hub.publish(user.id)
-        return _user_view(factory, user)
+        return user_view(user)
 
-    @app.get("/v1/flights", response_model=list[FlightView])
-    async def list_flights(user: User = Depends(authenticate)) -> list[FlightView]:  # noqa: B008
-        return [record_to_view(item) for item in flight_records(user.id)]
+    @app.post("/v1/organizations", response_model=MembershipView, status_code=201)
+    async def create_organization(
+        body: OrganizationCreate, user: User = Depends(authenticate)
+    ) -> MembershipView:  # noqa: B008
+        with factory.begin() as session:
+            organization = Organization(name=body.name.strip(), slug=_slug(body.name))
+            session.add(organization)
+            session.flush()
+            session.add(
+                OrganizationMembership(
+                    organization_id=organization.id, user_id=user.id, role="admin"
+                )
+            )
+            current = session.get(User, user.id)
+            assert current
+            current.active_organization_id = organization.id
+        return MembershipView(
+            organization_id=organization.id, organization_name=organization.name, role="admin"
+        )
 
-    @app.post("/v1/flights", response_model=FlightView, status_code=201)
-    async def create_flight(
-        body: FlightCreate,
-        user: User = Depends(authenticate),  # noqa: B008
-    ) -> FlightView:
+    @app.post(
+        "/v1/organizations/current/memberships", response_model=MembershipView, status_code=201
+    )
+    async def add_membership(
+        body: MembershipCreate, user: User = Depends(authenticate)
+    ) -> MembershipView:  # noqa: B008
+        with factory.begin() as session:
+            organization_id, membership = authorize_scope(session, user, "organization")
+            target = session.scalar(select(User).where(User.email == str(body.email).casefold()))
+            if not target:
+                raise HTTPException(404, "user was not found")
+            existing = session.get(OrganizationMembership, (organization_id, target.id))
+            if existing:
+                existing.role = body.role
+                existing.status = "active"
+            else:
+                session.add(
+                    OrganizationMembership(
+                        organization_id=organization_id, user_id=target.id, role=body.role
+                    )
+                )
+            organization = session.get(Organization, organization_id)
+            assert organization
+        return MembershipView(
+            organization_id=organization_id, organization_name=organization.name, role=body.role
+        )
+
+    @app.get("/v1/bookings", response_model=list[BookingView])
+    async def list_bookings(
+        scope: Scope = "personal",
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+        user: User = Depends(authenticate),
+    ) -> list[BookingView]:  # noqa: B008
+        with factory() as session:
+            organization_id, _ = authorize_scope(session, user, scope)
+            records = session.scalars(
+                select(TravelBooking)
+                .where(*business_filter(TravelBooking, organization_id, user, scope))
+                .order_by(TravelBooking.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            ).all()
+            return [booking_view(session, row) for row in records]
+
+    @app.get("/v1/bookings/{booking_id}", response_model=BookingView)
+    async def get_booking(booking_id: str, user: User = Depends(authenticate)) -> BookingView:  # noqa: B008
+        with factory() as session:
+            return booking_view(session, accessible_booking(session, booking_id, user))
+
+    @app.post("/v1/bookings", response_model=BookingView, status_code=201)
+    async def post_booking(body: BookingCreate, user: User = Depends(authenticate)) -> BookingView:  # noqa: B008
         try:
             with factory.begin() as session:
-                record = insert_flight(session, user.id, body, source="manual")
-                if not record:
-                    raise ValueError("this flight already exists")
-                add_notification(
+                organization_id, membership = authorize_scope(session, user, "personal")
+                if (
+                    body.assigned_agent_id
+                    and body.assigned_agent_id != user.id
+                    and membership.role != "admin"
+                ):
+                    raise HTTPException(403, "agents may only assign their own bookings")
+                record = create_booking(session, organization_id, user.id, body)
+                session.flush()
+                notify(
                     session,
-                    user.id,
-                    "flight_added",
-                    "New flight added",
-                    f"{record.passenger_name}: {record.origin} → "
-                    f"{record.destination_code} was added manually.",
-                    record.id,
+                    record.assigned_agent_id,
+                    organization_id,
+                    "booking_added",
+                    "Booking added",
+                    "A travel booking was added.",
+                    booking_id=record.id,
+                )
+                view = booking_view(session, record)
+        except IntegrityError as exc:
+            raise HTTPException(409, "booking conflicts with existing organization data") from exc
+        publish_organization(record.organization_id)
+        return view
+
+    @app.patch("/v1/bookings/{booking_id}", response_model=BookingView)
+    async def patch_booking(
+        booking_id: str, body: BookingUpdate, user: User = Depends(authenticate)
+    ) -> BookingView:  # noqa: B008
+        with factory.begin() as session:
+            record = accessible_booking(session, booking_id, user)
+            if body.assigned_agent_id:
+                ensure_agent(session, record.organization_id, body.assigned_agent_id)
+                record.assigned_agent_id = body.assigned_agent_id
+            if body.internal_reference is not None:
+                record.internal_reference = body.internal_reference
+            if body.attributes is not None:
+                record.attributes = body.attributes
+            if body.status:
+                record.status = body.status
+                for reservation in session.scalars(
+                    select(FlightReservation).where(FlightReservation.booking_id == record.id)
+                ):
+                    reservation.status = body.status
+                if body.status == "cancelled":
+                    for opportunity in session.scalars(
+                        select(UpsellOpportunity).where(
+                            UpsellOpportunity.booking_id == record.id,
+                            UpsellOpportunity.status.in_(["open", "contacted"]),
+                        )
+                    ):
+                        opportunity.status = "closed"
+                        opportunity.close_reason = "booking_cancelled"
+            record.updated_at = datetime.now(UTC)
+            session.flush()
+            view = booking_view(session, record)
+        publish_organization(record.organization_id)
+        return view
+
+    @app.post("/v1/bookings/{booking_id}/tickets", response_model=BookingView, status_code=201)
+    async def create_ticket(
+        booking_id: str, body: TicketCreate, user: User = Depends(authenticate)
+    ) -> BookingView:  # noqa: B008
+        try:
+            with factory.begin() as session:
+                booking = accessible_booking(session, booking_id, user)
+                reservation = session.scalar(
+                    select(FlightReservation).where(
+                        FlightReservation.id == body.reservation_id,
+                        FlightReservation.booking_id == booking.id,
+                        FlightReservation.organization_id == booking.organization_id,
+                    )
+                )
+                person = session.scalar(
+                    select(BookingPerson).where(
+                        BookingPerson.id == body.person_id,
+                        BookingPerson.booking_id == booking.id,
+                        BookingPerson.organization_id == booking.organization_id,
+                    )
+                )
+                if not reservation or not person:
+                    raise HTTPException(
+                        422, "ticket person and reservation must belong to this booking"
+                    )
+                ticket = FlightTicket(
+                    organization_id=booking.organization_id,
+                    booking_id=booking.id,
+                    reservation_id=reservation.id,
+                    person_id=person.id,
+                    ticket_number=body.ticket_number,
+                    amount=body.amount,
+                    currency=body.currency,
+                )
+                session.add(ticket)
+                session.flush()
+                for segment_id in body.segment_ids:
+                    segment = session.scalar(
+                        select(FlightSegment).where(
+                            FlightSegment.id == segment_id,
+                            FlightSegment.reservation_id == reservation.id,
+                            FlightSegment.organization_id == booking.organization_id,
+                        )
+                    )
+                    if not segment:
+                        raise HTTPException(422, "ticket segment must belong to its reservation")
+                    session.add(
+                        TicketSegment(
+                            ticket_id=ticket.id,
+                            segment_id=segment.id,
+                            organization_id=booking.organization_id,
+                        )
+                    )
+                session.flush()
+                return booking_view(session, booking)
+        except IntegrityError as exc:
+            raise HTTPException(409, "ticket number already exists in this organization") from exc
+
+    @app.post(
+        "/v1/bookings/{booking_id}/people/{person_id}/roles",
+        response_model=BookingView,
+        status_code=201,
+    )
+    async def add_person_role(
+        booking_id: str,
+        person_id: str,
+        body: RoleCreate,
+        user: User = Depends(authenticate),
+    ) -> BookingView:
+        try:
+            with factory.begin() as session:
+                booking = accessible_booking(session, booking_id, user)
+                person = session.scalar(
+                    select(BookingPerson).where(
+                        BookingPerson.id == person_id,
+                        BookingPerson.booking_id == booking.id,
+                        BookingPerson.organization_id == booking.organization_id,
+                    )
+                )
+                if not person:
+                    raise HTTPException(404, "person was not found")
+                session.add(
+                    BookingPersonRole(
+                        organization_id=booking.organization_id,
+                        person_id=person.id,
+                        role=body.role,
+                        source_method=body.source_method,
+                        confidence=body.confidence,
+                        reason=body.reason,
+                    )
                 )
                 session.flush()
-        except (IntegrityError, ValueError) as exc:
-            detail = str(exc) if isinstance(exc, ValueError) else "could not save the flight"
+                return booking_view(session, booking)
+        except IntegrityError as exc:
+            raise HTTPException(409, "this role and source method already exist") from exc
+
+    @app.post(
+        "/v1/bookings/{booking_id}/people/{person_id}/contacts",
+        response_model=BookingView,
+        status_code=201,
+    )
+    async def add_person_contact(
+        booking_id: str,
+        person_id: str,
+        body: ContactCreate,
+        user: User = Depends(authenticate),
+    ) -> BookingView:
+        try:
             with factory.begin() as session:
-                add_notification(
-                    session,
-                    user.id,
-                    "flight_add_failed",
-                    "Could not add flight",
-                    detail,
+                booking = accessible_booking(session, booking_id, user)
+                person = session.scalar(
+                    select(BookingPerson).where(
+                        BookingPerson.id == person_id,
+                        BookingPerson.booking_id == booking.id,
+                        BookingPerson.organization_id == booking.organization_id,
+                    )
                 )
-            event_hub.publish(user.id)
-            raise HTTPException(status.HTTP_409_CONFLICT, detail) from exc
-        event_hub.publish(user.id)
-        return record_to_view(record)
+                if not person:
+                    raise HTTPException(404, "person was not found")
+                session.add(
+                    ContactPoint(
+                        organization_id=booking.organization_id,
+                        person_id=person.id,
+                        channel=body.channel,
+                        raw_value=body.value,
+                        display_value=body.value.strip(),
+                        normalized_value=normalized_contact(body.channel, body.value),
+                        is_primary=body.is_primary,
+                    )
+                )
+                session.flush()
+                return booking_view(session, booking)
+        except IntegrityError as exc:
+            raise HTTPException(409, "this contact point already exists") from exc
 
-    @app.patch("/v1/flights/{flight_id}/status", response_model=FlightView)
-    async def update_flight_status(
-        flight_id: str,
-        body: FlightStatusUpdate,
-        user: User = Depends(authenticate),  # noqa: B008
-    ) -> FlightView:
-        with factory.begin() as session:
-            record = session.get(FlightRecord, flight_id)
-            if not record or record.user_id != user.id:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "flight was not found")
-            record.is_open_for_upsell = body.status == "open"
-            record.closed_reason = None if body.status == "open" else body.status
-            if body.status == "open":
-                record.matched_hotel = None
-            session.flush()
-        event_hub.publish(user.id)
-        return record_to_view(record)
-
-    @app.post("/v1/flights/{flight_id}/send-upsell", response_model=UpsellResult)
-    async def send_flight_upsell(
-        flight_id: str,
-        user: User = Depends(authenticate),  # noqa: B008
-    ) -> UpsellResult:
+    @app.get("/v1/opportunities", response_model=list[OpportunityView])
+    async def list_opportunities(
+        scope: Scope = "personal",
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+        user: User = Depends(authenticate),
+    ) -> list[OpportunityView]:  # noqa: B008
         with factory() as session:
-            record = session.get(FlightRecord, flight_id)
-            if not record or record.user_id != user.id:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "flight was not found")
-            if not record.is_open_for_upsell:
-                raise HTTPException(status.HTTP_409_CONFLICT, "flight is already closed")
+            organization_id, _ = authorize_scope(session, user, scope)
+            records = session.scalars(
+                select(UpsellOpportunity)
+                .where(*business_filter(UpsellOpportunity, organization_id, user, scope))
+                .order_by(UpsellOpportunity.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            ).all()
+            return [opportunity_view(session, row) for row in records]
 
-        async def fail(detail: str) -> None:
-            with factory.begin() as session:
-                add_notification(
-                    session,
-                    user.id,
-                    "whatsapp_failed",
-                    "WhatsApp delivery failed",
-                    f"The offer for {record.booking_ref} could not be sent: {detail}",
-                    record.id,
+    @app.get("/v1/opportunities/{opportunity_id}", response_model=OpportunityView)
+    async def get_opportunity(
+        opportunity_id: str, user: User = Depends(authenticate)
+    ) -> OpportunityView:  # noqa: B008
+        with factory() as session:
+            return opportunity_view(session, accessible_opportunity(session, opportunity_id, user))
+
+    @app.post("/v1/opportunities", response_model=OpportunityView, status_code=201)
+    async def create_opportunity(
+        body: OpportunityCreate, user: User = Depends(authenticate)
+    ) -> OpportunityView:  # noqa: B008
+        with factory.begin() as session:
+            booking = accessible_booking(session, body.booking_id, user)
+            agent_id = body.assigned_agent_id or booking.assigned_agent_id
+            ensure_agent(session, booking.organization_id, agent_id)
+            tickets = session.scalars(
+                select(FlightTicket).where(
+                    FlightTicket.id.in_(body.ticket_ids),
+                    FlightTicket.booking_id == booking.id,
+                    FlightTicket.organization_id == booking.organization_id,
                 )
-            event_hub.publish(user.id)
+            ).all()
+            if len(tickets) != len(set(body.ticket_ids)):
+                raise HTTPException(422, "every covered ticket must belong to the booking")
+            record = UpsellOpportunity(
+                organization_id=booking.organization_id,
+                booking_id=booking.id,
+                assigned_agent_id=agent_id,
+                product_type=body.product_type,
+                destination=body.destination,
+                service_start=body.service_start,
+                service_end=body.service_end,
+                potential_revenue=body.potential_revenue,
+                potential_commission=body.potential_commission,
+                currency=body.currency,
+            )
+            session.add(record)
+            session.flush()
+            for ticket in tickets:
+                session.add(
+                    OpportunityTicket(
+                        opportunity_id=record.id,
+                        ticket_id=ticket.id,
+                        booking_id=booking.id,
+                        organization_id=booking.organization_id,
+                    )
+                )
+            session.flush()
+            view = opportunity_view(session, record)
+        publish_organization(booking.organization_id)
+        return view
+
+    @app.patch("/v1/opportunities/{opportunity_id}", response_model=OpportunityView)
+    async def update_opportunity(
+        opportunity_id: str, body: OpportunityUpdate, user: User = Depends(authenticate)
+    ) -> OpportunityView:  # noqa: B008
+        with factory.begin() as session:
+            record = accessible_opportunity(session, opportunity_id, user)
+            if record.version != body.version:
+                raise HTTPException(409, "opportunity was changed; refresh and retry")
+            record.status = body.status
+            record.close_reason = body.close_reason
+            if body.won_revenue is not None:
+                record.won_revenue = body.won_revenue
+            if body.won_commission is not None:
+                record.won_commission = body.won_commission
+            record.version += 1
+            record.updated_at = datetime.now(UTC)
+            session.flush()
+            view = opportunity_view(session, record)
+        publish_organization(record.organization_id)
+        return view
+
+    @app.put(
+        "/v1/opportunities/{opportunity_id}/recipients/{person_id}", response_model=OpportunityView
+    )
+    async def put_recipient(
+        opportunity_id: str,
+        person_id: str,
+        body: RecipientUpdate,
+        user: User = Depends(authenticate),
+    ) -> OpportunityView:  # noqa: B008
+        if body.person_id != person_id:
+            raise HTTPException(422, "person IDs do not match")
+        with factory.begin() as session:
+            opportunity = accessible_opportunity(session, opportunity_id, user)
+            person = session.scalar(
+                select(BookingPerson).where(
+                    BookingPerson.id == person_id,
+                    BookingPerson.booking_id == opportunity.booking_id,
+                    BookingPerson.organization_id == opportunity.organization_id,
+                )
+            )
+            if not person:
+                raise HTTPException(422, "recipient must belong to the opportunity booking")
+            if body.contact_point_id:
+                contact = session.scalar(
+                    select(ContactPoint).where(
+                        ContactPoint.id == body.contact_point_id,
+                        ContactPoint.person_id == person_id,
+                        ContactPoint.organization_id == opportunity.organization_id,
+                    )
+                )
+                if not contact:
+                    raise HTTPException(422, "contact point must belong to the recipient")
+            recipient = session.scalar(
+                select(OpportunityRecipient).where(
+                    OpportunityRecipient.opportunity_id == opportunity.id,
+                    OpportunityRecipient.person_id == person_id,
+                )
+            )
+            if not recipient:
+                recipient = OpportunityRecipient(
+                    organization_id=opportunity.organization_id,
+                    booking_id=opportunity.booking_id,
+                    opportunity_id=opportunity.id,
+                    person_id=person_id,
+                    selection_status=body.selection_status,
+                    selection_method=body.selection_method,
+                )
+                session.add(recipient)
+            recipient.contact_point_id = body.contact_point_id
+            recipient.selection_status = body.selection_status
+            recipient.selection_method = body.selection_method
+            recipient.selection_reason = body.selection_reason
+            recipient.confidence = body.confidence
+            recipient.priority = body.priority
+            opportunity.version += 1
+            session.flush()
+            view = opportunity_view(session, opportunity)
+        publish_organization(opportunity.organization_id)
+        return view
+
+    @app.post("/v1/opportunities/{opportunity_id}/send", response_model=SendBatchView)
+    async def send_opportunity(
+        opportunity_id: str,
+        user: User = Depends(authenticate),
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> SendBatchView:  # noqa: B008
+        key = idempotency_key or secrets.token_urlsafe(24)
+        with factory() as session:
+            opportunity = accessible_opportunity(session, opportunity_id, user)
+            replay = session.scalar(
+                select(UpsellSendBatch).where(
+                    UpsellSendBatch.organization_id == opportunity.organization_id,
+                    UpsellSendBatch.idempotency_key == key,
+                )
+            )
+            if replay:
+                deliveries = session.scalars(
+                    select(MessageDelivery).where(MessageDelivery.batch_id == replay.id)
+                ).all()
+                return SendBatchView(
+                    id=replay.id,
+                    opportunity_id=replay.opportunity_id,
+                    completion_policy="all_selected",
+                    status=replay.status,
+                    idempotent_replay=True,
+                    deliveries=[delivery_view(item) for item in deliveries],
+                )
+            recipients = session.scalars(
+                select(OpportunityRecipient)
+                .where(
+                    OpportunityRecipient.opportunity_id == opportunity.id,
+                    OpportunityRecipient.selection_status == "selected",
+                )
+                .order_by(OpportunityRecipient.priority)
+            ).all()
+            if not recipients:
+                raise HTTPException(422, "select at least one recipient before sending")
+            targets: list[tuple[OpportunityRecipient, BookingPerson, ContactPoint]] = []
+            for recipient in recipients:
+                person = session.get(BookingPerson, recipient.person_id)
+                contact = (
+                    session.get(ContactPoint, recipient.contact_point_id)
+                    if recipient.contact_point_id
+                    else None
+                )
+                if not person or not contact or contact.person_id != recipient.person_id:
+                    raise HTTPException(
+                        422, f"selected recipient {recipient.id} needs a valid contact point"
+                    )
+                targets.append((recipient, person, contact))
+            org_id = opportunity.organization_id
+            agent_id = opportunity.assigned_agent_id
+        try:
+            with factory.begin() as session:
+                locked = session.scalar(
+                    select(UpsellOpportunity)
+                    .where(
+                        UpsellOpportunity.id == opportunity_id,
+                        UpsellOpportunity.organization_id == org_id,
+                    )
+                    .with_for_update()
+                )
+                assert locked
+                processing = session.scalar(
+                    select(UpsellSendBatch.id).where(
+                        UpsellSendBatch.opportunity_id == opportunity_id,
+                        UpsellSendBatch.status == "processing",
+                    )
+                )
+                if processing:
+                    raise HTTPException(409, "a send for this opportunity is already processing")
+                batch = UpsellSendBatch(
+                    organization_id=org_id,
+                    opportunity_id=opportunity_id,
+                    actor_user_id=user.id,
+                    idempotency_key=key,
+                    template_name="hotel_offer",
+                    template_version="1",
+                )
+                session.add(batch)
+                session.flush()
+                batch_id = batch.id
+        except IntegrityError:
+            with factory() as session:
+                replay = session.scalar(
+                    select(UpsellSendBatch).where(
+                        UpsellSendBatch.organization_id == org_id,
+                        UpsellSendBatch.idempotency_key == key,
+                    )
+                )
+                assert replay
+                deliveries = session.scalars(
+                    select(MessageDelivery).where(MessageDelivery.batch_id == replay.id)
+                ).all()
+                return SendBatchView(
+                    id=replay.id,
+                    opportunity_id=replay.opportunity_id,
+                    completion_policy="all_selected",
+                    status=replay.status,
+                    idempotent_replay=True,
+                    deliveries=[delivery_view(item) for item in deliveries],
+                )
 
         account_sid = resolved.twilio_account_sid.strip()
         auth_token = resolved.twilio_auth_token.get_secret_value()
-        if not account_sid or not auth_token:
-            detail = "Twilio is not configured"
-            await fail(detail)
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail)
-        if not record.phone.strip():
-            detail = "the customer has no phone number"
-            await fail(detail)
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail)
-
-        first_name = record.passenger_name.split("&", 1)[0].split(",", 1)[0].strip()
-        message_body = (
-            f"היי {first_name}! ✈️\n\n"
-            f"הנסיעה שלך עם Tapy ל-{record.destination_city} "
-            f"({record.arrival_date.isoformat()} - {record.departure_date.isoformat()}) אושרה.\n\n"
-            "מצאנו עבורך 3 מלונות במחירים בלעדיים לתאריכים שלך. "
-            "ניתן לשריין כל אחד מהם בלחיצה אחת — ללא חיוב עד הצ'ק-אין:\n\n"
-            f"👉 {resolved.hotel_offer_url}\n\nלהסרה השב STOP."
+        created: list[MessageDelivery] = []
+        for recipient, person, contact in targets:
+            with factory() as session:
+                previous = session.scalar(
+                    select(MessageDelivery)
+                    .join(UpsellSendBatch, UpsellSendBatch.id == MessageDelivery.batch_id)
+                    .where(
+                        UpsellSendBatch.opportunity_id == opportunity_id,
+                        MessageDelivery.recipient_id == recipient.id,
+                        MessageDelivery.status.in_(["submitted", "delivered"]),
+                    )
+                    .order_by(MessageDelivery.created_at.desc())
+                )
+            if previous:
+                created.append(previous)
+                continue
+            rendered = (
+                f"Hi {person.given_name or person.display_name}! "
+                f"Your Tapy travel offer is ready: {resolved.hotel_offer_url}"
+            )
+            provider_id = error_code = error_message = None
+            delivery_status = "failed"
+            if contact.channel not in {"phone", "whatsapp"}:
+                error_code, error_message = (
+                    "unsupported_channel",
+                    "Twilio delivery requires phone or WhatsApp",
+                )
+            elif not account_sid or not auth_token:
+                error_code, error_message = "provider_unconfigured", "Twilio is not configured"
+            else:
+                try:
+                    response = await app.state.http_client.post(
+                        f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json",
+                        data={
+                            "To": f"whatsapp:{contact.normalized_value}",
+                            "From": resolved.twilio_whatsapp_from,
+                            "Body": rendered,
+                        },
+                        auth=(account_sid, auth_token),
+                    )
+                    response.raise_for_status()
+                    provider_id = str(response.json()["sid"])
+                    delivery_status = "submitted"
+                except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+                    error_code = (
+                        "provider_rejected"
+                        if isinstance(exc, httpx.HTTPStatusError)
+                        else "provider_unavailable"
+                    )
+                    error_message = "Twilio did not accept the message"
+            with factory.begin() as session:
+                delivery = MessageDelivery(
+                    organization_id=org_id,
+                    batch_id=batch_id,
+                    recipient_id=recipient.id,
+                    channel=contact.channel,
+                    provider="twilio",
+                    provider_message_id=provider_id,
+                    status=delivery_status,
+                    error_code=error_code,
+                    error_message=error_message,
+                    recipient_name_snapshot=person.display_name,
+                    destination_snapshot=contact.normalized_value,
+                    rendered_message=rendered,
+                    idempotency_key=stable_hash(opportunity_id, recipient.id, key),
+                    submitted_at=datetime.now(UTC) if delivery_status == "submitted" else None,
+                )
+                session.add(delivery)
+                session.flush()
+                created.append(delivery)
+        successful_recipient_ids = {
+            item.recipient_id for item in created if item.status in {"submitted", "delivered"}
+        }
+        batch_status = (
+            "completed"
+            if len(successful_recipient_ids) == len(targets)
+            else "partial"
+            if successful_recipient_ids
+            else "failed"
         )
-        try:
-            response = await app.state.http_client.post(
-                f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json",
-                data={
-                    "To": f"whatsapp:{record.phone.strip()}",
-                    "From": resolved.twilio_whatsapp_from,
-                    "Body": message_body,
-                },
-                auth=(account_sid, auth_token),
-            )
-            response.raise_for_status()
-            message_sid = str(response.json()["sid"])
-        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
-            logger.warning(
-                "whatsapp_delivery_failed",
-                user_id=user.id,
-                flight_id=record.id,
-                error=type(exc).__name__,
-            )
-            detail = (
-                "Twilio rejected the message"
-                if isinstance(exc, httpx.HTTPStatusError)
-                else "Twilio could not be reached"
-            )
-            await fail(detail)
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail) from exc
-
         with factory.begin() as session:
-            current = session.get(FlightRecord, flight_id)
-            if not current or current.user_id != user.id:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "flight was not found")
-            current.is_open_for_upsell = False
-            current.closed_reason = "upsold"
-            add_notification(
+            completed_batch = session.get(UpsellSendBatch, batch_id)
+            assert completed_batch
+            completed_batch.status = batch_status
+            completed_batch.completed_at = datetime.now(UTC)
+            current = session.get(UpsellOpportunity, opportunity_id)
+            assert current
+            if successful_recipient_ids and current.status == "open":
+                current.status = "contacted"
+                current.version += 1
+            notify(
                 session,
-                user.id,
-                "upsell_sent",
-                "Upsell sent",
-                f"The WhatsApp offer for {current.booking_ref} was sent and the flight closed.",
-                current.id,
+                agent_id,
+                org_id,
+                "opportunity_send",
+                "Opportunity outreach completed",
+                f"Delivery batch finished with status {batch_status}.",
+                booking_id=current.booking_id,
+                opportunity_id=current.id,
             )
-            session.flush()
-        event_hub.publish(user.id)
-        return UpsellResult(flight=record_to_view(current), message_sid=message_sid)
+        publish_organization(org_id)
+        return SendBatchView(
+            id=batch_id,
+            opportunity_id=opportunity_id,
+            completion_policy="all_selected",
+            status=batch_status,
+            deliveries=[delivery_view(item) for item in created],
+        )
+
+    @app.get("/v1/metrics", response_model=MetricsView)
+    async def metrics(scope: Scope = "personal", user: User = Depends(authenticate)) -> MetricsView:  # noqa: B008
+        with factory() as session:
+            organization_id, _ = authorize_scope(session, user, scope)
+            values = metric_values(
+                session, organization_id, user.id if scope == "personal" else None
+            )
+            statuses = cast(dict[str, int], values["statuses"])
+            per_agent: list[AgentMetrics] = []
+            if scope == "organization":
+                members = session.execute(
+                    select(OrganizationMembership, User)
+                    .join(User, User.id == OrganizationMembership.user_id)
+                    .where(
+                        OrganizationMembership.organization_id == organization_id,
+                        OrganizationMembership.status == "active",
+                    )
+                ).all()
+                for _, member in members:
+                    own = metric_values(session, organization_id, member.id)
+                    own_statuses = cast(dict[str, int], own["statuses"])
+                    own_money = cast(dict[str, dict[str, Decimal]], own["monetary_totals"])
+                    per_agent.append(
+                        AgentMetrics(
+                            agent_id=member.id,
+                            agent_name=member.name,
+                            total_opportunities=cast(int, own["total"]),
+                            won_opportunities=own_statuses["won"],
+                            conversion_rate=cast(float, own["conversion_rate"]),
+                            won_commission_by_currency={
+                                currency: totals["won_commission"]
+                                for currency, totals in own_money.items()
+                                if totals["won_commission"]
+                            },
+                        )
+                    )
+            return MetricsView(
+                scope=scope,
+                total_opportunities=cast(int, values["total"]),
+                open_opportunities=statuses["open"],
+                contacted_opportunities=statuses["contacted"],
+                won_opportunities=statuses["won"],
+                declined_opportunities=statuses["declined"],
+                expired_opportunities=statuses["expired"],
+                closed_opportunities=statuses["closed"],
+                delivery_successes=cast(int, values["delivery_successes"]),
+                delivery_failures=cast(int, values["delivery_failures"]),
+                conversion_rate=cast(float, values["conversion_rate"]),
+                monetary_totals=[
+                    CurrencyMetrics(currency=currency, **totals)
+                    for currency, totals in sorted(
+                        cast(dict[str, dict[str, Decimal]], values["monetary_totals"]).items()
+                    )
+                ],
+                per_agent=per_agent,
+            )
 
     @app.get("/v1/notifications", response_model=list[NotificationView])
-    async def list_notifications(
-        user: User = Depends(authenticate),  # noqa: B008
-    ) -> list[NotificationView]:
+    async def list_notifications(user: User = Depends(authenticate)) -> list[NotificationView]:  # noqa: B008
         with factory() as session:
+            organization_id, _ = authorize_scope(session, user, "personal")
             records = session.scalars(
                 select(NotificationRecord)
-                .where(NotificationRecord.user_id == user.id)
+                .where(
+                    NotificationRecord.user_id == user.id,
+                    NotificationRecord.organization_id == organization_id,
+                )
                 .order_by(NotificationRecord.created_at.desc())
                 .limit(100)
             ).all()
-        return [notification_view(record) for record in records]
+            return [NotificationView.model_validate(row, from_attributes=True) for row in records]
 
     @app.post("/v1/notifications/read", status_code=204)
-    async def mark_notifications_read(
-        body: NotificationsRead,
-        user: User = Depends(authenticate),  # noqa: B008
-    ) -> None:
-        now = datetime.now(UTC)
+    async def read_notifications(
+        body: NotificationsRead, user: User = Depends(authenticate)
+    ) -> None:  # noqa: B008
         with factory.begin() as session:
-            unread = session.scalars(
+            organization_id, _ = authorize_scope(session, user, "personal")
+            for record in session.scalars(
                 select(NotificationRecord).where(
                     NotificationRecord.user_id == user.id,
+                    NotificationRecord.organization_id == organization_id,
                     NotificationRecord.id.in_(body.notification_ids),
                     NotificationRecord.read_at.is_(None),
                 )
-            ).all()
-            for notification in unread:
-                notification.read_at = now
-        event_hub.publish(user.id)
-
-    @app.get("/v1/metrics", response_model=MetricsView)
-    async def metrics(user: User = Depends(authenticate)) -> MetricsView:  # noqa: B008
-        records = flight_records(user.id)
-        statuses = [record_to_view(record).status for record in records]
-        upsold = statuses.count("upsold")
-        opened = statuses.count("open")
-        declined = statuses.count("declined")
-        hotel = statuses.count("past")
-        hotel_revenue = sum(
-            r.hotel_cost_usd for r, s in zip(records, statuses, strict=True) if s == "upsold"
-        )
-        potential_value = sum(
-            r.hotel_cost_usd for r, s in zip(records, statuses, strict=True) if s == "open"
-        )
-        handled = upsold + declined
-        return MetricsView(
-            total_flights=len(records),
-            upsold_count=upsold,
-            open_count=opened,
-            declined_count=declined,
-            hotel_on_file_count=hotel,
-            closing_rate=upsold / handled if handled else 0,
-            net_profit=round(hotel_revenue * 0.01, 2),
-            potential_profit=round(potential_value * 0.01, 2),
-            total_hotel_revenue=hotel_revenue,
-        )
+            ):
+                record.read_at = datetime.now(UTC)
 
     @app.get("/v1/events")
     async def events(user: User = Depends(authenticate)) -> StreamingResponse:  # noqa: B008
@@ -1026,8 +1318,8 @@ def create_app(
                 yield "event: ready\ndata: connected\n\n"
                 while True:
                     try:
-                        event = await asyncio.wait_for(queue.get(), timeout=25)
-                        yield f"event: {event}\ndata: refresh\n\n"
+                        value = await asyncio.wait_for(queue.get(), timeout=25)
+                        yield f"event: refresh\ndata: {value}\n\n"
                     except TimeoutError:
                         yield ": keepalive\n\n"
             finally:
@@ -1035,65 +1327,186 @@ def create_app(
 
         return StreamingResponse(stream(), media_type="text/event-stream")
 
-    # Iteration-one compatibility API. New clients use /v1/auth and /v1/users/me.
     @app.post("/v1/agents", response_model=AgentCreated, status_code=201)
     async def create_agent() -> AgentCreated:
         with factory.begin() as session:
             user, token = new_agent(session)
-            if legacy_flights:
-                for flight in legacy_flights.flights:
-                    session.add(
-                        FlightRecord(
-                            user_id=user.id,
-                            booking_ref=flight.id,
-                            passenger_name=flight.label,
-                            origin="UNK",
-                            origin_city="Unknown",
-                            destination_code=(flight.destination.airport_codes or ["UNK"])[0],
-                            destination_city=flight.destination.city,
-                            destination_country=flight.destination.country,
-                            arrival_date=flight.arrival_date,
-                            departure_date=flight.departure_date,
-                        )
-                    )
         return AgentCreated(agent_id=user.id, access_token=token)
 
     @app.get("/v1/agents/me", response_model=AgentView)
     async def get_agent(user: User = Depends(authenticate)) -> AgentView:  # noqa: B008
-        view = _user_view(factory, user)
+        view = user_view(user)
         return AgentView(
-            agent_id=user.id,
-            connected_mailboxes=[mailbox.provider for mailbox in view.mailboxes],
+            agent_id=user.id, connected_mailboxes=[item.provider for item in view.mailboxes]
         )
 
     @app.post("/v1/mailboxes/{provider}/authorization", response_model=AuthorizationUrl)
     async def authorize_mailbox(
-        provider: Provider,
-        request: Request,
-        user: User = Depends(authenticate),  # noqa: B008
-    ) -> AuthorizationUrl:
+        provider: Provider, request: Request, user: User = Depends(authenticate)
+    ) -> AuthorizationUrl:  # noqa: B008
         try:
             return AuthorizationUrl(
                 authorization_url=request.app.state.oauth.authorization_url(user.id, provider)
             )
         except OAuthError as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+            raise HTTPException(503, str(exc)) from exc
 
     @app.delete("/v1/mailboxes/{provider}", status_code=204)
-    async def disconnect_mailbox(
-        provider: Provider,
-        user: User = Depends(authenticate),  # noqa: B008
-    ) -> None:
+    async def disconnect_mailbox(provider: Provider, user: User = Depends(authenticate)) -> None:  # noqa: B008
         with factory.begin() as session:
             mailbox = session.scalar(
                 select(MailboxConnection).where(
-                    MailboxConnection.user_id == user.id,
-                    MailboxConnection.provider == provider,
+                    MailboxConnection.user_id == user.id, MailboxConnection.provider == provider
                 )
             )
             if mailbox:
                 session.delete(mailbox)
-        event_hub.publish(user.id)
+
+    async def scan(user: User, provider: Provider, maximum: int | None) -> ScanResult:
+        with factory() as session:
+            organization_id, _ = authorize_scope(session, user, "personal")
+            mailbox = session.scalar(
+                select(MailboxConnection).where(
+                    MailboxConnection.user_id == user.id, MailboxConnection.provider == provider
+                )
+            )
+        if not mailbox:
+            raise HTTPException(409, "mailbox is not connected")
+        limit = min(
+            maximum or resolved.maximum_messages_per_scan, resolved.maximum_messages_per_scan
+        )
+        try:
+            access_token = await app.state.oauth.access_token(mailbox)
+            messages = await app.state.mailbox_readers[provider].messages(access_token, limit)
+        except (OAuthError, MailboxError) as exc:
+            raise HTTPException(502, str(exc)) from exc
+        skipped = confirmations = flight_confirmations = tickets_found = created_count = 0
+        results: list[AnalysisResponse] = []
+        for email in messages:
+            with factory() as session:
+                if session.scalar(
+                    select(ProcessedMessage.id).where(
+                        ProcessedMessage.mailbox_id == mailbox.id,
+                        ProcessedMessage.provider_message_id == email.message_id,
+                    )
+                ):
+                    skipped += 1
+                    continue
+            try:
+                extracted = await configured_extractor.extract(email)
+            except ExtractionError as exc:
+                raise HTTPException(502, "all LLM backends failed") from exc
+            outcome_ids: list[str] = []
+            opportunity_ids: list[str] = []
+            if extracted.flight_booking.is_flight_booking_confirmation:
+                flight_confirmations += 1
+                tickets_found += len(extracted.flight_booking.tickets)
+                with factory.begin() as session:
+                    outcome = ingest_flight_booking(
+                        session,
+                        organization_id=organization_id,
+                        agent_id=user.id,
+                        mailbox_id=mailbox.id,
+                        provider=provider,
+                        email=email,
+                        facts=extracted.flight_booking,
+                    )
+                    outcome_ids = outcome.booking_ids
+                    opportunity_ids = outcome.opportunity_ids
+                    for booking_id in outcome_ids:
+                        notify(
+                            session,
+                            user.id,
+                            organization_id,
+                            "booking_ingested",
+                            "Booking ingested",
+                            "Booking facts were extracted from email.",
+                            booking_id=booking_id,
+                        )
+                created_count += len(opportunity_ids)
+            confirmations += int(extracted.hotel_booking.is_hotel_booking_confirmation)
+            matches = []
+            if extracted.hotel_booking.is_hotel_booking_confirmation:
+                with factory.begin() as session:
+                    opportunities = session.scalars(
+                        select(UpsellOpportunity).where(
+                            UpsellOpportunity.organization_id == organization_id,
+                            UpsellOpportunity.assigned_agent_id == user.id,
+                            UpsellOpportunity.status.in_(["open", "contacted"]),
+                        )
+                    ).all()
+                    projections = [
+                        Flight(
+                            id=row.id,
+                            label=row.destination or row.id,
+                            arrival_date=(row.service_start or datetime.now(UTC)).date(),
+                            departure_date=(
+                                row.service_end or row.service_start or datetime.now(UTC)
+                            ).date(),
+                            destination=Destination(
+                                city=row.destination or "",
+                                airport_codes=[row.destination] if row.destination else [],
+                            ),
+                        )
+                        for row in opportunities
+                    ]
+                    matches = score_booking(
+                        extracted.hotel_booking, projections, resolved.match_threshold
+                    )
+                    if matches and matches[0].related:
+                        matched = session.get(UpsellOpportunity, matches[0].flight_id)
+                        assert matched
+                        matched.status = "closed"
+                        matched.close_reason = "hotel_already_booked"
+                        matched.version += 1
+            with factory.begin() as session:
+                session.add(
+                    ProcessedMessage(
+                        mailbox_id=mailbox.id,
+                        organization_id=organization_id,
+                        provider_message_id=email.message_id,
+                        provider_thread_id=email.thread_id,
+                        event_type=extracted.flight_booking.booking_status,
+                        outcome="opportunities_created" if opportunity_ids else "analyzed",
+                        result_summary={
+                            "booking_ids": outcome_ids,
+                            "opportunity_ids": opportunity_ids,
+                            "hotel_match": matches[0].flight_id
+                            if matches and matches[0].related
+                            else None,
+                        },
+                    )
+                )
+            results.append(
+                AnalysisResponse(
+                    message_id=email.message_id,
+                    booking=extracted.hotel_booking,
+                    matches=matches,
+                    best_opportunity_id=matches[0].flight_id if matches else None,
+                    best_score=matches[0].score if matches else 0,
+                    tickets_found=len(extracted.flight_booking.tickets),
+                    bookings_changed=outcome_ids,
+                    opportunities_created=opportunity_ids,
+                )
+            )
+        if results:
+            publish_organization(organization_id)
+        return ScanResult(
+            provider=provider,
+            messages_seen=len(messages),
+            messages_skipped=skipped,
+            messages_analyzed=len(results),
+            confirmations_found=confirmations,
+            matches_found=sum(bool(r.matches and r.matches[0].related) for r in results),
+            flight_confirmations_found=flight_confirmations,
+            flight_tickets_found=tickets_found,
+            opportunities_created=created_count,
+            results=results,
+        )
+
+    @app.post("/v1/scans", response_model=ScanResult)
+    async def scan_mailbox(body: ScanRequest, user: User = Depends(authenticate)) -> ScanResult:
+        return await scan(user, body.provider, body.maximum_messages)  # noqa: B008
 
     @app.get("/v1/oauth/{provider}/callback", response_class=HTMLResponse)
     async def oauth_callback(
@@ -1105,56 +1518,54 @@ def create_app(
         try:
             purpose = request.app.state.oauth.state_purpose(provider, state)
             if purpose == "login":
-                auth_provider: AuthProvider = "google" if provider == "gmail" else "microsoft"
                 completion = await request.app.state.oauth.complete_login(
-                    auth_provider, state, code
+                    "google" if provider == "gmail" else "microsoft", state, code
                 )
                 with factory.begin() as session:
-                    token, _ = new_session(session, completion.user.id, resolved.session_days)
-                response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+                    current = session.get(User, completion.user.id)
+                    assert current
+                    ensure_context(session, current)
+                    token, _ = new_session(session, current.id, resolved.session_days)
+                response = RedirectResponse(url="/", status_code=303)
                 _set_session_cookie(response, token, resolved)
                 return response
             mailbox = await request.app.state.oauth.complete(provider, state, code)
             await request.app.state.webhooks.ensure(mailbox)
             event_hub.publish(mailbox.user_id)
         except OAuthError as exc:
-            logger.warning("oauth_failed", provider=provider, error=str(exc))
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+            raise HTTPException(400, str(exc)) from exc
         return HTMLResponse(
             "<!doctype html><title>Mailbox connected</title><h1>Mailbox connected</h1>"
-            f"<p>{provider.title()} access was granted. You may close this window.</p>"
             "<script>if(window.opener){window.opener.postMessage('tapy-mailbox-connected',"
             "window.location.origin);window.close()}else{window.location.replace('/')}</script>"
         )
 
-    @app.post("/v1/scans", response_model=ScanResult)
-    async def scan_mailbox(
-        body: ScanRequest,
-        user: User = Depends(authenticate),  # noqa: B008
-    ) -> ScanResult:
-        return await scan(user.id, body.provider, body.maximum_messages)
+    async def scan_from_webhook(user_id: str, provider: Provider) -> None:
+        with factory() as session:
+            user = session.get(User, user_id)
+        if user:
+            with suppress(Exception):
+                await scan(user, provider, None)
 
     @app.post("/v1/webhooks/gmail", status_code=202)
     async def gmail_webhook(
-        payload: dict[str, object],
-        background: BackgroundTasks,
-        token: str = Query(default=""),
+        payload: dict[str, object], background: BackgroundTasks, token: str = Query(default="")
     ) -> dict[str, str]:
         expected = resolved.webhook_verification_token.get_secret_value()
         if expected and not hmac.compare_digest(token, expected):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid webhook token")
+            raise HTTPException(401, "invalid webhook token")
         try:
             message = cast(dict[str, object], payload["message"])
             raw = str(message["data"])
             notice = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
             email = str(notice["emailAddress"]).casefold()
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid Gmail notification") from exc
+            raise HTTPException(400, "invalid Gmail notification") from exc
         with factory() as session:
             mailbox = session.scalar(
                 select(MailboxConnection).where(
                     MailboxConnection.provider == "gmail",
-                    func.lower(MailboxConnection.email_address) == email,
+                    MailboxConnection.email_address.ilike(email),
                 )
             )
         if mailbox:
@@ -1170,27 +1581,26 @@ def create_app(
     ) -> StarletteResponse:
         expected = resolved.webhook_verification_token.get_secret_value()
         if expected and not hmac.compare_digest(token, expected):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid webhook token")
+            raise HTTPException(401, "invalid webhook token")
         if validation_token is not None:
             return PlainTextResponse(validation_token)
         notifications = payload.get("value", []) if payload else []
         if not isinstance(notifications, list):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid Outlook notification")
-        for notification in notifications:
-            if not isinstance(notification, dict):
+            raise HTTPException(400, "invalid Outlook notification")
+        for item in notifications:
+            if not isinstance(item, dict):
                 continue
-            subscription_id = str(notification.get("subscriptionId", ""))
-            client_state = str(notification.get("clientState", ""))
             with factory() as session:
                 mailbox = session.scalar(
                     select(MailboxConnection).where(
                         MailboxConnection.provider == "outlook",
-                        MailboxConnection.webhook_subscription_id == subscription_id,
-                        MailboxConnection.webhook_client_state == client_state,
+                        MailboxConnection.webhook_subscription_id
+                        == str(item.get("subscriptionId", "")),
+                        MailboxConnection.webhook_client_state == str(item.get("clientState", "")),
                     )
                 )
             if mailbox:
                 background.add_task(scan_from_webhook, mailbox.user_id, "outlook")
-        return Response(status_code=status.HTTP_202_ACCEPTED)
+        return Response(status_code=202)
 
     return app

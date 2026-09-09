@@ -4,15 +4,16 @@ import { useEffect, useState } from "react";
 import { useDemo } from "../lib/store";
 
 export function UserInfoPage() {
-  const { user, flights, setView, logout } = useDemo();
+  const { user, bookings, opportunities, setView, logout } = useDemo();
   if (!user) return null;
   return (
     <Page title="Your account" subtitle="Identity and account details used by Tapy.">
       <div className="grid gap-4 sm:grid-cols-2">
         <Info label="Name" value={user.name} />
         <Info label="Email" value={user.email} />
-        <Info label="Sign-in methods" value={user.authProviders.join(", ") || "—"} />
-        <Info label="Flights" value={String(flights.length)} />
+        <Info label="Sign-in methods" value={user.auth_providers.join(", ") || "—"} />
+        <Info label="Assigned bookings" value={String(bookings.length)} />
+        <Info label="Assigned opportunities" value={String(opportunities.length)} />
       </div>
       <button type="button" onClick={() => setView("settings")} className="mt-6 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white">Open settings</button>
       <button type="button" onClick={() => void logout()} className="ms-3 mt-6 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">Sign out</button>
@@ -49,6 +50,14 @@ export function UserSettingsPage() {
       </section>
 
       <section className="mt-5 rounded-2xl border border-slate-200 p-5">
+        <h2 className="font-semibold text-slate-900">Active organization</h2>
+        <p className="mt-1 text-sm text-slate-500">All booking, opportunity, notification, and metric requests use this tenant context.</p>
+        <select value={user.active_organization_id} onChange={(event) => void updateProfile({ active_organization_id: event.target.value })} className="mt-4 w-full max-w-md rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm">
+          {user.memberships.map((membership) => <option key={membership.organization_id} value={membership.organization_id}>{membership.organization_name} · {membership.role}</option>)}
+        </select>
+      </section>
+
+      <section className="mt-5 rounded-2xl border border-slate-200 p-5">
         <h2 className="font-semibold text-slate-900">Email permissions</h2>
         <p className="mt-1 text-sm leading-relaxed text-slate-500">Tapy asks for read-only email access in the provider&apos;s own consent window. When connected, Tapy reads a bounded set of recent messages and sends their subject, sender, date, and text to Alibaba Cloud Qwen to identify flight and hotel confirmations. Full message bodies are not saved in Tapy&apos;s product database. Tokens go directly to the backend, are encrypted there, and are never exposed to this page. Selecting <strong>Grant read access</strong> requests this processing. See the <a href="/privacy" className="font-medium text-indigo-600 underline underline-offset-2">Privacy Policy</a>.</p>
         <div className="mt-5 space-y-3">
@@ -65,7 +74,7 @@ export function UserSettingsPage() {
       <div className="flex flex-col gap-3 rounded-xl bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-slate-900">{title}</p>
-          <p className="mt-0.5 text-xs text-slate-500">{mailbox ? `${mailbox.emailAddress} · ${mailbox.webhookActive ? "live notifications active" : "connected; webhook configuration pending"}` : "Not connected"}</p>
+          <p className="mt-0.5 text-xs text-slate-500">{mailbox ? `${mailbox.email_address} · ${mailbox.webhook_active ? "live notifications active" : "connected; webhook configuration pending"}` : "Not connected"}</p>
         </div>
         {mailbox ? (
           <button type="button" onClick={() => void disconnectMailbox(provider)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Disconnect</button>

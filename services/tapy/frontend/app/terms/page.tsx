@@ -105,7 +105,7 @@ export default function TermsOfService() {
         </p>
         <p>
           Tapy relies on third-party services, including Google, Microsoft, Alibaba Cloud Model
-          Studio, Google Gemini, Twilio, and WhatsApp. Their services are governed by their own
+          Studio, Twilio, and WhatsApp. Their services are governed by their own
           terms and may be changed, limited, or unavailable. Tapy is not responsible for a
           third-party service outside our reasonable control, but we remain responsible for our own
           obligations regarding Customer Data.

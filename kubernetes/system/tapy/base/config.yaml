@@ -21,5 +21,3 @@ data:
   MATCH_THRESHOLD: "0.90"
   MAXIMUM_MESSAGES_PER_SCAN: "20"
   GMAIL_QUERY: newer_than:365d
-  flights.json: |
-    {"version":1,"flights":[]}

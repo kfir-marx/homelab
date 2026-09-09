@@ -4,52 +4,43 @@ Portable homelab/cloud topology, cloud prerequisites, configuration matrices,
 deployment order, and migration steps are documented in
 [`tapy-kubernetes-portability.md`](tapy-kubernetes-portability.md).
 
-## Runtime design
+## Runtime and data design
 
-Tapy is deployed as separate frontend and backend workloads. The public
-`tapy-frontend` Service on port 3000 sends traffic to the Next.js frontend,
-which proxies `/v1/*` to the private `tapy-backend` Service on port 8080. Both
-workloads and their PostgreSQL resources run only in the `tapy` namespace.
-This keeps the existing public hostname
-and OAuth callback URIs stable. The backend never accepts mailbox access
-tokens or email bodies from the frontend. The intended flow is:
+The public Next.js frontend proxies `/v1/*` to the private backend. Both run in
+the `tapy` namespace. PostgreSQL is the authority for organizations and active
+memberships, travel bookings, people and roles, contact points, real PNRs,
+segments, passenger tickets, opportunities, covered-ticket links, recipients,
+send batches, individual deliveries, notifications, and ingestion provenance.
 
-```text
-frontend -> password/Google/Microsoft login -> HttpOnly backend session
-settings -> official mailbox consent page -> encrypted refresh token in PostgreSQL
-provider webhook -> Gmail API or Microsoft Graph -> bounded email text
-matcher -> RabbitMQ -> external-ai
-matcher -> flight email -> one deduplicated open flight per passenger ticket
-matcher -> hotel email -> per-user deterministic flight scoring -> close flight on score > 0.90
-backend -> Twilio WhatsApp -> close flight only after delivery acceptance
-backend -> persisted per-user notifications -> SSE frontend refresh
-```
+Every business row carries an organization boundary. Composite foreign keys
+prevent bookings, assigned agents, people, tickets, opportunities, recipients,
+and deliveries from being connected across organizations. A request uses the
+user's explicit active organization. Personal scope filters bookings and
+opportunities by assigned agent; organization scope requires an active `admin`
+membership and is rejected with HTTP 403 for an `agent`.
 
-The LLM may only classify hotel and flight confirmations and populate the
-strict `EmailExtraction` schema. A confirmed flight email contains one
-`FlightTicket` per passenger, so a shared multi-passenger booking creates
-separate flight rows without introducing a flight-booking aggregate. The LLM
-does not choose existing flights, calculate a score, deduplicate records, or
-invoke actions. Invalid model output counts as a backend failure and triggers
-the next configured LLM. The homelab development deployment uses only
-`external-ai`, so Tapy startup and readiness do not depend on `internal-llm`.
+The strict `EmailExtraction` schema represents multiple people, explicit roles
+and contacts, multiple PNRs, timezone-aware segments, and passenger tickets.
+The LLM extracts facts only and must not infer group leadership or select a
+recipient. Deterministic code resolves the graph using provider message IDs,
+ticket numbers, unchanged PNRs, segment fingerprints, and stable source IDs.
+The current application rule creates one opportunity per newly resolved ticket.
+`opportunity_tickets` is many-to-many, so manual and future logic can attach
+multiple tickets to one opportunity without a schema change.
 
-Flights are stored in PostgreSQL and owned by one user. Manual and email
-sources pass through the same insertion path. A candidate with the same
-normalized passenger, destination, and departure timestamp (or date when an
-exact time is unavailable) is skipped as a duplicate. Every new flight starts
-open for upsell and publishes an SSE invalidation to connected browsers.
-Exact hotel location and dates score 1.0; the configured
-threshold is a strict lower bound. A winning match stores a small hotel
-summary, closes the flight for upsell, and notifies connected frontends. If a
-flight already has a hotel match, the backend leaves it unchanged and logs the
-duplicate to standard output.
+The current recipient fallback records the ticket holder as
+`legacy_ticket_holder`. If that person has no extracted contact, the recipient
+is `needs_contact`; no group-leader fact is invented. Agents can manually add
+multiple selected or excluded people, choose each contact, and record selection
+reason and confidence.
 
-User notifications are persistent records, not operational logs. Tapy creates
-them only when a flight is added, an upsell message is accepted and the flight
-is closed, WhatsApp delivery fails, or flight insertion fails. Opening the
-notification menu marks all current notifications read; later notifications
-restore the unread indicator.
+Sending creates one `upsell_send_batch` with completion policy `all_selected`
+and one immutable `message_delivery` snapshot per attempted recipient. Twilio
+acceptance records `submitted`; it changes an open opportunity to `contacted`,
+never `won`. A mixture of accepted and failed deliveries makes the batch
+`partial`. Reusing the same idempotency key replays the batch, and a new retry
+skips recipients with an earlier `submitted` or `delivered` result. Conversion
+requires an explicit opportunity transition to `won`.
 
 ## Backend API
 
@@ -61,15 +52,25 @@ scopes. Login and mailbox grants remain separate operations.
 - `POST /v1/auth/register`, `POST /v1/auth/login`, and `POST /v1/auth/logout`
   manage regular authentication.
 - `GET /v1/auth/{google|microsoft}/authorization` starts social login.
-- `GET/PATCH /v1/users/me` returns or updates the user profile and connections.
-- `GET/POST /v1/flights` and `PATCH /v1/flights/{id}/status` own the live flight pipeline.
-- `GET /v1/metrics` returns server-derived dashboard metrics.
+- `GET/PATCH /v1/users/me` returns the active organization, role, memberships,
+  profile, and connections; PATCH can switch to another active membership.
+- `POST /v1/organizations` and `POST /v1/organizations/current/memberships`
+  create an organization or let an admin add an existing user as admin/agent.
+- `GET/POST /v1/bookings`, `GET/PATCH /v1/bookings/{id}`, and
+  `POST /v1/bookings/{id}/tickets` expose the normalized booking graph.
+  Person role/contact subresources support manual corrections without replacing
+  the person or using a mutable name as identity.
+- `GET/POST /v1/opportunities`, `GET/PATCH /v1/opportunities/{id}`, and
+  `PUT /v1/opportunities/{id}/recipients/{person_id}` manage opportunities,
+  covered tickets, outcomes, and recipient selection.
+- `POST /v1/opportunities/{id}/send` sends all selected valid recipients and
+  returns the batch plus individual delivery outcomes. Supply `Idempotency-Key`.
+- `GET /v1/metrics?scope=personal|organization` returns opportunity metrics;
+  organization scope also contains per-agent rows.
 - `GET /v1/events` streams invalidations; the frontend also refreshes on focus
   and every 30 seconds as a recovery path.
 - `GET /v1/notifications` lists the current user's notifications and
   `POST /v1/notifications/read` marks the current set read.
-- `POST /v1/flights/{id}/send-upsell` sends the customer WhatsApp message and
-  closes the flight only when Twilio accepts it.
 - `POST /v1/mailboxes/gmail/authorization` returns a Google consent URL.
 - `POST /v1/mailboxes/outlook/authorization` returns a Microsoft consent URL.
 - `GET /v1/oauth/{provider}/callback` consumes the one-time OAuth state and
@@ -83,18 +84,15 @@ OAuth state is random, one-time, database-backed, purpose-bound, and expires
 after ten minutes. A mailbox account can belong to only one user. The old
 `/v1/agents` bearer-token endpoints remain only for development compatibility.
 
-The database retains users, login identities and sessions, per-user flights,
-flight ingestion metadata, user notifications,
-encrypted provider refresh tokens, renewable webhook state, processed provider
-message IDs, and small match summaries.
-It never retains access tokens or message bodies. In the homelab overlay the
+The database retains normalized business records, encrypted refresh tokens,
+renewable webhook state, raw provider identifiers, derived fingerprints, and
+small result summaries. It never retains access tokens or message bodies. In the homelab overlay the
 PostgreSQL PV is hard bound to the permanent critical NFS tier with `Retain`;
 cloud uses either a dynamically provisioned retained PVC or managed PostgreSQL.
 
-The frontend has no seeded business data. Flights, statuses, user data, and
-metrics come from the backend. Its existing server actions call Twilio and Gemini directly
-from the Next.js server; their credentials are never exposed as
-`NEXT_PUBLIC_*` values.
+The frontend has no seeded business data or demo aggregation. Personal and
+admin-only organization views use the backend resources and metrics. Twilio is
+called only by the backend; credentials are never exposed to the browser.
 
 ## Public legal pages
 
@@ -305,6 +303,42 @@ a documented exception), Microsoft audience/publisher/tenant-consent decisions,
 credential rotation, webhook renewal, provider alerts, and end-to-end mailbox
 reconnection have named owners and passing evidence.
 
+## Metrics
+
+Metrics count each opportunity once, regardless of covered-ticket or recipient
+count. Personal scope includes only opportunities assigned to the current user;
+organization scope includes the active tenant and is admin-only.
+
+- Lifecycle counts are exact counts by opportunity status.
+- Delivery successes count `submitted` plus `delivered` delivery rows; failures
+  count `failed` rows. These do not imply conversion.
+- Conversion rate is `won / (won + declined + expired + closed)`. Open and
+  contacted opportunities are not decided and are excluded from the denominator.
+- Potential revenue/commission sums open and contacted opportunities.
+- Won revenue/commission sums only won opportunities.
+- Organization per-agent metrics use the same formula and assignment boundary.
+
+Monetary totals are grouped by ISO currency. Tapy never adds EUR to USD or
+silently converts either; exchange-rate conversion is intentionally outside the
+current product boundary.
+
+## Database migration and reset
+
+Alembic replaces runtime `create_all()` as the deployment migration authority.
+The API upgrades to the latest revision before accepting traffic; operators can
+also run `tapy migrate` explicitly. Revision `20260908_01` is a pre-production
+reset migration: when it detects the old `tapy_flights` table it drops only the
+enumerated Tapy tables and creates the normalized schema. It does not delete the
+PVC/PV or touch other schemas/workloads.
+
+This reset irrecoverably removes Tapy users, sessions, mailbox grants, webhook
+state, processed-message history, and old flight rows unless PostgreSQL was
+backed up first. After it runs, create the initial admin again and reconnect
+every mailbox so watches/subscriptions are recreated. A PVC deletion is not
+required. If an operator nevertheless chooses to remove retained Tapy storage,
+resolve the exact namespace/PVC/PV first and follow the repository's live-action
+safety rules.
+
 ## Configuration and secrets
 
 The ConfigMap owns `LLM_ORDER`, both queue names and model names,
@@ -333,11 +367,9 @@ Create `tapy/tapy-frontend-secrets` with:
 
 - `TWILIO_ACCOUNT_SID`
 - `TWILIO_AUTH_TOKEN`
-- `GEMINI_API_KEY`
 
-The backend also reads the two Twilio credentials from this Secret because it
-owns the send/close/notify transaction. The frontend continues to use the
-Gemini credential only from its server-side chat action.
+The backend reads the two Twilio credentials from this Secret because it owns
+send batches and delivery records. The frontend receives no provider secret.
 
 The local source values belong in the repository-level gitignored `.env`; the
 same names are documented in `.env-template`. Capture the updated encrypted
@@ -369,8 +401,10 @@ names are `tapy-backend` and `tapy-frontend`; its Services have the same names.
 The namespace migration reuses `/mnt/storage2-bulk/tapy/postgres` through the
 new retained `tapy-postgres-tapy-pv`. Stop the old PostgreSQL writer before
 binding or starting the new one, and never run both against that directory.
-Keep the old namespace, PVC, and `tapy-postgres-pv` until the new API, mailbox
-grants, and processed-message history have been verified. The new database URL
+Keep the old namespace, PVC, and `tapy-postgres-pv` until its backup has been
+verified. The normalized-schema migration resets legacy Tapy records, so mailbox
+grants and processed-message history cannot be verified after migration without
+restoring that backup. The new database URL
 must target `tapy-postgres.tapy.svc.cluster.local` while preserving the existing
 database password and OAuth encryption key exactly. The Cloudflare Tunnel
 origin is `http://tapy-frontend.tapy.svc:3000`.

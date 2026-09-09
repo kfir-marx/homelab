@@ -18,7 +18,7 @@ const PRODUCT_STEPS = [
   {
     number: "03",
     title: "Review hotel opportunities",
-    body: "Flights without a matching hotel appear in an agent workspace, with agency-level status and performance views for the travel team.",
+    body: "Ticket-level opportunities appear in an agent workspace; organization-wide data is available only to organization admins.",
   },
   {
     number: "04",
@@ -141,9 +141,9 @@ export default function AuthScreen() {
             ))}
           </div>
           <div className="mt-8 grid gap-5 sm:grid-cols-3">
-            <Capability title="Agent dashboard" body="Organize trips, booking status, destinations, and hotel-match opportunities." />
-            <Capability title="Agency overview" body="See team-level pipeline and performance information in one operational view." />
-            <Capability title="Optional assistant" body="Ask questions about the current dashboard; assistant output remains subject to human review." />
+            <Capability title="Personal workspace" body="See only bookings and opportunities assigned to the signed-in agent." />
+            <Capability title="Admin overview" body="Authorized admins see organization metrics and per-agent performance." />
+            <Capability title="Recipient control" body="Select one or more recipients and record manual inclusion or exclusion decisions." />
           </div>
         </div>
       </section>
@@ -162,7 +162,7 @@ export default function AuthScreen() {
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <DataCard title="What is processed" body="A bounded set of recent message subjects, senders, dates, and text is classified to identify booking confirmations. Relevant booking facts are then shown in Tapy." />
-            <DataCard title="How AI is involved" body="Selected message content is sent to Alibaba Cloud Qwen for booking classification and extraction. The optional dashboard assistant uses Google Gemini only when a user invokes it." />
+            <DataCard title="How AI is involved" body="Selected message content is sent to Alibaba Cloud Qwen for booking classification and fact extraction. Deterministic application code creates opportunities and recipients." />
             <DataCard title="What Tapy cannot do" body="The requested Gmail permission does not allow Tapy to send, edit, or delete messages. Tapy cannot make or change a travel reservation." />
             <DataCard title="What Tapy does not do" body="Tapy does not sell Google user data, use it for advertising or credit decisions, or use it to train generalized AI models." />
           </div>

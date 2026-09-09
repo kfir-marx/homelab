@@ -4,8 +4,8 @@
 
 Tapy keeps the same runtime architecture in development and
 production: the frontend serves the UI and proxies `/v1/*` to the private
-backend, which stores users, sessions, per-user flights, and encrypted mailbox grants in
-PostgreSQL, publishes OpenAI-compatible RPC requests through RabbitMQ, and
+backend, which stores users, multi-tenant booking/opportunity graphs, individual
+deliveries, and encrypted mailbox grants in PostgreSQL, publishes OpenAI-compatible RPC requests through RabbitMQ, and
 tries the configured internal/external LLM queues in order. `external-ai`
 retains its authenticated HTTP job API, durable PostgreSQL job state, RabbitMQ
 RPC worker, Codex state, and Alibaba Model Studio provider.
@@ -113,7 +113,7 @@ Never commit a Secret manifest with real or fabricated values.
 | Namespace / Secret | Required keys |
 |---|---|
 | `tapy/tapy-secrets` | `DATABASE_URL`, `RABBITMQ_URL`, `OAUTH_TOKEN_ENCRYPTION_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MICROSOFT_OAUTH_CLIENT_SECRET`; optional `WEBHOOK_VERIFICATION_TOKEN`; add `POSTGRES_PASSWORD` for in-cluster PostgreSQL |
-| `tapy/tapy-frontend-secrets` | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `GEMINI_API_KEY` |
+| `tapy/tapy-frontend-secrets` | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` (consumed by the backend; retained name for deployment compatibility) |
 | `external-ai/external-ai-secrets` | `DATABASE_URL`, `RABBITMQ_URL`, `HOMELAB_ASSISTANT_TOKEN`, `JOB_ASSISTANT_TOKEN`; `POSTGRES_PASSWORD` for in-cluster PostgreSQL; `ALIBABA_API_KEY` when Model Studio is enabled |
 | `external-ai/external-ai-codex-auth-bootstrap` | `auth.json` when Codex-backed models are enabled |
 | `rabbitmq/rabbitmq-secrets` | `username`, `password`, `erlang-cookie` |

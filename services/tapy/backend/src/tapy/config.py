@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote, urlparse
 
@@ -24,7 +23,6 @@ class Settings(BaseSettings):
         "external-ai",
         "internal-llm",
     )
-    flights_config_path: Path = Path("/config/flights.json")
     request_timeout_seconds: float = Field(default=120, gt=0, le=300)
     match_threshold: float = Field(default=0.90, ge=0, le=1)
     maximum_messages_per_scan: int = Field(default=20, ge=1, le=100)

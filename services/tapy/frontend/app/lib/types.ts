@@ -1,54 +1,141 @@
-export type FlightStatus = "open" | "upsold" | "declined" | "past";
+export type OpportunityStatus =
+  | "open"
+  | "contacted"
+  | "won"
+  | "declined"
+  | "expired"
+  | "closed";
 
-export type NotificationKind =
-  | "flight_added"
-  | "upsell_sent"
-  | "whatsapp_failed"
-  | "flight_add_failed";
+export type Contact = {
+  id: string;
+  channel: "phone" | "whatsapp" | "email";
+  display_value: string;
+  normalized_value: string;
+  is_primary: boolean;
+};
+
+export type Person = {
+  id: string;
+  display_name: string;
+  roles: string[];
+  contacts: Contact[];
+};
+
+export type Ticket = {
+  id: string;
+  ticket_number: string;
+  person_id: string;
+  amount: string;
+  currency: string;
+  segment_ids: string[];
+};
+
+export type Segment = {
+  id: string;
+  airline: string | null;
+  flight_number: string | null;
+  origin_code: string;
+  destination_code: string;
+  departure_at: string;
+  arrival_at: string | null;
+};
+
+export type Booking = {
+  id: string;
+  organization_id: string;
+  assigned_agent_id: string;
+  internal_reference: string | null;
+  external_reference: string | null;
+  status: "confirmed" | "modified" | "cancelled";
+  people: Person[];
+  reservations: Array<{
+    id: string;
+    pnr: string;
+    status: string;
+    segments: Segment[];
+    tickets: Ticket[];
+  }>;
+  opportunity_ids: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type Recipient = {
+  id: string;
+  person: Person;
+  contact_point_id: string | null;
+  selection_status: "candidate" | "selected" | "excluded" | "needs_contact";
+  selection_method: string;
+  selection_reason: string | null;
+  confidence: string | null;
+  priority: number;
+};
+
+export type Opportunity = {
+  id: string;
+  organization_id: string;
+  booking_id: string;
+  assigned_agent_id: string;
+  product_type: string;
+  destination: string | null;
+  service_start: string | null;
+  service_end: string | null;
+  status: OpportunityStatus;
+  close_reason: string | null;
+  potential_revenue: string;
+  potential_commission: string;
+  won_revenue: string;
+  won_commission: string;
+  currency: string;
+  version: number;
+  tickets: Ticket[];
+  recipients: Recipient[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentMetric = {
+  agent_id: string;
+  agent_name: string;
+  total_opportunities: number;
+  won_opportunities: number;
+  conversion_rate: number;
+  won_commission_by_currency: Record<string, string>;
+};
+
+export type CurrencyMetrics = {
+  currency: string;
+  potential_revenue: string;
+  potential_commission: string;
+  won_revenue: string;
+  won_commission: string;
+};
+
+export type Metrics = {
+  scope: "personal" | "organization";
+  total_opportunities: number;
+  open_opportunities: number;
+  contacted_opportunities: number;
+  won_opportunities: number;
+  declined_opportunities: number;
+  expired_opportunities: number;
+  closed_opportunities: number;
+  delivery_successes: number;
+  delivery_failures: number;
+  conversion_rate: number;
+  monetary_totals: CurrencyMetrics[];
+  per_agent: AgentMetric[];
+};
 
 export type Notification = {
   id: string;
-  kind: NotificationKind;
+  kind: string;
   title: string;
   message: string;
-  flightId: string | null;
-  createdAt: string;
-  readAt: string | null;
-};
-
-export type Flight = {
-  id: string;
-  bookingRef: string;
-  passengerName: string;
-  partySize: number;
-  email: string;
-  phone: string;
-  origin: string;
-  originCity: string;
-  destination: string;
-  destinationCity: string;
-  departureDate: string;
-  returnDate: string;
-  flightCostUsd: number;
-  hotelCostUsd: number;
-  agentId: string;
-  status: FlightStatus;
-  closedReason?: string | null;
-  matchedHotel?: Record<string, unknown> | null;
-};
-
-export type Agent = {
-  id: string;
-  name: string;
-  initials: string;
-  email: string;
-  avatarTint: string;
-};
-
-export type Mailbox = {
-  provider: "gmail" | "outlook";
-  emailAddress: string;
-  webhookActive: boolean;
+  booking_id: string | null;
+  opportunity_id: string | null;
+  created_at: string;
+  read_at: string | null;
 };
 
 export type User = {
@@ -56,8 +143,19 @@ export type User = {
   name: string;
   email: string;
   language: "en" | "he";
-  authProviders: string[];
-  mailboxes: Mailbox[];
+  active_organization_id: string;
+  active_organization_role: "admin" | "agent";
+  memberships: Array<{
+    organization_id: string;
+    organization_name: string;
+    role: "admin" | "agent";
+  }>;
+  auth_providers: string[];
+  mailboxes: Array<{
+    provider: "gmail" | "outlook";
+    email_address: string;
+    webhook_active: boolean;
+  }>;
 };
 
-export type View = "agent" | "agency" | "profile" | "settings";
+export type View = "personal" | "organization" | "profile" | "settings";

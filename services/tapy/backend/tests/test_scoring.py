@@ -1,34 +1,31 @@
 from datetime import date
 
-from tapy.flights import ConfigFlightRepository, score_booking
-from tapy.models import Destination, Flight, FlightConfiguration, HotelBooking
+from tapy.flights import score_booking
+from tapy.models import Destination, Flight, HotelBooking
 
 
-def config() -> FlightConfiguration:
-    return FlightConfiguration(
-        version=1,
-        flights=[
-            Flight(
-                id="london",
-                label="London",
-                arrival_date=date(2026, 10, 12),
-                departure_date=date(2026, 10, 17),
-                destination=Destination(
-                    city="London",
-                    country="United Kingdom",
-                    airport_codes=["LHR"],
-                    aliases=["Greater London"],
-                ),
+def config() -> list[Flight]:
+    return [
+        Flight(
+            id="london",
+            label="London",
+            arrival_date=date(2026, 10, 12),
+            departure_date=date(2026, 10, 17),
+            destination=Destination(
+                city="London",
+                country="United Kingdom",
+                airport_codes=["LHR"],
+                aliases=["Greater London"],
             ),
-            Flight(
-                id="paris",
-                label="Paris",
-                arrival_date=date(2026, 11, 2),
-                departure_date=date(2026, 11, 5),
-                destination=Destination(city="Paris", country="France"),
-            ),
-        ],
-    )
+        ),
+        Flight(
+            id="paris",
+            label="Paris",
+            arrival_date=date(2026, 11, 2),
+            departure_date=date(2026, 11, 5),
+            destination=Destination(city="Paris", country="France"),
+        ),
+    ]
 
 
 def test_matching_booking_scores_expected_flight_highest() -> None:
@@ -41,7 +38,7 @@ def test_matching_booking_scores_expected_flight_highest() -> None:
         check_in_date=date(2026, 10, 12),
         check_out_date=date(2026, 10, 17),
     )
-    matches = score_booking(booking, config().flights, 0.90)
+    matches = score_booking(booking, config(), 0.90)
     assert matches[0].flight_id == "london"
     assert matches[0].score == 1
     assert matches[0].related is True
@@ -54,7 +51,7 @@ def test_threshold_is_strictly_above_configured_value() -> None:
         city="London",
         check_in_date=date(2026, 10, 12),
     )
-    assert score_booking(booking, config().flights, 1.0)[0].related is False
+    assert score_booking(booking, config(), 1.0)[0].related is False
 
 
 def test_cancelled_booking_never_matches() -> None:
@@ -65,9 +62,4 @@ def test_cancelled_booking_never_matches() -> None:
         check_in_date=date(2026, 10, 12),
         check_out_date=date(2026, 10, 17),
     )
-    assert all(match.score == 0 for match in score_booking(booking, config().flights, 0.90))
-
-
-def test_repository_boundary_accepts_agent_id() -> None:
-    repository = ConfigFlightRepository(config())
-    assert repository.for_agent("future-agent")[0].id == "london"
+    assert all(match.score == 0 for match in score_booking(booking, config(), 0.90))

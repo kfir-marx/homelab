@@ -43,10 +43,6 @@ spec:
         - name: frontend
           image: ghcr.io/kfir-marx/tapy-frontend:sha-e9d905be3efc67b0fa4dad66952ff0b6608ec2ef
           imagePullPolicy: IfNotPresent
-          env:
-            - name: GEMINI_API_KEY
-              valueFrom:
-                secretKeyRef: {name: tapy-frontend-secrets, key: GEMINI_API_KEY}
           ports:
             - name: http
               containerPort: 3000

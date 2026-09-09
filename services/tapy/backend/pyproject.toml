@@ -4,10 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tapy"
-version = "0.3.0"
-description = "OAuth mailbox ingestion, queued hotel extraction, and deterministic matching"
+version = "1.0.0"
+description = "Multi-tenant travel bookings, opportunities, recipients, delivery, and ingestion"
 requires-python = ">=3.14.7"
 dependencies = [
+  "alembic>=1.16.5,<2",
   "aio-pika>=10.0.1,<11",
   "cryptography>=50.0.1,<51",
   "fastapi>=0.141.1,<1",
@@ -47,7 +48,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "S", "ASYNC"]
-ignore = ["S101"]
+ignore = ["S101", "B008"]
 
 [tool.mypy]
 python_version = "3.12"

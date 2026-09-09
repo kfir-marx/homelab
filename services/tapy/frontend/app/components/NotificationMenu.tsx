@@ -3,14 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { LOCALES } from "../lib/i18n";
 import { useDemo } from "../lib/store";
-import type { NotificationKind } from "../lib/types";
-
-const TONES: Record<NotificationKind, string> = {
-  flight_added: "bg-emerald-100 text-emerald-700",
-  upsell_sent: "bg-indigo-100 text-indigo-700",
-  whatsapp_failed: "bg-rose-100 text-rose-700",
-  flight_add_failed: "bg-rose-100 text-rose-700",
-};
+const tone = (kind: string) => kind.includes("failed")
+  ? "bg-rose-100 text-rose-700"
+  : kind.includes("send") ? "bg-indigo-100 text-indigo-700" : "bg-emerald-100 text-emerald-700";
 
 export default function NotificationMenu() {
   const {
@@ -90,7 +85,7 @@ export default function NotificationMenu() {
             ) : (
               notifications.map((notification) => (
                 <article key={notification.id} className="flex gap-3 border-b border-slate-100 px-4 py-3 last:border-0">
-                  <span className={`mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full text-xs ${TONES[notification.kind]}`}>
+                  <span className={`mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-full text-xs ${tone(notification.kind)}`}>
                     {notification.kind.includes("failed") ? "!" : "✓"}
                   </span>
                   <div className="min-w-0">
@@ -100,7 +95,7 @@ export default function NotificationMenu() {
                       {new Intl.DateTimeFormat(LOCALES[lang], {
                         dateStyle: "medium",
                         timeStyle: "short",
-                      }).format(new Date(notification.createdAt))}
+                      }).format(new Date(notification.created_at))}
                     </time>
                   </div>
                 </article>
