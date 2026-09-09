@@ -41,7 +41,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: frontend
-          image: ghcr.io/kfir-marx/tapy-frontend:sha-e9d905be3efc67b0fa4dad66952ff0b6608ec2ef
+          image: ghcr.io/kfir-marx/tapy-frontend:sha-141798d9abdf5cf8c052717d9eb68c2181789f45
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
