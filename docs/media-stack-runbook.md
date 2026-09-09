@@ -256,7 +256,22 @@ Open `https://whisparr.home.547600.xyz` and complete the setup in this order:
 
 ## Bazarr subtitle automation
 
-Open `https://bazarr.home.547600.xyz` and complete the setup in this order:
+The retained Bazarr state uses this baseline:
+
+- The `Hebrew + English` language profile requires normal Hebrew and English
+  subtitles, has no cutoff, and is assigned to all existing movies and series.
+  It is also the default profile for newly added movies and series.
+- Wizdom handles Hebrew movies and episodes, Gestdown supplements episode
+  searches, and YIFY Subtitles supplements movie searches. These providers do
+  not require credentials. Provider availability remains external and can
+  change independently of the cluster.
+- Provider credentials and language-profile state remain in Bazarr's retained
+  local configuration and database. The init controller reconciles only the
+  Sonarr and Radarr connections, so restore Bazarr state from backup or recreate
+  this baseline after a clean-state recovery.
+
+Open `https://bazarr.home.547600.xyz` and verify or recreate the setup in this
+order:
 
 1. Enable Bazarr authentication before storing API keys or provider
    credentials. The route is private, but every trusted LAN or tailnet client
@@ -273,14 +288,16 @@ Open `https://bazarr.home.547600.xyz` and complete the setup in this order:
    Keys**. Configure Bazarr's Jellyfin integration with server URL
    `http://jellyfin:8096`, that key, and the applicable movie and TV libraries.
    This lets Bazarr refresh Jellyfin after subtitle changes.
-5. Add only the subtitle providers you intend to use. Keep provider usernames,
-   passwords, tokens, and cookies in Bazarr's local configuration, never in
-   Git. Start with one or two providers to avoid unnecessary bans or rate
-   limits, then test each provider from Bazarr.
-6. Create the required language profile or profiles, enable automatic subtitle
-   downloading, and assign a default profile to new movies and shows. For
-   existing library entries, use Bazarr's mass editor to apply the profile;
-   setting a default does not retroactively assign it.
+5. Confirm Wizdom, Gestdown, and YIFY Subtitles are enabled. Add authenticated
+   providers only when needed, and keep provider usernames, passwords, tokens,
+   and cookies in Bazarr's local configuration, never in Git. Test each added
+   provider and avoid enabling redundant providers that increase bans or rate
+   limits.
+6. Confirm the `Hebrew + English` profile contains normal Hebrew and English
+   entries with no cutoff, automatic profiles are enabled for both movies and
+   series, and both defaults select this profile. After a clean-state recovery,
+   use the mass editors to assign it to existing library entries; setting a
+   default does not retroactively assign it.
 7. Run a manual search on one movie and one episode. Confirm the `.srt` files
    appear beside the video under `/data/media`, then refresh and play both in
    Jellyfin before enabling broad automatic searches.

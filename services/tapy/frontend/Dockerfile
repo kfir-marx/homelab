@@ -17,7 +17,6 @@ ENV HOSTNAME=0.0.0.0 \
 COPY --from=builder --chown=10001:10001 /app/public ./public
 COPY --from=builder --chown=10001:10001 /app/.next/standalone ./
 COPY --from=builder --chown=10001:10001 /app/.next/static ./.next/static
-COPY --from=builder --chown=10001:10001 /app/instructions.txt ./instructions.txt
 USER 10001:10001
 EXPOSE 3000
 CMD ["node", "server.js"]
