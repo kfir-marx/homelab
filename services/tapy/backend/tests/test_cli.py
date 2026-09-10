@@ -1,3 +1,6 @@
+from pathlib import Path
+
+import pytest
 from typer.testing import CliRunner
 
 from tapy.cli import app
@@ -8,7 +11,9 @@ def test_serve_is_an_explicit_subcommand() -> None:
     assert result.exit_code == 0
 
 
-def test_operator_provision_is_idempotent_and_inventory_has_no_tokens(tmp_path, monkeypatch):
+def test_operator_provision_is_idempotent_and_inventory_has_no_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import json
 
     from pydantic import SecretStr

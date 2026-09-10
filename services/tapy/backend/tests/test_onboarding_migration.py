@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 from pydantic import SecretStr
@@ -11,13 +12,14 @@ from tapy.migrations import upgrade_database
 
 @pytest.mark.parametrize("backend", ["sqlite", "postgres"])
 def test_forward_migration_preserves_history_and_only_binds_unambiguous_mailboxes(
-    tmp_path, backend
-):
+    tmp_path: Path, backend: str
+) -> None:
     url = f"sqlite+pysqlite:///{tmp_path / 'old.db'}"
     if backend == "postgres":
-        url = os.environ.get("TAPY_ONBOARDING_MIGRATION_TEST_DATABASE_URL")
-        if not url:
+        postgres_url = os.environ.get("TAPY_ONBOARDING_MIGRATION_TEST_DATABASE_URL")
+        if not postgres_url:
             pytest.skip("requires a separate empty disposable PostgreSQL database")
+        url = postgres_url
     engine = make_engine(Settings(database_url=SecretStr(url)))
     # Minimal pre-onboarding schema including the real cascading mailbox dependency.
     with engine.begin() as connection:
@@ -64,9 +66,10 @@ def test_forward_migration_preserves_history_and_only_binds_unambiguous_mailboxe
     upgrade_database(engine)
     upgrade_database(engine)
     with engine.connect() as connection:
-        assert dict(
-            connection.execute(text("SELECT id, organization_id FROM tapy_mailboxes")).all()
-        ) == {"clear": "a", "ambiguous": None, "empty": None}
+        mailboxes = connection.execute(
+            text("SELECT id, organization_id FROM tapy_mailboxes")
+        ).tuples().all()
+        assert dict(mailboxes) == {"clear": "a", "ambiguous": None, "empty": None}
         assert connection.scalar(text("SELECT count(*) FROM tapy_processed_messages")) == 2
         assert (
             connection.scalar(text("SELECT subject FROM tapy_auth_identities")) == "stable-subject"

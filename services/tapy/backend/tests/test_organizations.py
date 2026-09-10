@@ -1,6 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Barrier
+from typing import Any
 
 import httpx
 import pytest
@@ -25,7 +27,9 @@ from tapy.oauth import OAuthError, OAuthService, OAuthTokens
 from tapy.organizations import accept_invitation, change_member
 
 
-def invitation(client, email="guest@example.com", role="agent"):
+def invitation(
+    client: TestClient, email: str = "guest@example.com", role: str = "agent"
+) -> tuple[str, str]:
     result = client.post(
         "/v1/organizations/current/invitations", json={"email": email, "role": role}
     )
@@ -33,7 +37,7 @@ def invitation(client, email="guest@example.com", role="agent"):
     return result.json()["id"], result.json()["invitation_path"].split("=")[1]
 
 
-def test_invitation_lifecycle_and_no_membership(tmp_path):
+def test_invitation_lifecycle_and_no_membership(tmp_path: Path) -> None:
     app = create_app(settings(tmp_path), extractor=FakeExtractor())
     with TestClient(app) as client:
         admin = register(client, "Admin", "admin@example.com")
@@ -132,7 +136,7 @@ def test_invitation_lifecycle_and_no_membership(tmp_path):
         assert client.get(f"/v1/bookings/{own['id']}").status_code == 200
 
 
-def test_existing_account_matching_expiry_revocation_and_tenant_scope(tmp_path):
+def test_existing_account_matching_expiry_revocation_and_tenant_scope(tmp_path: Path) -> None:
     app = create_app(settings(tmp_path), extractor=FakeExtractor())
     with TestClient(app) as client:
         first = register(client, "First", "first@example.com")
@@ -188,7 +192,7 @@ def test_existing_account_matching_expiry_revocation_and_tenant_scope(tmp_path):
 
 
 @pytest.mark.parametrize("backend", ["sqlite", "postgres"])
-def test_concurrent_acceptance_and_last_admin(tmp_path, backend):
+def test_concurrent_acceptance_and_last_admin(tmp_path: Path, backend: str) -> None:
     import os
 
     from pydantic import SecretStr
@@ -205,7 +209,7 @@ def test_concurrent_acceptance_and_last_admin(tmp_path, backend):
         _, token = invitation(client, role="admin")
         barrier = Barrier(2)
 
-        def accept(_):
+        def accept(_: int) -> str | int:
             barrier.wait()
             try:
                 with app.state.factory.begin() as session:
@@ -219,7 +223,7 @@ def test_concurrent_acceptance_and_last_admin(tmp_path, backend):
         guest_id = next(r for r in results if isinstance(r, str))
         barrier = Barrier(2)
 
-        def demote(user_id):
+        def demote(user_id: str) -> int:
             barrier.wait()
             try:
                 with app.state.factory.begin() as session:
@@ -252,7 +256,9 @@ def test_concurrent_acceptance_and_last_admin(tmp_path, backend):
 
 
 @pytest.mark.asyncio
-async def test_social_login_never_creates_or_links_by_email(tmp_path, monkeypatch):
+async def test_social_login_never_creates_or_links_by_email(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     app = create_app(settings(tmp_path), extractor=FakeExtractor())
     with app.state.factory.begin() as session:
         user = User(email="known@example.com", name="Known")
@@ -263,10 +269,10 @@ async def test_social_login_never_creates_or_links_by_email(tmp_path, monkeypatc
         oauth = OAuthService(settings(tmp_path), app.state.factory, client)
         monkeypatch.setattr(oauth, "_consume_state", lambda *args: (None, None))
 
-        async def exchange(*args):
+        async def exchange(*args: Any) -> OAuthTokens:
             return OAuthTokens("inert", None, "openid")
 
-        async def profile(*args):
+        async def profile(*args: Any) -> tuple[str, str, str]:
             return ("subject", "known@example.com", "Known")
 
         monkeypatch.setattr(oauth, "_exchange", exchange)
@@ -285,8 +291,8 @@ async def test_social_login_never_creates_or_links_by_email(tmp_path, monkeypatc
 
 @pytest.mark.asyncio
 async def test_mailbox_connection_binds_original_context_and_rejects_reassignment(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from urllib.parse import parse_qs, urlparse
 
     from pydantic import SecretStr
@@ -317,10 +323,10 @@ async def test_mailbox_connection_binds_original_context_and_rejects_reassignmen
                 )
                 session.get(User, user["id"]).active_organization_id = other.id
 
-            async def exchange(*args):
+            async def exchange(*args: Any) -> OAuthTokens:
                 return OAuthTokens("inert", "refresh", "mail")
 
-            async def profile(*args):
+            async def profile(*args: Any) -> tuple[str, str, str]:
                 return ("mail-account", "mail@example.com", "User")
 
             monkeypatch.setattr(oauth, "_exchange", exchange)
@@ -350,7 +356,7 @@ async def test_mailbox_connection_binds_original_context_and_rejects_reassignmen
 
 
 @pytest.mark.asyncio
-async def test_unbound_and_deactivated_jobs_fail_before_external_work(tmp_path):
+async def test_unbound_and_deactivated_jobs_fail_before_external_work(tmp_path: Path) -> None:
     from tapy.database import BackgroundJob
 
     app = create_app(settings(tmp_path), extractor=FakeExtractor())

@@ -37,7 +37,7 @@ def register(client: TestClient, name: str, email: str) -> dict[str, Any]:
     from tapy.database import Organization
     from tapy.organizations import issue_invitation
 
-    with client.app.state.factory.begin() as session:
+    with cast(Any, client.app).state.factory.begin() as session:
         organization = Organization(name=name, slug=uuid.uuid4().hex)
         session.add(organization)
         session.flush()
