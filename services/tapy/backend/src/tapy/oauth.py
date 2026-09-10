@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import TokenCipher
 from .config import Settings
-from .database import AuthIdentity, MailboxConnection, OAuthState, User
+from .database import AuthIdentity, MailboxConnection, OAuthState, OrganizationMembership, User
 from .models import AuthProvider, Provider
 
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
@@ -90,8 +90,20 @@ class OAuthService:
         expires = datetime.now(UTC) + timedelta(seconds=self._settings.oauth_state_ttl_seconds)
         with self._factory.begin() as session:
             session.execute(delete(OAuthState).where(OAuthState.expires_at < datetime.now(UTC)))
+            organization_id = None
+            if purpose == "mailbox":
+                user = session.get(User, user_id)
+                organization_id = user.active_organization_id if user else None
+                member = (
+                    session.get(OrganizationMembership, (organization_id, user_id))
+                    if organization_id
+                    else None
+                )
+                if not member or member.status != "active":
+                    raise OAuthError("active organization membership is required")
             session.add(
                 OAuthState(
+                    organization_id=organization_id,
                     state_hash=_state_hash(state),
                     user_id=user_id,
                     provider=provider,
@@ -129,9 +141,15 @@ class OAuthService:
             f"/oauth2/v2.0/authorize?{query}"
         )
 
-    def _consume_state(self, provider: Provider, state: str, purpose: str) -> str | None:
+    def _consume_state(
+        self, provider: Provider, state: str, purpose: str
+    ) -> tuple[str | None, str | None]:
         with self._factory.begin() as session:
-            record = session.get(OAuthState, _state_hash(state))
+            record = session.scalar(
+                select(OAuthState)
+                .where(OAuthState.state_hash == _state_hash(state))
+                .with_for_update()
+            )
             if (
                 not record
                 or record.provider != provider
@@ -139,9 +157,9 @@ class OAuthService:
                 or _as_utc(record.expires_at) < datetime.now(UTC)
             ):
                 raise OAuthError("OAuth state is invalid or expired")
-            user_id = record.user_id
+            user_id, organization_id = record.user_id, record.organization_id
             session.delete(record)
-        return user_id
+        return user_id, organization_id
 
     def state_purpose(self, provider: Provider, state: str) -> str:
         with self._factory() as session:
@@ -155,7 +173,7 @@ class OAuthService:
             return record.purpose
 
     async def complete(self, provider: Provider, state: str, code: str) -> MailboxConnection:
-        user_id = self._consume_state(provider, state, "mailbox")
+        user_id, organization_id = self._consume_state(provider, state, "mailbox")
         if not user_id:
             raise OAuthError("OAuth state is not associated with a user")
         tokens = await self._exchange(provider, code, "mailbox")
@@ -164,6 +182,13 @@ class OAuthService:
         account_id, email, _ = await self._profile(provider, tokens.access_token, "mailbox")
         cipher = TokenCipher(self._settings.oauth_token_encryption_key.get_secret_value())
         with self._factory.begin() as session:
+            member = (
+                session.get(OrganizationMembership, (organization_id, user_id))
+                if organization_id
+                else None
+            )
+            if not member or member.status != "active":
+                raise OAuthError("active membership in the original organization is required")
             account_mailbox = session.scalar(
                 select(MailboxConnection).where(
                     MailboxConnection.provider == provider,
@@ -178,9 +203,15 @@ class OAuthService:
                     MailboxConnection.provider == provider,
                 )
             )
+            if mailbox and (
+                mailbox.organization_id != organization_id
+                or mailbox.provider_account_id != account_id
+            ):
+                raise OAuthError("mailbox binding cannot be reassigned; operator review required")
             if mailbox is None:
                 mailbox = MailboxConnection(
                     user_id=user_id,
+                    organization_id=organization_id,
                     provider=provider,
                     provider_account_id=account_id,
                     email_address=email,
@@ -201,8 +232,7 @@ class OAuthService:
         mail_provider = _auth_to_mail_provider(provider)
         self._consume_state(mail_provider, state, "login")
         tokens = await self._exchange(mail_provider, code, "login")
-        subject, email, name = await self._profile(mail_provider, tokens.access_token, "login")
-        normalized_email = email.strip().casefold()
+        subject, _email, _name = await self._profile(mail_provider, tokens.access_token, "login")
         with self._factory.begin() as session:
             identity = session.scalar(
                 select(AuthIdentity).where(
@@ -214,19 +244,28 @@ class OAuthService:
                 if not user:
                     raise OAuthError("login identity has no user")
                 return LoginCompletion(user, False)
-            user = session.scalar(select(User).where(User.email == normalized_email))
-            created = user is None
-            if user is None:
-                user = User(email=normalized_email, name=name or normalized_email.split("@")[0])
-                session.add(user)
-                session.flush()
-            session.add(AuthIdentity(user_id=user.id, provider=provider, subject=subject))
-            session.flush()
-            return LoginCompletion(user, created)
+            raise OAuthError(
+                "invitation required; sign in with an existing linked identity or password"
+            )
 
     async def access_token(self, mailbox: MailboxConnection) -> str:
+        with self._factory() as session:
+            current = session.get(MailboxConnection, mailbox.id)
+            member = (
+                session.get(OrganizationMembership, (mailbox.organization_id, mailbox.user_id))
+                if mailbox.organization_id
+                else None
+            )
+            if (
+                not current
+                or not current.refresh_token
+                or current.organization_id != mailbox.organization_id
+                or not member
+                or member.status != "active"
+            ):
+                raise OAuthError("mailbox is unbound, disconnected, or membership is inactive")
         cipher = TokenCipher(self._settings.oauth_token_encryption_key.get_secret_value())
-        refresh_token = cipher.decrypt(mailbox.refresh_token)
+        refresh_token = cipher.decrypt(current.refresh_token)
         if mailbox.provider == "gmail":
             url = "https://oauth2.googleapis.com/token"
             data = {
@@ -321,7 +360,7 @@ class OAuthService:
                 if purpose == "login" and payload.get("email_verified") is not True:
                     raise OAuthError("Google account email is not verified")
                 email = payload.get("email") or payload["emailAddress"]
-                account_id = payload.get("sub") or email
+                account_id = payload["sub"] if purpose == "login" else email
                 name = payload.get("name") or ""
             else:
                 account_id = payload["id"]

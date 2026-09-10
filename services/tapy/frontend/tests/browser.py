@@ -63,6 +63,7 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
                 self.user["mailboxes"] = []
                 return await route.fulfill(status=204)
         values = {"/v1/users/me": self.user, "/v1/bookings": [], "/v1/opportunities": [self.card],
+                  "/v1/organizations/current/team": {"members": [], "invitations": []},
                   "/v1/metrics": METRICS, "/v1/notifications": [], "/v1/jobs": []}
         if path == "/v1/events":
             return await route.fulfill(content_type="text/event-stream", body=": keepalive\n\n")
@@ -116,6 +117,56 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         await expect(self.page.get_by_role("article")).to_have_count(1)
         await expect(self.page.get_by_text("Please try again", exact=True)).to_be_visible()
         await expect(self.page.get_by_role("article").get_by_role("button", name="Dismiss", exact=True)).to_be_enabled()
+
+    async def test_invitation_required_hides_business_workspace(self):
+        self.user.update(invitation_required=True, active_organization_id=None, active_organization_role=None, memberships=[])
+        await self.page.reload()
+        await expect(self.page.get_by_role("heading", name="Invitation required", exact=True)).to_be_visible()
+        await expect(self.page.get_by_role("button", name="Settings", exact=True)).to_have_count(0)
+        await expect(self.page.get_by_role("article")).to_have_count(0)
+
+    async def test_invitation_acceptance_for_signed_in_account(self):
+        accepted = []
+        async def accept(route):
+            accepted.append(route.request.post_data_json)
+            await route.fulfill(json={"user": self.user})
+        await self.page.route("**/v1/invitations/accept", accept)
+        await self.page.goto(os.environ.get("TAPY_TEST_URL", "http://127.0.0.1:3100") + "/#invite=" + "x" * 43)
+        await expect(self.page.get_by_role("heading", name="Accept your Tapy invitation")).to_be_visible()
+        await self.page.get_by_role("button", name="Accept invitation", exact=True).click()
+        await expect(self.page.get_by_role("button", name="Settings", exact=True)).to_be_visible()
+        self.assertEqual(accepted, [{"token": "x" * 43}])
+        self.assertEqual(await self.page.evaluate("sessionStorage.getItem('tapy-invitation')"), None)
+
+    async def test_new_account_chooses_password_through_invitation(self):
+        accepted = []
+        async def me(route):
+            if accepted:
+                await route.fulfill(json=self.user)
+            else:
+                await route.fulfill(status=401, json={"detail":"authentication is required"})
+        async def accept(route):
+            accepted.append(route.request.post_data_json)
+            await route.fulfill(json={"user": self.user})
+        await self.page.route("**/v1/users/me", me)
+        await self.page.route("**/v1/invitations/accept", accept)
+        await self.page.goto(os.environ.get("TAPY_TEST_URL", "http://127.0.0.1:3100") + "/#invite=" + "y" * 43)
+        await self.page.get_by_label("Name", exact=True).fill("Invited colleague")
+        await self.page.get_by_label("Choose your password", exact=True).fill("chosen-by-the-user")
+        await self.page.get_by_role("button", name="Accept invitation", exact=True).click()
+        await expect(self.page.get_by_role("button", name="Settings", exact=True)).to_be_visible()
+        self.assertEqual(accepted, [{"token": "y" * 43, "name":"Invited colleague", "password":"chosen-by-the-user"}])
+
+    async def test_team_shows_copyable_invitation(self):
+        async def invite(route):
+            self.assertEqual(route.request.post_data_json, {"email":"guest@example.com", "role":"agent"})
+            await route.fulfill(status=201, json={"id":"i1", "invitation_path":"/#invite=" + "x" * 43})
+        await self.page.route("**/v1/organizations/current/invitations", invite)
+        await self.page.get_by_role("button", name="Settings", exact=True).click()
+        await expect(self.page.get_by_role("heading", name="Team", exact=True)).to_be_visible()
+        await self.page.get_by_role("textbox", name="Invite email").fill("guest@example.com")
+        await self.page.get_by_role("button", name="Create invitation", exact=True).click()
+        await expect(self.page.get_by_role("textbox", name="Invitation link")).to_have_value(os.environ.get("TAPY_TEST_URL", "http://127.0.0.1:3100") + "/#invite=" + "x" * 43)
 
 
 if __name__ == "__main__":

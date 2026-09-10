@@ -26,7 +26,6 @@ type Store = {
   view: View;
   setView: (view: View) => void;
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
   socialLogin: (provider: "google" | "microsoft") => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (input: { name?: string; language?: Lang; active_organization_id?: string }) => Promise<void>;
@@ -49,7 +48,7 @@ type Store = {
 
 const Context = createContext<Store | null>(null);
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     credentials: "same-origin",
@@ -83,6 +82,9 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
       const me = await api<User>("/v1/users/me");
       if (requestRevision !== revision.current) return;
       setUser(me); setLangState(me.language);
+      if (me.invitation_required) {
+        setBookings([]); setOpportunities([]); setMetrics(EMPTY_METRICS); setNotifications([]); setJobs([]); setError(null); return;
+      }
       const nextView = requestedView ?? view;
       const scope = nextView === "organization" && me.active_organization_role === "admin" ? "organization" : "personal";
       const [nextBookings, nextOpportunities, nextMetrics, nextNotifications, nextJobs] = await Promise.all([
@@ -131,7 +133,6 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
     setViewState(next); void load(next);
   }, [load, user]);
   const login = useCallback(async (email: string, password: string) => { await api("/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }); await load("personal"); }, [load]);
-  const register = useCallback(async (name: string, email: string, password: string) => { await api("/v1/auth/register", { method: "POST", body: JSON.stringify({ name, email, password }) }); await load("personal"); }, [load]);
   const socialLogin = useCallback(async (provider: "google" | "microsoft") => { const value = await api<{ authorization_url: string }>(`/v1/auth/${provider}/authorization`); location.assign(value.authorization_url); }, []);
   const logout = useCallback(async () => { await api("/v1/auth/logout", { method: "POST" }); revision.current++; setUser(null); setBookings([]); setOpportunities([]); setMetrics(EMPTY_METRICS); setNotifications([]); setJobs([]); setError(null); setViewState("personal"); }, []);
   const updateProfile = useCallback(async (input: { name?: string; language?: Lang; active_organization_id?: string }) => { const me = await api<User>("/v1/users/me", { method: "PATCH", body: JSON.stringify(input) }); revision.current++; setUser(me); setLangState(me.language); if (input.active_organization_id) { setViewState("personal"); setBookings([]); setOpportunities([]); setMetrics(EMPTY_METRICS); setNotifications([]); setJobs([]); } void load("personal"); }, [load]);
@@ -178,7 +179,7 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
   const t = useCallback((key: string, vars?: Record<string, string | number>) => tr(DICTIONARIES[lang], key, vars), [lang]);
   const money = useCallback((value: string | number, currency = "USD") => new Intl.NumberFormat(LOCALES[lang], { style: "currency", currency }).format(Number(value)), [lang]);
   const unreadNotificationCount = notifications.filter((item) => !item.read_at).length;
-  const value = useMemo<Store>(() => ({ loading, jobs, retryJob, error, user, bookings, opportunities, metrics, notifications, unreadNotificationCount, view, setView, login, register, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox, scanMailbox, updateOpportunity, updateRecipient, sendOpportunity, refresh, markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, money }), [loading, jobs, retryJob, error, user, bookings, opportunities, metrics, notifications, unreadNotificationCount, view, setView, login, register, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox, scanMailbox, updateOpportunity, updateRecipient, sendOpportunity, refresh, markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, money]);
+  const value = useMemo<Store>(() => ({ loading, jobs, retryJob, error, user, bookings, opportunities, metrics, notifications, unreadNotificationCount, view, setView, login, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox, scanMailbox, updateOpportunity, updateRecipient, sendOpportunity, refresh, markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, money }), [loading, jobs, retryJob, error, user, bookings, opportunities, metrics, notifications, unreadNotificationCount, view, setView, login, socialLogin, logout, updateProfile, connectMailbox, disconnectMailbox, scanMailbox, updateOpportunity, updateRecipient, sendOpportunity, refresh, markNotificationsRead, pushToast, toasts, dismissToast, lang, setLang, t, money]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

@@ -4,6 +4,109 @@ Portable homelab/cloud topology, cloud prerequisites, configuration matrices,
 deployment order, and migration steps are documented in
 [`tapy-kubernetes-portability.md`](tapy-kubernetes-portability.md).
 
+## Organization onboarding and operator rollout
+
+This section describes operator actions for a separately authorized live rollout.
+Repository implementation and tests do not provision the pilot organizations.
+Use a trusted operator shell with the intended `MATCHER_DATABASE_URL` supplied through
+secret management. Never paste database credentials, invitation links or sessions into
+logs, tickets, commits, or shared terminal recordings.
+
+1. Back up PostgreSQL and record the Alembic revision. For an existing `20260909_02`
+   database, run the new `tapy inventory` command before migration. It is read-only,
+   reflects the old mailbox schema, and prints organization IDs, member roles/status,
+   mailbox user/binding IDs and historical organization evidence without credentials.
+   Review this output; no existing organization or user is presumed to be a pilot.
+2. Stop old API and worker writers during the separately approved release. Run
+   `tapy migrate`, then `tapy inventory` again. Compare counts and ownership with the
+   backup and preflight inventory. Deploy API, worker and frontend together so an old
+   registration endpoint or worker cannot bypass the new policy.
+3. Provision initial admin invitations with explicit real addresses and frontend origin:
+
+   ```bash
+   tapy provision-pilots "$TEST_ADMIN_EMAIL" "$LAKISH_ADMIN_EMAIL" "$PUBLIC_ORIGIN"
+   ```
+
+   `PUBLIC_ORIGIN` must be the HTTPS frontend origin. This creates ordinary Tapy-test
+   and Lakish-tours organization records using deterministic UUIDv5 IDs and independent
+   memberships. Names confer no privilege. It prints initial seven-day invitation links
+   once, after commit. Repeating it keeps the same IDs and does not issue duplicate
+   invitations, create accounts, or give developers access to the customer organization.
+   It never adopts a pre-existing organization just because its name matches.
+4. Deliver each link privately to its intended recipient. A new user chooses a name
+   and password (at least ten characters). An existing user signs in as the exact
+   normalized invited email, then accepts. Possession of the email-bound invitation
+   verifies the email in addition to that existing-account authentication. Acceptance
+   creates/reactivates the invited membership and selects that organization. Existing
+   active memberships keep their role; role changes use Team controls.
+5. If a link was lost, expired or revoked, explicitly reissue it:
+
+   ```bash
+   tapy invite "$ORGANIZATION_ID" "$ADMIN_EMAIL" "$PUBLIC_ORIGIN" --role admin
+   ```
+
+   Reissue invalidates prior outstanding invitations for that email in that organization.
+   Raw invitation tokens are not stored; they cannot be retrieved later. The database
+   retains hashes, expiry, inviter, acceptance/revocation timestamps, and secret-free audit
+   records. Replayed or concurrent acceptance can succeed only once.
+6. Review each unbound mailbox. For an unambiguous operator-reviewed resolution, use:
+
+   ```bash
+   tapy bind-mailbox "$MAILBOX_ID" "$ORGANIZATION_ID"
+   ```
+
+   This requires an active owner membership and refuses conflicting historical evidence
+   or an existing different binding. Mixed-organization history stays blocked and needs
+   a separately reviewed recovery migration; never choose an arbitrary organization.
+   Neither membership changes nor this command move bookings or history. Then reconnect
+   the same mailbox account in its bound organization and test a bounded benign scan.
+
+Admins manage colleagues in **Settings → Team**: create/copy invitations, revoke or
+reissue them, change active roles, and deactivate members. Agent access remains limited
+to assigned bookings/opportunities. Only admins assign work; booking assignment carries
+through to its opportunities. Deactivation keeps the account, other memberships and all
+business history; reactivation requires a new invitation. Concurrent removal/demotion
+cannot eliminate the last active admin. If all admins are unavailable, an operator
+issues a new admin invitation for that organization's ID using the CLI.
+
+Public signup, public development-account creation, direct member addition and API
+organization creation are disabled. Accounts without active memberships see **Invitation
+required** and cannot access business endpoints or jobs. Social login accepts only an
+already-linked provider/subject identity; it creates neither accounts nor memberships and
+never links by email. Newly invited accounts use passwords for this pilot. Linking a new
+social identity is intentionally not an email-match fallback.
+
+Mailbox connection captures the organization at consent initiation and rechecks membership
+at callback. Changing the selected organization during consent cannot change that binding.
+Reconnect must use the same provider account and organization. Disconnect clears stored
+credentials and disables local scanning, preserving the mailbox record, binding and history.
+Provider grants may also be revoked in the provider's account settings. Switching organizations
+shows only that organization's connected mailboxes. Scans, callbacks, webhook ingestion and
+queued jobs use the explicit mailbox binding. Unbound mailboxes and inactive memberships
+cannot ingest; workers recheck membership before privileged work and retained evidence writes.
+
+Recovery: preserve the backup, current Alembic version, pilot IDs and OAuth encryption key.
+The onboarding migration has no destructive downgrade. Prefer a forward fix; any backup
+restore requires a separately approved outage and reconciliation of writes made since backup.
+Do not roll back only the API to a version that permits public onboarding. Invitations and
+member changes are recorded in `organization_audit`; a NULL actor identifies an operator
+command. No API organization role grants platform operator authority.
+
+## Future enterprise authentication boundary
+
+`User` is the account, `AuthIdentity` authenticates it, and `OrganizationMembership` grants
+organization roles. Business data stays attached to organization IDs. A future enterprise
+release can add organization authentication connections (issuer, protocol and configuration)
+and external identities keyed by `(connection_id, issuer, subject)`, with a user FK. One
+user may have multiple connections, including multiple customer IdPs of the same provider.
+Before enabling those connections, replace the current built-in-only `AuthIdentity`
+`(provider, subject)` and `(user_id, provider)` uniqueness constraints: migrate each existing
+identity to its explicit built-in connection without changing subjects or user IDs. Do not
+reuse email as the permanent identity key or auto-link accounts by email. Account linking
+must independently prove control of both identities. SSO, SCIM, domain auto-join, owner roles,
+custom roles and enterprise configuration screens remain deferred. None requires replacing
+memberships or moving bookings, opportunities or mailbox history.
+
 ## Runtime and data design
 
 The public Next.js frontend proxies `/v1/*` to the private backend. Both run in
@@ -88,9 +191,8 @@ requests return `202` and a persisted job view. The database outbox commits befo
 publisher confirmation; workers recover unpublished jobs every ten seconds. Leases,
 heartbeats and bounded retry backoff cover crashes and duplicate broker deliveries.
 Scan retries skip committed messages. Jobs preserve the tenant and mailbox captured
-at submission even if the user changes organizations. A mailbox remains bound to
-the organization where it was first processed; webhook routing follows that evidence
-rather than the user's currently selected organization. Disconnected mailboxes cannot
+at submission even if the user changes organizations. A mailbox remains explicitly bound
+to the organization captured at connection; webhook routing follows that binding. Disconnected mailboxes cannot
 continue ingestion. Gmail/Outlook readers paginate (100 messages per page) through the
 configured scan scope, defaulting to at most 10,000 messages. Reaching a page cap is a
 visible failure, not a false completed scan. Gmail no longer filters the default scan
@@ -119,13 +221,16 @@ stored using salted scrypt hashes. Google and Microsoft login use the same
 confidential OAuth registrations as mailbox consent, but request only identity
 scopes. Login and mailbox grants remain separate operations.
 
-- `POST /v1/auth/register`, `POST /v1/auth/login`, and `POST /v1/auth/logout`
-  manage regular authentication.
+- `POST /v1/auth/login` and `POST /v1/auth/logout` manage regular authentication.
+  Public `POST /v1/auth/register` returns 403; use `POST /v1/invitations/accept`.
 - `GET /v1/auth/{google|microsoft}/authorization` starts social login.
 - `GET/PATCH /v1/users/me` returns the active organization, role, memberships,
   profile, and connections; PATCH can switch to another active membership.
-- `POST /v1/organizations` and `POST /v1/organizations/current/memberships`
-  create an organization or let an admin add an existing user as admin/agent.
+- `POST /v1/organizations` and direct `POST /v1/organizations/current/memberships`
+  return 403. Organization creation uses the operator CLI.
+- `GET /v1/organizations/current/team`, `POST /v1/organizations/current/invitations`,
+  `DELETE /v1/organizations/current/invitations/{id}`, and
+  `PATCH /v1/organizations/current/memberships/{user_id}` support admin Team controls.
 - `GET/POST /v1/bookings`, `GET/PATCH /v1/bookings/{id}`, and
   `POST /v1/bookings/{id}/tickets` expose the normalized booking graph.
   Person role/contact subresources support manual corrections without replacing
@@ -158,8 +263,9 @@ scopes. Login and mailbox grants remain separate operations.
   `POST /v1/webhooks/outlook` accepts Microsoft Graph notifications.
 
 OAuth state is random, one-time, database-backed, purpose-bound, and expires
-after ten minutes. A mailbox account can belong to only one user. The old
-`/v1/agents` bearer-token endpoints remain only for development compatibility.
+after ten minutes. A mailbox account can belong to only one user and one organization.
+`POST /v1/agents` returns 403. Existing bearer credentials still authenticate their
+accounts but confer no access without active organization membership.
 
 The database retains normalized business records, encrypted refresh tokens,
 renewable webhook state, raw provider identifiers, derived fingerprints, and
@@ -403,7 +509,7 @@ Monetary totals are grouped by ISO currency. Tapy never adds EUR to USD or
 silently converts either; exchange-rate conversion is intentionally outside the
 current product boundary.
 
-## Database migration and reset
+## Database migration and preservation
 
 Alembic replaces runtime `create_all()` as the deployment migration authority.
 Deployment init containers run `tapy migrate` before API/worker startup; PostgreSQL
@@ -414,18 +520,18 @@ because their hotel evidence was never retained. Run a reprocess scan after depl
 to rebuild eligible email-derived opportunities. Matching legacy email bookings are
 adopted and duplicate per-ticket cards are retired, preserving prior dismissal and
 outreach. Normal scans also automatically re-extract legacy processed messages.
-The Settings UI provides a reprocess control. Revision `20260908_01` is a pre-production
-reset migration: when it detects the old `tapy_flights` table it drops only the
-enumerated Tapy tables and creates the normalized schema. It does not delete the
-PVC/PV or touch other schemas/workloads.
+The Settings UI provides a reprocess control. The baseline now refuses unversioned
+legacy databases containing `tapy_flights`; it no longer resets them. Such databases
+require a separate reviewed preservation migration. Do not clear the Alembic version
+or delete a PVC to bypass this guard.
 
-This reset irrecoverably removes Tapy users, sessions, mailbox grants, webhook
-state, processed-message history, and old flight rows unless PostgreSQL was
-backed up first. After it runs, create the initial admin again and reconnect
-every mailbox so watches/subscriptions are recreated. A PVC deletion is not
-required. If an operator nevertheless chooses to remove retained Tapy storage,
-resolve the exact namespace/PVC/PV first and follow the repository's live-action
-safety rules.
+Revision `20260910_03` adds invitations, organization audit, email verification timestamps,
+and nullable organization bindings on mailboxes and OAuth states. It preserves all
+existing accounts, identities, organizations, memberships and business data. Mailboxes
+are backfilled only when the union of processed-message, ingestion-source and retained
+email-event evidence names exactly one organization. Zero or multiple organizations
+leave the binding NULL and block ingestion. User selection is never backfill evidence.
+Pending mailbox OAuth states created before this revision must be restarted.
 
 ## Configuration and secrets
 
@@ -490,9 +596,9 @@ The namespace migration reuses `/mnt/storage2-bulk/tapy/postgres` through the
 new retained `tapy-postgres-tapy-pv`. Stop the old PostgreSQL writer before
 binding or starting the new one, and never run both against that directory.
 Keep the old namespace, PVC, and `tapy-postgres-pv` until its backup has been
-verified. The normalized-schema migration resets legacy Tapy records, so mailbox
-grants and processed-message history cannot be verified after migration without
-restoring that backup. The new database URL
+verified. Compare organization, identity, mailbox, and processed-message inventory
+before and after migration. Unversioned legacy schemas require a preservation plan.
+The new database URL
 must target `tapy-postgres.tapy.svc.cluster.local` while preserving the existing
 database password and OAuth encryption key exactly. The Cloudflare Tunnel
 origin is `http://tapy-frontend.tapy.svc:3000`.
@@ -522,7 +628,7 @@ PR, create and capture `tapy-frontend-secrets`. Do not sync the placeholder
 frontend image or OAuth client IDs. After rollout, confirm `tapy-backend` and
 `tapy-frontend` are Ready, check `/health/live` and `/health/ready`, submit a
 benign request through `external-ai.requests`, and inspect logs for startup
-exceptions or `ACCESS_REFUSED`. Then create a test agent through the API,
-complete each provider's browser consent, scan benign test mail, and verify
+exceptions or `ACCESS_REFUSED`. Then accept an operator-issued Tapy-test invitation,
+complete each provider's mailbox consent, scan benign test mail, and verify
 external inference. Never place agent,
 OAuth, RabbitMQ, or provider tokens in shell history.

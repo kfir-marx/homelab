@@ -28,9 +28,7 @@ const PRODUCT_STEPS = [
 ];
 
 export default function AuthScreen() {
-  const { login, register, socialLogin } = useDemo();
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [name, setName] = useState("");
+  const { login, socialLogin } = useDemo();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [working, setWorking] = useState(false);
@@ -41,8 +39,7 @@ export default function AuthScreen() {
     setWorking(true);
     setError("");
     try {
-      if (mode === "register") await register(name, email, password);
-      else await login(email, password);
+      await login(email, password);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Authentication failed");
     } finally {
@@ -187,8 +184,8 @@ export default function AuthScreen() {
 
           <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-xl shadow-slate-300/40 sm:p-9">
             <div>
-              <h3 className="text-xl font-semibold text-slate-900">{mode === "login" ? "Welcome back" : "Create your Tapy account"}</h3>
-              <p className="mt-1 text-sm text-slate-500">{mode === "login" ? "Sign in to continue to your travel workspace." : "Pilot access may be limited to approved travel teams."}</p>
+              <h3 className="text-xl font-semibold text-slate-900">Welcome back</h3>
+              <p className="mt-1 text-sm text-slate-500">Sign in to continue. New accounts require an organization invitation.</p>
             </div>
 
             <div className="mt-7 grid grid-cols-2 gap-3">
@@ -201,26 +198,20 @@ export default function AuthScreen() {
             </div>
 
             <form onSubmit={submit} className="space-y-4">
-              {mode === "register" && (
-                <Field label="Name">
-                  <input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} className={INPUT} />
-                </Field>
-              )}
+
               <Field label="Email">
                 <input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} className={INPUT} />
               </Field>
               <Field label="Password">
-                <input required type="password" minLength={mode === "register" ? 10 : 1} autoComplete={mode === "register" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} className={INPUT} />
+                <input required type="password" minLength={1} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className={INPUT} />
               </Field>
               {error && <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
               <button disabled={working} className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
-                {working ? "Please wait…" : mode === "register" ? "Create account" : "Sign in"}
+                {working ? "Please wait…" : "Sign in"}
               </button>
             </form>
 
-            <button type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }} className="mt-5 w-full text-center text-sm font-medium text-indigo-600 hover:text-indigo-500">
-              {mode === "login" ? "New to Tapy? Create an account" : "Already have an account? Sign in"}
-            </button>
+            <p className="mt-5 text-sm text-slate-600">New to Tapy? Ask your organization admin for an invitation link.</p>
 
             <p className="mt-6 border-t border-slate-100 pt-5 text-center text-xs leading-5 text-slate-500">
               By using Tapy, you agree to the <Link href="/terms" className="font-medium text-slate-700 underline underline-offset-2 hover:text-slate-950">Terms of Service</Link> and acknowledge the <Link href="/privacy" className="font-medium text-slate-700 underline underline-offset-2 hover:text-slate-950">Privacy Policy</Link>.

@@ -31,6 +31,7 @@ def app_client(tmp_path: Path) -> Iterator[tuple[Any, TestClient]]:
         with app.state.factory.begin() as session:
             mailbox = MailboxConnection(
                 user_id=user["id"],
+                organization_id=user["active_organization_id"],
                 provider="gmail",
                 provider_account_id="a",
                 email_address=user["email"],
@@ -216,9 +217,18 @@ def test_stale_dismissal_version_rejected(app_client: tuple[Any, TestClient]) ->
 
 
 def test_mailbox_scope_cannot_follow_ui_tenant_switch(app_client: tuple[Any, TestClient]) -> None:
-    _, client = app_client
-    other = client.post("/v1/organizations", json={"name": "Another agency"}).json()
-    client.patch("/v1/users/me", json={"active_organization_id": other["organization_id"]})
+    app, client = app_client
+    from tapy.database import Organization, OrganizationMembership
+
+    user = client.get("/v1/users/me").json()
+    with app.state.factory.begin() as session:
+        other = Organization(name="Other", slug="other")
+        session.add(other)
+        session.flush()
+        session.add(
+            OrganizationMembership(organization_id=other.id, user_id=user["id"], role="admin")
+        )
+    client.patch("/v1/users/me", json={"active_organization_id": other.id})
     assert client.post("/v1/scans", json={"provider": "gmail"}).status_code == 409
 
 

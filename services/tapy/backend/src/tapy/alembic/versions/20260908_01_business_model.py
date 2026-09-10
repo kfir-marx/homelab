@@ -3,9 +3,8 @@
 Revision ID: 20260908_01
 Revises: None
 
-This application was explicitly pre-production when this baseline was created. The first
-migration intentionally resets Tapy-owned tables so no ambiguous flight-row data is guessed into
-the normalized model. It does not inspect or drop any non-Tapy table.
+Legacy pre-Alembic flight-row databases require a separate preservation migration.
+Never reset those records implicitly during onboarding rollout.
 """
 
 from __future__ import annotations
@@ -20,29 +19,15 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
-LEGACY_TABLES = (
-    "tapy_flight_ingestion",
-    "tapy_notifications",
-    "tapy_flights",
-    "tapy_processed_messages",
-    "tapy_oauth_states",
-    "tapy_mailboxes",
-    "tapy_auth_identities",
-    "tapy_user_sessions",
-    "tapy_users",
-)
-
 
 def upgrade() -> None:
     connection = op.get_bind()
     existing = set(inspect(connection).get_table_names())
-    # A legacy database has no Alembic version and contains tapy_flights. New/empty databases
-    # skip this reset. CASCADE is scoped to these exact Tapy tables on PostgreSQL.
+    # Fail closed rather than resetting an unversioned legacy database.
     if "tapy_flights" in existing:
-        for table in LEGACY_TABLES:
-            if table in existing:
-                suffix = " CASCADE" if connection.dialect.name == "postgresql" else ""
-                op.execute(f'DROP TABLE IF EXISTS "{table}"{suffix}')
+        raise RuntimeError(
+            "Legacy Tapy schema requires a reviewed preservation migration; refusing reset"
+        )
     Base.metadata.create_all(connection)
 
 

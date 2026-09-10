@@ -219,8 +219,9 @@ class UserView(StrictModel):
     name: str
     email: str
     language: Literal["en", "he"]
-    active_organization_id: str
-    active_organization_role: Literal["admin", "agent"]
+    active_organization_id: str | None
+    active_organization_role: Literal["admin", "agent"] | None
+    invitation_required: bool = False
     memberships: list[MembershipView]
     auth_providers: list[str]
     mailboxes: list[MailboxView]
@@ -522,3 +523,14 @@ class JobView(StrictModel):
     error: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class InvitationAccept(StrictModel):
+    token: str = Field(min_length=20, max_length=200)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    password: str | None = Field(default=None, min_length=10, max_length=256)
+
+
+class MembershipUpdate(StrictModel):
+    role: Literal["admin", "agent"]
+    status: Literal["active", "inactive"]

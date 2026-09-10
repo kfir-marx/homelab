@@ -23,7 +23,6 @@ from .database import (
     OpportunityRecipient,
     OpportunityTicket,
     Organization,
-    ProcessedMessage,
     ReconciliationDecision,
     TravelBooking,
     UpsellOpportunity,
@@ -52,17 +51,8 @@ def event_time(value: str | None) -> datetime:
 
 
 def mailbox_organization(session: Session, mailbox_id: str) -> str | None:
-    organization = session.scalar(
-        select(EmailBookingEvent.organization_id)
-        .where(EmailBookingEvent.mailbox_id == mailbox_id)
-        .order_by(EmailBookingEvent.created_at)
-        .limit(1)
-    )
-    return organization or session.scalar(
-        select(ProcessedMessage.organization_id)
-        .where(ProcessedMessage.mailbox_id == mailbox_id)
-        .order_by(ProcessedMessage.processed_at)
-        .limit(1)
+    return session.scalar(
+        select(MailboxConnection.organization_id).where(MailboxConnection.id == mailbox_id)
     )
 
 
@@ -76,15 +66,19 @@ def record_email(
     email: EmailForAnalysis,
     extraction: EmailExtraction,
 ) -> list[str]:
+    from .organizations import lock_organization, require_member
+
+    lock_organization(session, organization_id)
+    require_member(session, organization_id, agent_id)
     # Serializes ingestion, derived state and API decisions across workers for this tenant.
     session.scalar(select(Organization).where(Organization.id == organization_id).with_for_update())
     mailbox = session.scalar(
         select(MailboxConnection).where(MailboxConnection.id == mailbox_id).with_for_update()
     )
-    if not mailbox or mailbox.user_id != agent_id:
+    if not mailbox or not mailbox.refresh_token or mailbox.user_id != agent_id:
         raise ValueError("mailbox disconnected or not owned by this agent")
     bound_organization = mailbox_organization(session, mailbox_id)
-    if bound_organization and bound_organization != organization_id:
+    if not bound_organization or bound_organization != organization_id:
         raise ValueError("mailbox evidence belongs to a different organization")
     facts = extraction.model_dump(mode="json")
     fingerprint = stable_hash(json.dumps(facts, sort_keys=True))

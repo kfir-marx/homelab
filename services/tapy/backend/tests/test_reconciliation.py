@@ -36,6 +36,7 @@ def evidence(tmp_path: Path) -> Iterator[Evidence]:
         user, _ = new_agent(session)
         mailbox = MailboxConnection(
             user_id=user.id,
+            organization_id=user.active_organization_id,
             provider="gmail",
             provider_account_id="a",
             email_address="a@example.com",

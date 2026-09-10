@@ -45,6 +45,7 @@ async def test_postgres_concurrency_and_rabbit_outbox() -> None:
         user, _ = new_agent(session)
         mailbox = MailboxConnection(
             user_id=user.id,
+            organization_id=user.active_organization_id,
             provider="gmail",
             provider_account_id=uuid.uuid4().hex,
             email_address=user.email,

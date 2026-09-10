@@ -75,7 +75,7 @@ export function UserSettingsPage() {
       <section className="mt-5 rounded-2xl border border-slate-200 p-5">
         <h2 className="font-semibold text-slate-900">Active organization</h2>
         <p className="mt-1 text-sm text-slate-500">All booking, opportunity, notification, and metric requests use this tenant context.</p>
-        <select value={user.active_organization_id} onChange={(event) => void updateProfile({ active_organization_id: event.target.value })} className="mt-4 w-full max-w-md rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm">
+        <select value={user.active_organization_id ?? ""} onChange={(event) => void updateProfile({ active_organization_id: event.target.value })} className="mt-4 w-full max-w-md rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm">
           {user.memberships.map((membership) => <option key={membership.organization_id} value={membership.organization_id}>{membership.organization_name} · {membership.role}</option>)}
         </select>
       </section>

@@ -50,6 +50,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     password_hash: Mapped[str | None] = mapped_column(String(512))
     language: Mapped[str] = mapped_column(String(5), default="en", nullable=False)
     access_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
@@ -96,6 +97,33 @@ class OrganizationMembership(Base):
     )
 
 
+class OrganizationInvitation(Base):
+    __tablename__ = "organization_invitations"
+    __table_args__ = (CheckConstraint("role IN ('admin','agent')", name="ck_invitation_role"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    inviter_id: Mapped[str | None] = mapped_column(ForeignKey("tapy_users.id"))
+    accepted_by: Mapped[str | None] = mapped_column(ForeignKey("tapy_users.id"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class OrganizationAudit(Base):
+    __tablename__ = "organization_audit"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    actor_id: Mapped[str | None] = mapped_column(ForeignKey("tapy_users.id"))
+    action: Mapped[str] = mapped_column(String(60), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    details: Mapped[dict[str, object]] = mapped_column(JSON_DATA, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class UserSession(Base):
     __tablename__ = "tapy_user_sessions"
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -131,6 +159,7 @@ class MailboxConnection(Base):
     user_id: Mapped[str] = mapped_column(
         ForeignKey("tapy_users.id", ondelete="CASCADE"), index=True
     )
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id"), index=True)
     provider: Mapped[str] = mapped_column(String(20), nullable=False)
     provider_account_id: Mapped[str] = mapped_column(String(320), nullable=False)
     email_address: Mapped[str] = mapped_column(String(320), nullable=False)
@@ -153,6 +182,7 @@ class OAuthState(Base):
     user_id: Mapped[str | None] = mapped_column(
         ForeignKey("tapy_users.id", ondelete="CASCADE"), index=True
     )
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id"), index=True)
     provider: Mapped[str] = mapped_column(String(20), nullable=False)
     purpose: Mapped[str] = mapped_column(String(20), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -657,6 +687,7 @@ def token_hash(token: str) -> str:
 
 
 def new_agent(session: Session) -> tuple[User, str]:
+    """Create an isolated development fixture; never expose through public onboarding."""
     token = "agt_" + secrets.token_urlsafe(32)
     suffix = secrets.token_hex(6)
     user = User(

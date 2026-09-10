@@ -94,6 +94,7 @@ def test_projection_does_not_decide_opportunities(tmp_path: Path) -> None:
         user, _ = new_agent(session)
         mailbox = MailboxConnection(
             user_id=user.id,
+            organization_id=user.active_organization_id,
             provider="gmail",
             provider_account_id="a",
             email_address="a@example.com",

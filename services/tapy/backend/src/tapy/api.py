@@ -4,7 +4,6 @@ import asyncio
 import base64
 import hmac
 import json
-import re
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
@@ -36,7 +35,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.responses import Response as StarletteResponse
 
-from .auth import bearer_token, new_session, password_hash, password_matches
+from .auth import bearer_token, new_session, password_matches
 from .business import (
     booking_view,
     create_booking,
@@ -61,6 +60,7 @@ from .database import (
     NotificationRecord,
     OpportunityRecipient,
     Organization,
+    OrganizationInvitation,
     OrganizationMembership,
     ProcessedMessage,
     ReconciliationDecision,
@@ -72,7 +72,6 @@ from .database import (
     UserSession,
     make_engine,
     make_factory,
-    new_agent,
     token_hash,
 )
 from .jobs import JobFailure, JobQueue, job_view
@@ -94,10 +93,12 @@ from .models import (
     DeliveryView,
     EmailExtraction,
     EmailForAnalysis,
+    InvitationAccept,
     JobView,
     LoginRequest,
     MailboxView,
     MembershipCreate,
+    MembershipUpdate,
     MembershipView,
     MetricsView,
     NotificationsRead,
@@ -118,6 +119,14 @@ from .models import (
     UserView,
 )
 from .oauth import OAuthError, OAuthService
+from .organizations import (
+    accept_invitation,
+    audit,
+    change_member,
+    issue_invitation,
+    lock_organization,
+    require_member,
+)
 from .reconciliation import mailbox_organization, reconcile, record_email
 from .webhooks import WebhookService, webhook_active
 
@@ -167,11 +176,6 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _slug(name: str) -> str:
-    base = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-") or "agency"
-    return f"{base[:60]}-{secrets.token_hex(4)}"
-
-
 def _set_session_cookie(response: StarletteResponse, token: str, settings: Settings) -> None:
     response.set_cookie(
         SESSION_COOKIE,
@@ -204,7 +208,7 @@ def create_app(
     event_hub = EventHub()
     queue = JobQueue(resolved, factory)
 
-    def ensure_context(session: Session, user: User) -> OrganizationMembership:
+    def ensure_context(session: Session, user: User) -> OrganizationMembership | None:
         membership = (
             session.get(OrganizationMembership, (user.active_organization_id, user.id))
             if user.active_organization_id
@@ -218,15 +222,7 @@ def create_app(
                 OrganizationMembership.status == "active",
             )
         )
-        if not membership:
-            organization = Organization(name=f"{user.name}'s agency", slug=_slug(user.name))
-            session.add(organization)
-            session.flush()
-            membership = OrganizationMembership(
-                organization_id=organization.id, user_id=user.id, role="admin"
-            )
-            session.add(membership)
-        user.active_organization_id = membership.organization_id
+        user.active_organization_id = membership.organization_id if membership else None
         session.flush()
         return membership
 
@@ -277,6 +273,11 @@ def create_app(
             ensure_context(session, user)
             return user
 
+    def active_user(user: User = Depends(authenticate)) -> User:
+        with factory() as session:
+            authorize_scope(session, user, "personal")
+        return user
+
     def user_view(user: User) -> UserView:
         with factory() as session:
             memberships = session.execute(
@@ -295,13 +296,15 @@ def create_app(
                 ),
                 None,
             )
-            if not active:
-                raise HTTPException(status.HTTP_409_CONFLICT, "active organization is unavailable")
             providers = session.scalars(
                 select(AuthIdentity.provider).where(AuthIdentity.user_id == user.id)
             ).all()
             mailboxes = session.scalars(
-                select(MailboxConnection).where(MailboxConnection.user_id == user.id)
+                select(MailboxConnection).where(
+                    MailboxConnection.user_id == user.id,
+                    MailboxConnection.organization_id == user.active_organization_id,
+                    MailboxConnection.refresh_token != "",
+                )
             ).all()
         auth_providers = [str(item) for item in providers]
         if user.password_hash:
@@ -311,8 +314,11 @@ def create_app(
             name=user.name,
             email=user.email,
             language=cast(Literal["en", "he"], user.language),
-            active_organization_id=active.organization_id,
-            active_organization_role=cast(Literal["admin", "agent"], active.role),
+            active_organization_id=active.organization_id if active else None,
+            invitation_required=active is None,
+            active_organization_role=cast(Literal["admin", "agent"], active.role)
+            if active
+            else None,
             memberships=[
                 MembershipView(
                     organization_id=m.organization_id,
@@ -527,32 +533,7 @@ def create_app(
 
     @app.post("/v1/auth/register", response_model=AuthResult, status_code=201)
     async def register(body: RegisterRequest, response: Response) -> AuthResult:
-        try:
-            with factory.begin() as session:
-                user = User(
-                    email=str(body.email).casefold(),
-                    name=body.name.strip(),
-                    password_hash=password_hash(body.password),
-                )
-                session.add(user)
-                session.flush()
-                organization = Organization(
-                    name=body.organization_name or f"{body.name.strip()}'s agency",
-                    slug=_slug(body.organization_name or body.name),
-                )
-                session.add(organization)
-                session.flush()
-                session.add(
-                    OrganizationMembership(
-                        organization_id=organization.id, user_id=user.id, role="admin"
-                    )
-                )
-                user.active_organization_id = organization.id
-                token, _ = new_session(session, user.id, resolved.session_days)
-        except IntegrityError as exc:
-            raise HTTPException(409, "an account already exists for this email") from exc
-        _set_session_cookie(response, token, resolved)
-        return AuthResult(user=user_view(user))
+        raise HTTPException(403, "invitation required")
 
     @app.post("/v1/auth/login", response_model=AuthResult)
     async def login(body: LoginRequest, response: Response) -> AuthResult:
@@ -608,55 +589,108 @@ def create_app(
     async def create_organization(
         body: OrganizationCreate, user: User = Depends(authenticate)
     ) -> MembershipView:  # noqa: B008
-        with factory.begin() as session:
-            organization = Organization(name=body.name.strip(), slug=_slug(body.name))
-            session.add(organization)
-            session.flush()
-            session.add(
-                OrganizationMembership(
-                    organization_id=organization.id, user_id=user.id, role="admin"
-                )
-            )
-            current = session.get(User, user.id)
-            assert current
-            current.active_organization_id = organization.id
-        return MembershipView(
-            organization_id=organization.id, organization_name=organization.name, role="admin"
-        )
+        raise HTTPException(403, "organization creation requires the operator CLI")
 
-    @app.post(
-        "/v1/organizations/current/memberships", response_model=MembershipView, status_code=201
-    )
-    async def add_membership(
-        body: MembershipCreate, user: User = Depends(authenticate)
-    ) -> MembershipView:  # noqa: B008
+    @app.post("/v1/organizations/current/memberships", status_code=403)
+    async def add_membership(user: User = Depends(authenticate)) -> None:
+        raise HTTPException(403, "use organization invitations")
+
+    @app.get("/v1/organizations/current/team")
+    async def team(user: User = Depends(authenticate)) -> dict[str, object]:
+        with factory() as session:
+            org, _ = authorize_scope(session, user, "organization")
+            members = session.execute(
+                select(OrganizationMembership, User)
+                .join(User, User.id == OrganizationMembership.user_id)
+                .where(OrganizationMembership.organization_id == org)
+            ).all()
+            invitations = session.scalars(
+                select(OrganizationInvitation)
+                .where(OrganizationInvitation.organization_id == org)
+                .order_by(OrganizationInvitation.created_at.desc())
+            ).all()
+            return {
+                "members": [
+                    {
+                        "user_id": u.id,
+                        "email": u.email,
+                        "name": u.name,
+                        "role": m.role,
+                        "status": m.status,
+                    }
+                    for m, u in members
+                ],
+                "invitations": [
+                    {
+                        "id": i.id,
+                        "email": i.email,
+                        "role": i.role,
+                        "expires_at": i.expires_at,
+                        "accepted_at": i.accepted_at,
+                        "revoked_at": i.revoked_at,
+                    }
+                    for i in invitations
+                ],
+            }
+
+    @app.post("/v1/organizations/current/invitations", status_code=201)
+    async def invite(body: MembershipCreate, user: User = Depends(authenticate)) -> dict[str, str]:
         with factory.begin() as session:
-            organization_id, membership = authorize_scope(session, user, "organization")
-            target = session.scalar(select(User).where(User.email == str(body.email).casefold()))
-            if not target:
-                raise HTTPException(404, "user was not found")
-            existing = session.get(OrganizationMembership, (organization_id, target.id))
-            if existing:
-                existing.role = body.role
-                existing.status = "active"
-            else:
-                session.add(
-                    OrganizationMembership(
-                        organization_id=organization_id, user_id=target.id, role=body.role
-                    )
-                )
-            organization = session.get(Organization, organization_id)
-            assert organization
-        return MembershipView(
-            organization_id=organization_id, organization_name=organization.name, role=body.role
-        )
+            org, _ = authorize_scope(session, user, "organization")
+            invitation, token = issue_invitation(session, org, str(body.email), body.role, user.id)
+        return {"id": invitation.id, "invitation_path": "/#invite=" + token}
+
+    @app.delete("/v1/organizations/current/invitations/{invitation_id}", status_code=204)
+    async def revoke_invitation(invitation_id: str, user: User = Depends(authenticate)) -> None:
+        with factory.begin() as session:
+            org = user.active_organization_id
+            if not org:
+                raise HTTPException(403, "invitation required")
+            lock_organization(session, org)
+            require_member(session, org, user.id, admin=True)
+            invitation = session.get(OrganizationInvitation, invitation_id)
+            if not invitation or invitation.organization_id != org:
+                raise HTTPException(404, "invitation not found")
+            if invitation.accepted_at:
+                raise HTTPException(409, "invitation already accepted")
+            invitation.revoked_at = datetime.now(UTC)
+            audit(session, org, user.id, "invitation.revoked", invitation.id)
+
+    @app.patch("/v1/organizations/current/memberships/{target_id}", status_code=204)
+    async def update_membership(
+        target_id: str, body: MembershipUpdate, user: User = Depends(authenticate)
+    ) -> None:
+        with factory.begin() as session:
+            if not user.active_organization_id:
+                raise HTTPException(403, "invitation required")
+            change_member(
+                session, user.active_organization_id, user.id, target_id, body.role, body.status
+            )
+        event_hub.publish(target_id)
+
+    @app.post("/v1/invitations/accept", response_model=AuthResult)
+    async def accept(
+        body: InvitationAccept,
+        response: Response,
+        authorization: Annotated[str | None, Header()] = None,
+        tapy_session: Annotated[str | None, Cookie()] = None,
+    ) -> AuthResult:
+        actor = authenticate(authorization, tapy_session) if authorization or tapy_session else None
+        try:
+            with factory.begin() as session:
+                user = accept_invitation(session, body.token, actor, body.name, body.password)
+                token, _ = new_session(session, user.id, resolved.session_days)
+        except IntegrityError as exc:
+            raise HTTPException(409, "account or invitation changed; sign in and retry") from exc
+        _set_session_cookie(response, token, resolved)
+        return AuthResult(user=user_view(user))
 
     @app.get("/v1/bookings", response_model=list[BookingView])
     async def list_bookings(
         scope: Scope = "personal",
         limit: int = Query(50, ge=1, le=200),
         offset: int = Query(0, ge=0),
-        user: User = Depends(authenticate),
+        user: User = Depends(active_user),
     ) -> list[BookingView]:  # noqa: B008
         with factory() as session:
             organization_id, _ = authorize_scope(session, user, scope)
@@ -670,12 +704,12 @@ def create_app(
             return [booking_view(session, row) for row in records]
 
     @app.get("/v1/bookings/{booking_id}", response_model=BookingView)
-    async def get_booking(booking_id: str, user: User = Depends(authenticate)) -> BookingView:  # noqa: B008
+    async def get_booking(booking_id: str, user: User = Depends(active_user)) -> BookingView:  # noqa: B008
         with factory() as session:
             return booking_view(session, accessible_booking(session, booking_id, user))
 
     @app.post("/v1/bookings", response_model=BookingView, status_code=201)
-    async def post_booking(body: BookingCreate, user: User = Depends(authenticate)) -> BookingView:  # noqa: B008
+    async def post_booking(body: BookingCreate, user: User = Depends(active_user)) -> BookingView:  # noqa: B008
         try:
             with factory.begin() as session:
                 organization_id, membership = authorize_scope(session, user, "personal")
@@ -704,13 +738,22 @@ def create_app(
 
     @app.patch("/v1/bookings/{booking_id}", response_model=BookingView)
     async def patch_booking(
-        booking_id: str, body: BookingUpdate, user: User = Depends(authenticate)
+        booking_id: str, body: BookingUpdate, user: User = Depends(active_user)
     ) -> BookingView:  # noqa: B008
         with factory.begin() as session:
             record = accessible_booking(session, booking_id, user)
             if body.assigned_agent_id:
+                authorize_scope(session, user, "organization")
                 ensure_agent(session, record.organization_id, body.assigned_agent_id)
                 record.assigned_agent_id = body.assigned_agent_id
+                for opportunity in session.scalars(
+                    select(UpsellOpportunity).where(
+                        UpsellOpportunity.booking_id == record.id,
+                        UpsellOpportunity.organization_id == record.organization_id,
+                    )
+                ):
+                    opportunity.assigned_agent_id = body.assigned_agent_id
+                    opportunity.version += 1
             if body.internal_reference is not None:
                 record.internal_reference = body.internal_reference
             if body.attributes is not None:
@@ -738,7 +781,7 @@ def create_app(
 
     @app.post("/v1/bookings/{booking_id}/tickets", response_model=BookingView, status_code=201)
     async def create_ticket(
-        booking_id: str, body: TicketCreate, user: User = Depends(authenticate)
+        booking_id: str, body: TicketCreate, user: User = Depends(active_user)
     ) -> BookingView:  # noqa: B008
         try:
             with factory.begin() as session:
@@ -803,7 +846,7 @@ def create_app(
         booking_id: str,
         person_id: str,
         body: RoleCreate,
-        user: User = Depends(authenticate),
+        user: User = Depends(active_user),
     ) -> BookingView:
         try:
             with factory.begin() as session:
@@ -841,7 +884,7 @@ def create_app(
         booking_id: str,
         person_id: str,
         body: ContactCreate,
-        user: User = Depends(authenticate),
+        user: User = Depends(active_user),
     ) -> BookingView:
         try:
             with factory.begin() as session:
@@ -876,7 +919,7 @@ def create_app(
         scope: Scope = "personal",
         limit: int = Query(50, ge=1, le=200),
         offset: int = Query(0, ge=0),
-        user: User = Depends(authenticate),
+        user: User = Depends(active_user),
     ) -> list[OpportunityView]:  # noqa: B008
         with factory() as session:
             organization_id, _ = authorize_scope(session, user, scope)
@@ -891,14 +934,14 @@ def create_app(
 
     @app.get("/v1/opportunities/{opportunity_id}", response_model=OpportunityView)
     async def get_opportunity(
-        opportunity_id: str, user: User = Depends(authenticate)
+        opportunity_id: str, user: User = Depends(active_user)
     ) -> OpportunityView:  # noqa: B008
         with factory() as session:
             return opportunity_view(session, accessible_opportunity(session, opportunity_id, user))
 
     @app.get("/v1/opportunities/{opportunity_id}/audit")
     async def opportunity_audit(
-        opportunity_id: str, user: User = Depends(authenticate)
+        opportunity_id: str, user: User = Depends(active_user)
     ) -> list[dict[str, object]]:
         with factory() as session:
             accessible_opportunity(session, opportunity_id, user)
@@ -913,7 +956,7 @@ def create_app(
 
     @app.post("/v1/opportunities", response_model=OpportunityView, status_code=201)
     async def create_opportunity(
-        body: OpportunityCreate, user: User = Depends(authenticate)
+        body: OpportunityCreate, user: User = Depends(active_user)
     ) -> OpportunityView:  # noqa: B008
         raise HTTPException(
             409, "Opportunities are derived from connected email; run a mailbox scan"
@@ -921,7 +964,7 @@ def create_app(
 
     @app.patch("/v1/opportunities/{opportunity_id}", response_model=OpportunityView)
     async def update_opportunity(
-        opportunity_id: str, body: OpportunityUpdate, user: User = Depends(authenticate)
+        opportunity_id: str, body: OpportunityUpdate, user: User = Depends(active_user)
     ) -> OpportunityView:  # noqa: B008
         with factory.begin() as session:
             session.scalar(
@@ -960,7 +1003,7 @@ def create_app(
         opportunity_id: str,
         person_id: str,
         body: RecipientUpdate,
-        user: User = Depends(authenticate),
+        user: User = Depends(active_user),
     ) -> OpportunityView:  # noqa: B008
         if body.person_id != person_id:
             raise HTTPException(422, "person IDs do not match")
@@ -1022,7 +1065,7 @@ def create_app(
 
     async def deliver_opportunity(
         opportunity_id: str,
-        user: User = Depends(authenticate),
+        user: User = Depends(active_user),
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> SendBatchView:  # noqa: B008
         key = idempotency_key or secrets.token_urlsafe(24)
@@ -1151,8 +1194,8 @@ def create_app(
                 created.append(previous)
                 continue
             with factory() as session:
-                current = session.get(UpsellOpportunity, opportunity_id)
-                if not current or current.status not in {"open", "contacted"}:
+                authorized_opportunity = accessible_opportunity(session, opportunity_id, user)
+                if authorized_opportunity.status not in {"open", "contacted"}:
                     raise HTTPException(409, "opportunity was invalidated before delivery")
             rendered = (
                 f"Hi {person.given_name or person.display_name}! "
@@ -1248,7 +1291,7 @@ def create_app(
         )
 
     @app.get("/v1/metrics", response_model=MetricsView)
-    async def metrics(scope: Scope = "personal", user: User = Depends(authenticate)) -> MetricsView:  # noqa: B008
+    async def metrics(scope: Scope = "personal", user: User = Depends(active_user)) -> MetricsView:  # noqa: B008
         with factory() as session:
             organization_id, _ = authorize_scope(session, user, scope)
             values = metric_values(
@@ -1305,7 +1348,7 @@ def create_app(
             )
 
     @app.get("/v1/notifications", response_model=list[NotificationView])
-    async def list_notifications(user: User = Depends(authenticate)) -> list[NotificationView]:  # noqa: B008
+    async def list_notifications(user: User = Depends(active_user)) -> list[NotificationView]:  # noqa: B008
         with factory() as session:
             organization_id, _ = authorize_scope(session, user, "personal")
             records = session.scalars(
@@ -1321,7 +1364,7 @@ def create_app(
 
     @app.post("/v1/notifications/read", status_code=204)
     async def read_notifications(
-        body: NotificationsRead, user: User = Depends(authenticate)
+        body: NotificationsRead, user: User = Depends(active_user)
     ) -> None:  # noqa: B008
         with factory.begin() as session:
             organization_id, _ = authorize_scope(session, user, "personal")
@@ -1336,7 +1379,7 @@ def create_app(
                 record.read_at = datetime.now(UTC)
 
     @app.get("/v1/events")
-    async def events(user: User = Depends(authenticate)) -> StreamingResponse:  # noqa: B008
+    async def events(user: User = Depends(active_user)) -> StreamingResponse:  # noqa: B008
         async def stream() -> AsyncIterator[str]:
             queue = event_hub.subscribe(user.id)
             try:
@@ -1354,12 +1397,10 @@ def create_app(
 
     @app.post("/v1/agents", response_model=AgentCreated, status_code=201)
     async def create_agent() -> AgentCreated:
-        with factory.begin() as session:
-            user, token = new_agent(session)
-        return AgentCreated(agent_id=user.id, access_token=token)
+        raise HTTPException(403, "invitation required")
 
     @app.get("/v1/agents/me", response_model=AgentView)
-    async def get_agent(user: User = Depends(authenticate)) -> AgentView:  # noqa: B008
+    async def get_agent(user: User = Depends(active_user)) -> AgentView:  # noqa: B008
         view = user_view(user)
         return AgentView(
             agent_id=user.id, connected_mailboxes=[item.provider for item in view.mailboxes]
@@ -1367,7 +1408,7 @@ def create_app(
 
     @app.post("/v1/mailboxes/{provider}/authorization", response_model=AuthorizationUrl)
     async def authorize_mailbox(
-        provider: Provider, request: Request, user: User = Depends(authenticate)
+        provider: Provider, request: Request, user: User = Depends(active_user)
     ) -> AuthorizationUrl:  # noqa: B008
         try:
             return AuthorizationUrl(
@@ -1377,7 +1418,7 @@ def create_app(
             raise HTTPException(503, str(exc)) from exc
 
     @app.delete("/v1/mailboxes/{provider}", status_code=204)
-    async def disconnect_mailbox(provider: Provider, user: User = Depends(authenticate)) -> None:  # noqa: B008
+    async def disconnect_mailbox(provider: Provider, user: User = Depends(active_user)) -> None:  # noqa: B008
         with factory.begin() as session:
             mailbox = session.scalar(
                 select(MailboxConnection).where(
@@ -1385,11 +1426,17 @@ def create_app(
                 )
             )
             if mailbox:
-                session.delete(mailbox)
+                if mailbox.organization_id != user.active_organization_id:
+                    raise HTTPException(403, "mailbox belongs to another organization")
+                # Preserve binding and history on disconnect; reconnect restores credentials.
+                mailbox.refresh_token = ""
+                mailbox.webhook_expires_at = None
 
     async def enqueue_job(
         user: User, kind: str, payload: dict[str, object], key: str | None = None
     ) -> JobView:
+        with factory() as session:
+            authorize_scope(session, user, "personal")
         try:
             job = queue.enqueue(
                 user_id=user.id,
@@ -1405,7 +1452,7 @@ def create_app(
         return job
 
     @app.get("/v1/jobs", response_model=list[JobView])
-    async def list_jobs(user: User = Depends(authenticate)) -> list[JobView]:
+    async def list_jobs(user: User = Depends(active_user)) -> list[JobView]:
         with factory() as session:
             return [
                 job_view(j)
@@ -1421,7 +1468,7 @@ def create_app(
             ]
 
     @app.get("/v1/jobs/{job_id}", response_model=JobView)
-    async def get_job(job_id: str, user: User = Depends(authenticate)) -> JobView:
+    async def get_job(job_id: str, user: User = Depends(active_user)) -> JobView:
         with factory() as session:
             job = session.get(BackgroundJob, job_id)
             if (
@@ -1433,7 +1480,7 @@ def create_app(
             return job_view(job)
 
     @app.post("/v1/jobs/{job_id}/retry", response_model=JobView, status_code=202)
-    async def retry_job(job_id: str, user: User = Depends(authenticate)) -> JobView:
+    async def retry_job(job_id: str, user: User = Depends(active_user)) -> JobView:
         await get_job(job_id, user)
         with factory.begin() as session:
             job = session.scalar(
@@ -1457,7 +1504,7 @@ def create_app(
     @app.post("/v1/opportunities/{opportunity_id}/send", response_model=JobView, status_code=202)
     async def send_opportunity(
         opportunity_id: str,
-        user: User = Depends(authenticate),
+        user: User = Depends(active_user),
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> JobView:
         with factory.begin() as session:
@@ -1529,7 +1576,7 @@ def create_app(
     @app.post("/v1/scans", response_model=JobView, status_code=202)
     async def scan_mailbox(
         body: ScanRequest,
-        user: User = Depends(authenticate),
+        user: User = Depends(active_user),
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> JobView:
         with factory() as session:
@@ -1539,10 +1586,10 @@ def create_app(
                     MailboxConnection.provider == body.provider,
                 )
             )
-            if not mailbox:
+            if not mailbox or not mailbox.refresh_token:
                 raise HTTPException(409, "mailbox is not connected")
             bound = mailbox_organization(session, mailbox.id)
-            if bound and bound != user.active_organization_id:
+            if not bound or bound != user.active_organization_id:
                 raise HTTPException(
                     409, "Switch to the organization where this mailbox was first scanned"
                 )
@@ -1568,7 +1615,11 @@ def create_app(
             return result.model_dump(mode="json")
         with factory() as session:
             mailbox = session.get(MailboxConnection, job.payload["mailbox_id"])
-            if not mailbox or mailbox.user_id != user.id:
+            if (
+                not mailbox
+                or mailbox.user_id != user.id
+                or mailbox.organization_id != job.organization_id
+            ):
                 raise ValueError("mailbox disconnected")
         if job.kind == "watch":
             registered = await app.state.webhooks.ensure(mailbox)
@@ -1593,6 +1644,7 @@ def create_app(
             for email in messages:
                 counts["messages_seen"] += 1
                 with factory() as session:
+                    require_member(session, job.organization_id, user.id)
                     seen = session.scalar(
                         select(ProcessedMessage).where(
                             ProcessedMessage.mailbox_id == mailbox.id,
@@ -1641,6 +1693,8 @@ def create_app(
                     assert current
                     current.progress = dict(counts)
         with factory.begin() as session:
+            lock_organization(session, job.organization_id)
+            require_member(session, job.organization_id, user.id)
             reconcile(session, job.organization_id, user.id)
         return dict(counts)
 
@@ -1673,6 +1727,7 @@ def create_app(
             with factory() as session:
                 owner = session.get(User, mailbox.user_id)
             assert owner
+            owner.active_organization_id = mailbox.organization_id
             await enqueue_job(owner, "watch", {"mailbox_id": mailbox.id})
             event_hub.publish(mailbox.user_id)
         except OAuthError as exc:
@@ -1702,9 +1757,14 @@ def create_app(
                 )
             )
             if user and mailbox:
-                user.active_organization_id = (
-                    mailbox_organization(session, mailbox.id) or user.active_organization_id
-                )
+                if not mailbox.refresh_token:
+                    return
+                user.active_organization_id = mailbox.organization_id
+                if not mailbox.organization_id:
+                    return
+                member = session.get(OrganizationMembership, (mailbox.organization_id, user.id))
+                if not member or member.status != "active":
+                    return
         if user:
             await scan_mailbox(ScanRequest(provider=provider), user, None)
 

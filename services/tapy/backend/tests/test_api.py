@@ -32,11 +32,21 @@ def settings(tmp_path: Path, *, twilio: bool = False) -> Settings:
 
 
 def register(client: TestClient, name: str, email: str) -> dict[str, Any]:
+    import uuid
+
+    from tapy.database import Organization
+    from tapy.organizations import issue_invitation
+
+    with client.app.state.factory.begin() as session:
+        organization = Organization(name=name, slug=uuid.uuid4().hex)
+        session.add(organization)
+        session.flush()
+        _, token = issue_invitation(session, organization.id, email, "admin", None)
     response = client.post(
-        "/v1/auth/register",
-        json={"name": name, "email": email, "password": "long-password"},
+        "/v1/invitations/accept",
+        json={"token": token, "name": name, "password": "long-password"},
     )
-    assert response.status_code == 201, response.text
+    assert response.status_code == 200, response.text
     return cast(dict[str, Any], response.json()["user"])
 
 
@@ -118,12 +128,19 @@ def test_personal_and_organization_authorization(tmp_path: Path) -> None:
 
         client.cookies.set("tapy_session", admin_cookie)
         membership = client.post(
-            "/v1/organizations/current/memberships",
+            "/v1/organizations/current/invitations",
             json={"email": "agent@example.com", "role": "agent"},
         )
         assert membership.status_code == 201
 
         client.cookies.set("tapy_session", agent_cookie)
+        assert (
+            client.post(
+                "/v1/invitations/accept",
+                json={"token": membership.json()["invitation_path"].split("=")[1]},
+            ).status_code
+            == 200
+        )
         switched = client.patch(
             "/v1/users/me", json={"active_organization_id": admin["active_organization_id"]}
         )

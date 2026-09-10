@@ -150,8 +150,9 @@ export type User = {
   name: string;
   email: string;
   language: "en" | "he";
-  active_organization_id: string;
-  active_organization_role: "admin" | "agent";
+  active_organization_id: string | null;
+  active_organization_role: "admin" | "agent" | null;
+  invitation_required: boolean;
   memberships: Array<{
     organization_id: string;
     organization_name: string;
