@@ -66,9 +66,11 @@ def test_forward_migration_preserves_history_and_only_binds_unambiguous_mailboxe
     upgrade_database(engine)
     upgrade_database(engine)
     with engine.connect() as connection:
-        mailboxes = connection.execute(
-            text("SELECT id, organization_id FROM tapy_mailboxes")
-        ).tuples().all()
+        mailboxes = (
+            connection.execute(text("SELECT id, organization_id FROM tapy_mailboxes"))
+            .tuples()
+            .all()
+        )
         assert dict(mailboxes) == {"clear": "a", "ambiguous": None, "empty": None}
         assert connection.scalar(text("SELECT count(*) FROM tapy_processed_messages")) == 2
         assert (
