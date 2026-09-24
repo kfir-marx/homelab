@@ -471,7 +471,7 @@ resource "helm_release" "argocd" {
   chart            = "argo-cd"
   # Argo CD 3.4 is tested with Kubernetes 1.35. Stay below 3.5 for now because
   # 3.5 switches application rendering to Helm 4.
-  version         = "10.2.2"
+  version         = "10.9.2"
   atomic          = true
   cleanup_on_fail = true
   wait            = true
