@@ -29,7 +29,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: api
-          image: ghcr.io/kfir-marx/homelab-external-ai:sha-572098ac8ed6826ba6a0f1e57ae30978d8c109e2
+          image: ghcr.io/kfir-marx/homelab-external-ai:sha-3df844f90332d98b0968ee36f4d2839e4d9d8ca1
           args: [api]
           env:
             - name: EXTERNAL_AI_DATABASE_URL
@@ -95,7 +95,7 @@ spec:
             - {name: auth-bootstrap, mountPath: /bootstrap, readOnly: true}
       containers:
         - name: worker
-          image: ghcr.io/kfir-marx/homelab-external-ai:sha-572098ac8ed6826ba6a0f1e57ae30978d8c109e2
+          image: ghcr.io/kfir-marx/homelab-external-ai:sha-3df844f90332d98b0968ee36f4d2839e4d9d8ca1
           args: [worker]
           env:
             - name: EXTERNAL_AI_DATABASE_URL
