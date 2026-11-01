@@ -65,7 +65,15 @@ spec:
                     if [ -f "${source_path}" ]; then
                       destination="${stage}/state/${relative_path}"
                       mkdir -p "$(dirname "${destination}")"
-                      sqlite3 "${source_path}" ".timeout 30000" ".backup '${destination}'"
+                      # SQLite 3.53.4's CLI backup command can spin indefinitely
+                      # on Jellyfin's valid WAL-mode database. VACUUM INTO is an
+                      # official online-backup alternative and completed against
+                      # the same database while preserving a read-only source.
+                      snapshot="$(mktemp)"
+                      rm -f "${snapshot}"
+                      sqlite3 -readonly "${source_path}" \
+                        "VACUUM INTO '${snapshot}';"
+                      mv -f "${snapshot}" "${destination}"
                     fi
                   }
 
