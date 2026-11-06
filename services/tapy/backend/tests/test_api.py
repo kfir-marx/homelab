@@ -28,6 +28,8 @@ def settings(tmp_path: Path, *, twilio: bool = False) -> Settings:
         secure_cookies=False,
         twilio_account_sid="AC123" if twilio else "",
         twilio_auth_token=SecretStr("secret" if twilio else ""),
+        twilio_whatsapp_from="whatsapp:+972553088930" if twilio else "",
+        twilio_content_sid="HX0123456789abcdef0123456789abcdef" if twilio else "",
     )
 
 

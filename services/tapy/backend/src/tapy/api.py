@@ -1177,6 +1177,8 @@ def create_app(
 
         account_sid = resolved.twilio_account_sid.strip()
         auth_token = resolved.twilio_auth_token.get_secret_value()
+        whatsapp_from = resolved.twilio_whatsapp_from
+        content_sid = resolved.twilio_content_sid
         created: list[MessageDelivery] = []
         for recipient, person, contact in targets:
             with factory() as session:
@@ -1208,16 +1210,26 @@ def create_app(
                     "unsupported_channel",
                     "Twilio delivery requires phone or WhatsApp",
                 )
-            elif not account_sid or not auth_token:
-                error_code, error_message = "provider_unconfigured", "Twilio is not configured"
+            elif not all((account_sid, auth_token, whatsapp_from, content_sid)):
+                error_code, error_message = (
+                    "provider_unconfigured",
+                    "Twilio WhatsApp is not fully configured",
+                )
             else:
                 try:
                     response = await app.state.http_client.post(
                         f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json",
                         data={
                             "To": f"whatsapp:{contact.normalized_value}",
-                            "From": resolved.twilio_whatsapp_from,
-                            "Body": rendered,
+                            "From": whatsapp_from,
+                            "ContentSid": content_sid,
+                            "ContentVariables": json.dumps(
+                                {
+                                    "1": person.given_name or person.display_name,
+                                    "2": resolved.hotel_offer_url,
+                                },
+                                separators=(",", ":"),
+                            ),
                         },
                         auth=(account_sid, auth_token),
                     )
@@ -1533,6 +1545,19 @@ def create_app(
                 raise HTTPException(409, "opportunity is no longer actionable")
             if not resolved.hotel_offer_url:
                 raise HTTPException(409, "A partner booking link must be configured before sending")
+            if not all(
+                (
+                    resolved.twilio_account_sid.strip(),
+                    resolved.twilio_auth_token.get_secret_value(),
+                    resolved.twilio_whatsapp_from,
+                    resolved.twilio_content_sid,
+                )
+            ):
+                raise HTTPException(
+                    409,
+                    "Twilio WhatsApp credentials, sender, and Content SID must be "
+                    "configured before sending",
+                )
             selected = session.scalar(
                 select(OpportunityRecipient.id).where(
                     OpportunityRecipient.opportunity_id == opportunity_id,

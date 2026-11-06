@@ -122,6 +122,14 @@ Never commit a Secret manifest with real or fabricated values.
 | `rabbitmq/rabbitmq-tapy-user` | `password` |
 | `rabbitmq/rabbitmq-external-ai-user` | `password` (broker-side recovery copy) |
 
+The `tapy` ConfigMap also owns the non-secret Twilio WhatsApp sender and
+Content Template SID (`TWILIO_WHATSAPP_FROM` and `TWILIO_CONTENT_SID`) plus the
+template's accommodation-link value (`HOTEL_OFFER_URL`). The template variables
+are `{{1}}` for the recipient name and `{{2}}` for the link. The homelab overlay
+selects the registered sender `whatsapp:+972553088930` and the
+`tapy_accommodation_offer` Content SID. Confirm its WhatsApp status is
+**Approved** before a business-initiated send.
+
 The OAuth encryption key must be a Fernet key and must not be rotated without
 re-encrypting stored refresh tokens. external-ai can run Model Studio-only
 without `auth.json`, and Codex-only without `ALIBABA_API_KEY`; requests for an

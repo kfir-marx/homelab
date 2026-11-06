@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
 from pydantic import SecretStr
 from sqlalchemy import select
@@ -25,7 +27,7 @@ from tapy.models import (
 )
 
 
-def extracted(status: str = "confirmed") -> FlightBooking:
+def extracted(status: Literal["confirmed", "modified", "cancelled"] = "confirmed") -> FlightBooking:
     return FlightBooking(
         is_flight_booking_confirmation=True,
         booking_status=status,
@@ -69,7 +71,7 @@ def extracted(status: str = "confirmed") -> FlightBooking:
                 passenger_source_id="p1",
                 reservation_source_id="r1",
                 segment_source_ids=["s1"],
-                amount="500.25",
+                amount=Decimal("500.25"),
                 currency="EUR",
             ),
             ExtractedTicket(
@@ -77,7 +79,7 @@ def extracted(status: str = "confirmed") -> FlightBooking:
                 passenger_source_id="p2",
                 reservation_source_id="r1",
                 segment_source_ids=["s1"],
-                amount="600.25",
+                amount=Decimal("600.25"),
                 currency="EUR",
             ),
         ],

@@ -538,7 +538,8 @@ Pending mailbox OAuth states created before this revision must be restarted.
 The ConfigMap owns `LLM_ORDER`, both queue names and model names,
 `MICROSOFT_TENANT`, optional explicit redirect URIs, `MATCH_THRESHOLD`, scan
 limit, Gmail query and Pub/Sub topic, public/webhook URLs, secure-cookie mode,
-`HOTEL_OFFER_URL`, and non-secret OAuth client IDs. The matcher
+`TWILIO_WHATSAPP_FROM`, `TWILIO_CONTENT_SID`, `HOTEL_OFFER_URL`, and non-secret
+OAuth client IDs. The matcher
 uses only the durable queues selected by `LLM_ORDER`; it receives RabbitMQ
 credentials, not either LLM's HTTP credential. The homelab overlay selects
 only `external-ai.requests`.
@@ -564,6 +565,33 @@ Create `tapy/tapy-frontend-secrets` with:
 
 The backend reads the two Twilio credentials from this Secret because it owns
 send batches and delivery records. The frontend receives no provider secret.
+
+The homelab overlay selects the registered WhatsApp sender
+`whatsapp:+972553088930` and the `tapy_accommodation_offer` Content SID.
+Confirm the template's WhatsApp approval status is **Approved** before a
+business-initiated send. The send endpoint rejects an unconfigured template
+instead of sending a Sandbox message.
+
+In Twilio Console, open **Communications → Messaging → Templates** (or
+**Messaging → Content Template Builder** in the legacy Console) and create a
+**Text** template in English named `tapy_accommodation_offer`. Use the body:
+
+```text
+Hi {{1}}, here are accommodation options for your upcoming trip: {{2}}. Please contact your travel agent if you have any questions.
+```
+
+Supply sample values such as `Alex` and `https://arbitrip.com/`. Select
+**Marketing** because the accommodation upsell is promotional, then **Save and
+submit for WhatsApp approval**. The homelab overlay references the template's
+`HX...` Content SID. Tapy
+sends the template with `ContentSid` and `ContentVariables`, using the
+recipient name as `{{1}}` and the configured accommodation URL as `{{2}}`.
+This supports agent-initiated outreach outside WhatsApp's 24-hour customer
+service window. Twilio's pre-approved sample templates belong to the Sandbox
+and cannot be used with this registered sender.
+The homelab offer URL is `https://arbitrip.com/`; later trip-specific link
+construction should replace only the URL value supplied for template variable
+`{{2}}`.
 
 The local source values belong in the repository-level gitignored `.env`; the
 same names are documented in `.env-template`. Capture the updated encrypted

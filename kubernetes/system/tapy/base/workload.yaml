@@ -138,6 +138,12 @@ spec:
             - name: MATCHER_MAXIMUM_MESSAGES_PER_SCAN
               valueFrom:
                 configMapKeyRef: {name: tapy, key: MAXIMUM_MESSAGES_PER_SCAN}
+            - name: MATCHER_TWILIO_WHATSAPP_FROM
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: TWILIO_WHATSAPP_FROM}
+            - name: MATCHER_TWILIO_CONTENT_SID
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: TWILIO_CONTENT_SID}
             - name: MATCHER_HOTEL_OFFER_URL
               valueFrom:
                 configMapKeyRef: {name: tapy, key: HOTEL_OFFER_URL}
@@ -294,6 +300,12 @@ spec:
             - name: MATCHER_MAXIMUM_MESSAGES_PER_SCAN
               valueFrom:
                 configMapKeyRef: {name: tapy, key: MAXIMUM_MESSAGES_PER_SCAN}
+            - name: MATCHER_TWILIO_WHATSAPP_FROM
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: TWILIO_WHATSAPP_FROM}
+            - name: MATCHER_TWILIO_CONTENT_SID
+              valueFrom:
+                configMapKeyRef: {name: tapy, key: TWILIO_CONTENT_SID}
             - name: MATCHER_HOTEL_OFFER_URL
               valueFrom:
                 configMapKeyRef: {name: tapy, key: HOTEL_OFFER_URL}

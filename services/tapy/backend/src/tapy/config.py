@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Annotated, Literal
 from urllib.parse import quote, urlparse
 
@@ -42,7 +43,8 @@ class Settings(BaseSettings):
     webhook_renewal_seconds: int = Field(default=21_600, ge=300, le=86_400)
     twilio_account_sid: str = ""
     twilio_auth_token: SecretStr = SecretStr("")
-    twilio_whatsapp_from: str = "whatsapp:+14155238886"
+    twilio_whatsapp_from: str = ""
+    twilio_content_sid: str = ""
     hotel_offer_url: str = ""
     jobs_queue: str = "tapy.jobs"
     job_max_attempts: int = Field(default=3, ge=1, le=10)
@@ -88,6 +90,32 @@ class Settings(BaseSettings):
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("value must be an absolute HTTP(S) URL")
         return value.rstrip("/")
+
+    @field_validator("hotel_offer_url")
+    @classmethod
+    def offer_url(cls, value: str) -> str:
+        if not value:
+            return value
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("value must be an absolute HTTP(S) URL")
+        return value
+
+    @field_validator("twilio_whatsapp_from")
+    @classmethod
+    def whatsapp_sender(cls, value: str) -> str:
+        value = value.strip()
+        if value and not re.fullmatch(r"whatsapp:\+[1-9]\d{6,14}", value):
+            raise ValueError("value must use the whatsapp:+<E.164 number> format")
+        return value
+
+    @field_validator("twilio_content_sid")
+    @classmethod
+    def content_sid(cls, value: str) -> str:
+        value = value.strip()
+        if value and not re.fullmatch(r"HX[0-9a-fA-F]{32}", value):
+            raise ValueError("value must be a Twilio Content SID beginning with HX")
+        return value
 
     @model_validator(mode="after")
     def validate_oauth_pairs(self) -> Settings:

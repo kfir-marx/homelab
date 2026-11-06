@@ -1,9 +1,11 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -111,6 +113,14 @@ def test_send_is_queued_and_idempotent_and_dismissal_is_final(
     job = client.get(f"/v1/jobs/{response.json()['id']}").json()
     assert job["status"] == "completed"
     assert route.call_count == 2  # one delivery for each explicitly selected traveler
+    form = parse_qs(route.calls[0].request.content.decode())
+    assert form["From"] == ["whatsapp:+972553088930"]
+    assert form["ContentSid"] == ["HX0123456789abcdef0123456789abcdef"]
+    assert json.loads(form["ContentVariables"][0]) == {
+        "1": "Ada Lovelace",
+        "2": "https://partner.example/offer?affiliate=tapy",
+    }
+    assert "Body" not in form
     execute(app, client, job["id"])
     assert route.call_count == 2
     card = client.get(f"/v1/opportunities/{card['id']}").json()

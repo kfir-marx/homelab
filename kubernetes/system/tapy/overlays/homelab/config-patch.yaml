@@ -11,6 +11,11 @@ data:
   MICROSOFT_OAUTH_REDIRECT_URI: https://tapy.547600.xyz/v1/oauth/outlook/callback
   WEBHOOK_PUBLIC_BASE_URL: https://tapy.547600.xyz
   GMAIL_PUBSUB_TOPIC: projects/tapy-508011/topics/tapy-gmail
+  # Registered production sender. Business-initiated sends require the
+  # accommodation template's WhatsApp approval status to be Approved.
+  TWILIO_WHATSAPP_FROM: whatsapp:+972553088930
+  TWILIO_CONTENT_SID: HX26345850d2bbf83279987bd128cbcd03
+  HOTEL_OFFER_URL: https://arbitrip.com/
   LLM_ORDER: external-ai
   INTERNAL_LLM_QUEUE: internal-llm.requests
   INTERNAL_LLM_MODEL: local-llm
