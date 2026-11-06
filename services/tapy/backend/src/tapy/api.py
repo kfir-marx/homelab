@@ -1200,8 +1200,9 @@ def create_app(
                 if authorized_opportunity.status not in {"open", "contacted"}:
                     raise HTTPException(409, "opportunity was invalidated before delivery")
             rendered = (
-                f"Hi {person.given_name or person.display_name}! "
-                f"Explore accommodation for your trip: {resolved.hotel_offer_url}"
+                f"Hi {person.given_name or person.display_name}, here are accommodation options "
+                f"for your upcoming trip: {resolved.hotel_offer_url}. "
+                "Please contact your travel agent if you have any questions."
             )
             provider_id = error_code = error_message = None
             delivery_status = "failed"

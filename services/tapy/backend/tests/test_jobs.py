@@ -11,12 +11,13 @@ import httpx
 import pytest
 import respx
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from test_api import FakeExtractor, register, settings
 from test_reconciliation import Evidence, flight
 from test_reconciliation import evidence as evidence
 
 from tapy.api import create_app
-from tapy.database import BackgroundJob, MailboxConnection
+from tapy.database import BackgroundJob, MailboxConnection, MessageDelivery
 from tapy.jobs import JobQueue
 from tapy.models import EmailExtraction, EmailForAnalysis, HotelBooking
 from tapy.reconciliation import record_email
@@ -113,6 +114,13 @@ def test_send_is_queued_and_idempotent_and_dismissal_is_final(
     job = client.get(f"/v1/jobs/{response.json()['id']}").json()
     assert job["status"] == "completed"
     assert route.call_count == 2  # one delivery for each explicitly selected traveler
+    with app.state.factory() as session:
+        rendered_messages = set(session.scalars(select(MessageDelivery.rendered_message)).all())
+        assert (
+            "Hi Ada Lovelace, here are accommodation options for your upcoming trip: "
+            "https://partner.example/offer?affiliate=tapy. "
+            "Please contact your travel agent if you have any questions."
+        ) in rendered_messages
     form = parse_qs(route.calls[0].request.content.decode())
     assert form["From"] == ["whatsapp:+972553088930"]
     assert form["ContentSid"] == ["HX0123456789abcdef0123456789abcdef"]
