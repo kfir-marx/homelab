@@ -195,9 +195,9 @@ at submission even if the user changes organizations. A mailbox remains explicit
 to the organization captured at connection; webhook routing follows that binding. Disconnected mailboxes cannot
 continue ingestion. Gmail/Outlook readers paginate (100 messages per page) through the
 configured scan scope, defaulting to at most 10,000 messages. Reaching a page cap is a
-visible failure, not a false completed scan. Gmail no longer filters the default scan
-to the most recent year. Full rescans for webhooks remain a cost bottleneck on large
-mailboxes; provider history/delta cursors are a future optimization.
+visible failure, not a false completed scan. Gmail's default `newer_than:3m` query limits
+scans to messages from the previous three months. Full rescans for webhooks remain a cost
+bottleneck on large mailboxes; provider history/delta cursors are a future optimization.
 
 Backend and frontend have separate deployments, images and CPU HPAs (1–3 replicas,
 70% utilization; requires metrics-server). Argo CD respects ignored replica fields

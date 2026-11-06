@@ -4,6 +4,7 @@ import httpx
 import pytest
 import respx
 
+from tapy.config import Settings
 from tapy.mailboxes import GmailReader, OutlookReader
 
 
@@ -35,8 +36,8 @@ async def test_gmail_reader_lists_then_fetches_bounded_body() -> None:
         )
     )
     async with httpx.AsyncClient() as client:
-        messages = await GmailReader(client, "newer_than:30d").messages("access", 5)
-    assert listed.calls[0].request.url.params["q"] == "newer_than:30d"
+        messages = await GmailReader(client, Settings().gmail_query).messages("access", 5)
+    assert listed.calls[0].request.url.params["q"] == "newer_than:3m"
     assert messages[0].body_text == "Hotel confirmation body"
     assert messages[0].subject == "Confirmed"
 

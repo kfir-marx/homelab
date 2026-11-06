@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = Field(default=120, gt=0, le=300)
     match_threshold: float = Field(default=0.90, ge=0, le=1)
     maximum_messages_per_scan: int = Field(default=10000, ge=1, le=10000)
-    gmail_query: str = Field(default="", max_length=500)
+    gmail_query: str = Field(default="newer_than:3m", max_length=500)
     public_base_url: str = "http://localhost:8080"
     google_oauth_redirect_uri: str = ""
     microsoft_oauth_redirect_uri: str = ""

@@ -42,11 +42,11 @@ clients or demonstrate each remaining client.
 
 ## Paste-ready combined scope justification
 
-Paste this single paragraph for the requested scopes. It is **994 characters**,
+Paste this single paragraph for the requested scopes. It is **983 characters**,
 including spaces, and leaves a small margin below Google's 1,000-character
 limit. Adjust it only if the deployed behavior changes:
 
-> Tapy serves travel professionals. Google sign-in uses openid, userinfo.email, and userinfo.profile only to authenticate users, link the Google subject to a Tapy account, verify email, and set the display name; it does not read Gmail. Separately, after the user reads the mailbox disclosure in Settings and selects "Grant read access," Tapy uses gmail.readonly to list up to 20 messages matching newer_than:365d and read the subject, sender, date, and up to 40,000 characters of plain-text body. This identifies flight and hotel confirmations; gmail.metadata excludes message bodies, and write scopes are unnecessary. Content is sent to Alibaba Cloud Model Studio (Qwen) only to classify messages and extract booking details. Tapy shows derived bookings and hotel opportunities to the user. It cannot send, edit, or delete mail; does not store full message bodies or access tokens in its product database; and does not use Google data for ads, sale, credit decisions, or generalized AI training.
+> Tapy serves travel professionals. Google sign-in uses openid, userinfo.email, and userinfo.profile only to authenticate users, link the Google subject to a Tapy account, verify email, and set the display name; it does not read Gmail. Separately, after the user reads the mailbox disclosure in Settings and selects "Grant read access," Tapy uses gmail.readonly to list messages matching newer_than:3m and read the subject, sender, date, and up to 40,000 characters of plain-text body. This identifies flight and hotel confirmations; gmail.metadata excludes message bodies, and write scopes are unnecessary. Content is sent to Alibaba Cloud Model Studio (Qwen) only to classify messages and extract booking details. Tapy shows derived bookings and hotel opportunities to the user. It cannot send, edit, or delete mail; does not store full message bodies or access tokens in its product database; and does not use Google data for ads, sale, credit decisions, or generalized AI training.
 
 If the form asks for the permitted application type, select the option closest
 to **reporting or monitoring that improves the email experience**, specifically
@@ -69,8 +69,8 @@ repository, the video, or an ordinary support document.
 >    controlled by the reviewer, review the requested permission, and grant it.
 >    The callback returns to Tapy and the Gmail row shows the connected address.
 > 5. For a deterministic test, place the synthetic flight-confirmation email
->    from this packet in that Gmail inbox, then select **Scan now**. Tapy reads a
->    maximum of 20 recent messages and returns to **My data**. A successful scan
+>    from this packet in that Gmail inbox, then select **Scan now**. Tapy reads
+>    messages from the previous three months and returns to **My data**. A successful scan
 >    displays a new flight-derived hotel opportunity and a completion notice.
 > 6. Return to **Settings** and select **Disconnect**. This deletes Tapy's stored
 >    Gmail connection credentials, webhook metadata, and duplicate-processing
@@ -82,8 +82,8 @@ repository, the video, or an ordinary support document.
 ### Synthetic Gmail message
 
 Send this from another test account to the Gmail account used in the demo. Use
-only invented data. Keep it among the newest 20 messages and send it after any
-earlier Tapy test of the same mailbox so its provider message ID is new.
+only invented data. Keep it within the three-month scan window and send it after
+any earlier Tapy test of the same mailbox so its provider message ID is new.
 
 ```text
 Subject: Confirmed flight - Tapy verification demo TAPY-DEMO-2026
