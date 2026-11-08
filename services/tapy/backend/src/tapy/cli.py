@@ -1,4 +1,6 @@
 import asyncio
+import signal
+from contextlib import suppress
 
 import typer
 import uvicorn
@@ -44,8 +46,30 @@ def worker() -> None:
 
     async def run() -> None:
         application = create_app(worker=True)
-        async with application.router.lifespan_context(application):
-            await asyncio.gather(*application.state.worker_tasks)
+        stopping = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        handled_signals = (signal.SIGINT, signal.SIGTERM)
+        for handled_signal in handled_signals:
+            loop.add_signal_handler(handled_signal, stopping.set)
+        try:
+            async with application.router.lifespan_context(application):
+                workers = asyncio.gather(*application.state.worker_tasks)
+                stopped = asyncio.create_task(stopping.wait())
+                try:
+                    done, _ = await asyncio.wait(
+                        (workers, stopped), return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if workers in done:
+                        await workers
+                finally:
+                    stopped.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await stopped
+            with suppress(asyncio.CancelledError):
+                await workers
+        finally:
+            for handled_signal in handled_signals:
+                loop.remove_signal_handler(handled_signal)
 
     asyncio.run(run())
 

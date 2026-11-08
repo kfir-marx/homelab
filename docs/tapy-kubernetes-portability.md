@@ -4,10 +4,16 @@
 
 Tapy keeps the same runtime architecture in development and
 production: the frontend serves the UI and proxies `/v1/*` to the private
-backend. A separate Tapy worker consumes durable `tapy.jobs`, scans mailboxes,
-reconciles extracted evidence in PostgreSQL, and submits Alibaba extraction RPCs
-through RabbitMQ. API/frontend have independent CPU HPAs; worker replicas scale
-independently. See [the Tapy runbook](tapy-runbook.md) for lifecycle and matching rules.
+backend. A separate pool of two long-running Tapy workers competes for durable
+`tapy.jobs` deliveries with prefetch one, scans mailboxes, reconciles extracted evidence
+in PostgreSQL, and submits Alibaba extraction RPCs through RabbitMQ. Application jobs are
+PostgreSQL rows plus AMQP deliveries, not Kubernetes Jobs. The workers have no Service;
+they receive no inbound traffic. A PodDisruptionBudget retains one worker, soft hostname
+spreading prefers separate nodes, rolling updates keep one available, and a 120-second
+termination grace allows SIGTERM cancellation to requeue active non-delivery work.
+API/frontend have independent CPU HPAs; worker replicas scale independently. See
+[the Tapy runbook](tapy-runbook.md) for failure recovery, manual scaling, lifecycle and
+matching rules.
 `external-ai`
 retains its authenticated HTTP job API, durable PostgreSQL job state, RabbitMQ
 RPC worker, Codex state, and Alibaba Model Studio provider.

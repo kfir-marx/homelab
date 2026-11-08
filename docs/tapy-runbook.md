@@ -185,11 +185,15 @@ query parameters or attribution promises are fabricated.
 
 ## Asynchronous execution and scaling
 
-`tapy serve` only handles HTTP; `tapy worker` consumes durable `tapy.jobs` messages.
-Scans, extraction, watch registration and sends execute in workers. HTTP scan/send
-requests return `202` and a persisted job view. The database outbox commits before
-publisher confirmation; workers recover unpublished jobs every ten seconds. Leases,
-heartbeats and bounded retry backoff cover crashes and duplicate broker deliveries.
+`tapy serve` only handles HTTP and webhooks; `tapy worker` is a long-running competing
+consumer of durable `tapy.jobs` messages. Application work is not represented by
+Kubernetes Jobs. API requests first commit a `background_jobs` row in PostgreSQL and
+then publish its ID to RabbitMQ. Scans, extraction, watch registration and sends execute
+in the worker pool, and HTTP scan/send requests return `202` with the persisted job view.
+The database outbox commits before publisher confirmation; workers recover unpublished
+jobs every ten seconds. Every consumer uses prefetch one, so a replica owns at most one
+unacknowledged Tapy job at a time. Leases, heartbeats and bounded retry backoff cover
+crashes and duplicate broker deliveries.
 Scan retries skip committed messages. Jobs preserve the tenant and mailbox captured
 at submission even if the user changes organizations. A mailbox remains explicitly bound
 to the organization captured at connection; webhook routing follows that binding. Disconnected mailboxes cannot
@@ -204,12 +208,79 @@ ID-only inbox recovery and still processes every candidate in a separate job.
 
 Backend and frontend have separate deployments, images and CPU HPAs (1–3 replicas,
 70% utilization; requires metrics-server). Argo CD respects ignored replica fields
-for those two deployments so self-heal does not undo HPA scaling. Workers have their own deployment and
-replica setting, with one prefetched job per consumer. Scale worker replicas from
-queue depth/oldest-job age using the cluster's external metrics system; a KEDA
-installation is not assumed. PostgreSQL and tenant reconciliation locks remain shared
-capacity constraints. Browser polling reconciles cross-process changes; local SSE is
-an optional latency optimization, not the correctness mechanism.
+for those two deployments so self-heal does not undo HPA scaling. The worker Deployment
+starts with two replicas, a disruption budget retaining one, soft hostname spreading,
+and a rolling update that permits at most one unavailable worker. It has no Service
+because it receives no inbound application traffic.
+
+On SIGTERM a worker stops inside the application lifespan. Cancellation exits
+`message.process(requeue=True)`, so RabbitMQ rejects and requeues the unacknowledged
+delivery. Ordinary interrupted work is made immediately retryable in PostgreSQL. A
+`send` interruption is instead terminal and explicitly uncertain because the provider
+may have accepted the message; it is never automatically resent. A process or node loss
+that cannot run this cleanup leaves the row `running`; its 90-second lease expires and a
+surviving worker republishes it. Attempt ownership prevents a stale completion from
+overwriting the newer lease. Completed and permanently failed rows ignore duplicate
+broker deliveries.
+
+The repository has RabbitMQ Prometheus scraping but no external/custom metrics adapter,
+so it cannot feed queue metrics to an HPA. Do not add a CPU-only worker HPA. Keep at least
+two replicas. For a durable manual change, edit `tapy-worker.spec.replicas` in
+`kubernetes/system/tapy/base/workload.yaml`, keep the value between 2 and the current
+operator ceiling of 6, merge it, and let Argo CD reconcile. For an explicitly authorized
+temporary emergency scale after pausing Argo self-heal, use:
+
+```bash
+kubectl -n tapy scale deployment/tapy-worker --replicas=4
+```
+
+Argo CD otherwise restores the Git value. Six is a conservative ceiling for the declared
+homelab while the roughly 50-mailbox workload is characterized; each additional worker
+adds concurrent PostgreSQL, RabbitMQ, Google/Microsoft, AI extraction, and Twilio load.
+PostgreSQL capacity and organization reconciliation locks remain shared bottlenecks, and
+provider quotas or AI capacity can make extra workers harmful rather than faster.
+
+Inspect ready and unacknowledged backlog with the RabbitMQ command in the shared runbook,
+or query Prometheus for `rabbitmq_queue_messages_ready{queue="tapy.jobs"}` and
+`rabbitmq_queue_messages_unacked{queue="tapy.jobs"}`. RabbitMQ does not expose the age of
+the authoritative PostgreSQL job row. Through trusted read-only database access, inspect
+the oldest runnable job with:
+
+```sql
+SELECT now() - min(available_at) AS oldest_ready_age
+FROM background_jobs
+WHERE (status IN ('queued', 'retrying') AND available_at <= now())
+   OR (status = 'running' AND lease_until < now());
+```
+
+Queue-driven autoscaling still needs an installed Prometheus external-metrics adapter (or
+a separately approved KEDA installation), a mapping for ready messages per worker, and an
+application metric such as `tapy_background_job_oldest_ready_age_seconds` derived from
+the query above. A future HPA should use `minReplicas: 2`, `maxReplicas: 6`, queue depth
+and oldest-ready age, with aggressive scale-up but a several-minute scale-down
+stabilization window. Browser polling reconciles cross-process changes; local SSE is an
+optional latency optimization, not the correctness mechanism.
+
+### Future queue separation
+
+Keep `tapy.jobs` for approximately 50 mailboxes until measurements show sustained oldest
+ready age or latency-sensitive job delay outside the operating objective. If bulk scans
+cause head-of-line blocking, introduce a versioned direct exchange and four bounded
+queues: `incoming_email` and `gmail_history` on a latency-sensitive queue, `scan` on a
+bulk queue, `send` on a delivery-critical queue, and `watch` on a maintenance/control
+queue. Give each pool an explicit replica/concurrency ceiling; delivery remains prefetch
+one and keeps its no-automatic-resend rule.
+
+Roll this out backward-compatibly: first deploy code that understands the new routes while
+a legacy-drain pool continues consuming `tapy.jobs`; then switch publishers to the new
+routing keys; wait for the legacy queue and PostgreSQL runnable set to drain; finally
+remove the legacy consumer in a later release. Extend the Tapy RabbitMQ identity's
+configure/read permissions to the new queues and write permission to the versioned
+exchange before publishers switch. Use a PostgreSQL mailbox-scoped advisory lock or
+durable mailbox lease where provider ordering is required; retain idempotency keys and
+monotonic Gmail cursor updates. Organization reconciliation continues to serialize on
+the organization row. Trigger separation from measured queue wait/oldest age, not mailbox
+count alone.
 
 Gmail watches include inbox changes only, per the
 [watch API](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/watch).

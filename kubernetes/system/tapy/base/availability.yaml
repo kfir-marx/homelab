@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tapy-worker
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: tapy
+      component: worker

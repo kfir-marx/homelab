@@ -181,7 +181,12 @@ kind: Deployment
 metadata:
   name: tapy-worker
 spec:
-  replicas: 1
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app: tapy
@@ -194,6 +199,15 @@ spec:
     spec:
       enableServiceLinks: false
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: tapy
+              component: worker
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001

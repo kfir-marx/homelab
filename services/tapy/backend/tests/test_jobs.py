@@ -168,6 +168,62 @@ def test_gmail_webhook_creates_one_job_per_incoming_message(
         )
 
 
+def test_concurrent_gmail_history_jobs_never_move_cursor_backwards(
+    app_client: tuple[Any, TestClient],
+) -> None:
+    app, client = app_client
+
+    class Reader:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.both_started = asyncio.Event()
+
+        async def history(self, token: str, start_history_id: str) -> tuple[list[str], str]:
+            del token
+            assert start_history_id == "100"
+            self.calls += 1
+            call = self.calls
+            if call == 2:
+                self.both_started.set()
+            await self.both_started.wait()
+            return [], "105" if call == 1 else "110"
+
+    reader = Reader()
+    app.state.mailbox_readers["gmail"] = reader
+    app.state.oauth.access_token = AsyncMock(return_value="access")
+    with app.state.factory.begin() as session:
+        mailbox = session.scalar(select(MailboxConnection))
+        assert mailbox
+        mailbox.webhook_cursor = "100"
+        mailbox_id = mailbox.id
+    first = app.state.job_queue.enqueue(
+        user_id=mailbox.user_id,
+        organization_id=mailbox.organization_id,
+        kind="gmail_history",
+        payload={"mailbox_id": mailbox_id, "history_id": "105"},
+        key="history:105",
+    )
+    second = app.state.job_queue.enqueue(
+        user_id=mailbox.user_id,
+        organization_id=mailbox.organization_id,
+        kind="gmail_history",
+        payload={"mailbox_id": mailbox_id, "history_id": "110"},
+        key="history:110",
+    )
+
+    async def execute_both() -> None:
+        await asyncio.gather(
+            app.state.job_queue.execute(first.id, app.state.run_job),
+            app.state.job_queue.execute(second.id, app.state.run_job),
+        )
+
+    assert client.portal
+    client.portal.call(execute_both)
+    with app.state.factory() as session:
+        current = session.get(MailboxConnection, mailbox_id)
+        assert current and current.webhook_cursor == "110"
+
+
 @respx.mock
 def test_gmail_watch_filters_inbox_and_preserves_consumed_cursor(
     app_client: tuple[Any, TestClient],
@@ -378,3 +434,136 @@ async def test_stale_worker_cannot_overwrite_newer_lease(
     with factory() as session:
         current = session.get(BackgroundJob, job.id)
         assert current and current.status == "retrying" and current.result == {}
+
+
+@pytest.mark.asyncio
+async def test_interrupted_job_is_immediately_retryable(evidence: Evidence, tmp_path: Path) -> None:
+    factory, ids = evidence
+    queue = JobQueue(settings(tmp_path), factory)
+    job = queue.enqueue(
+        user_id=ids["agent_id"],
+        organization_id=ids["organization_id"],
+        kind="scan",
+        payload={},
+        key="interrupted",
+    )
+    started = asyncio.Event()
+
+    async def interrupted(record: BackgroundJob) -> dict[str, object]:
+        del record
+        started.set()
+        await asyncio.Event().wait()
+        return {}
+
+    task = asyncio.create_task(queue.execute(job.id, interrupted))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    with factory() as session:
+        current = session.get(BackgroundJob, job.id)
+        assert current
+        assert current.status == "retrying"
+        assert current.lease_until is None
+
+    calls = 0
+
+    async def recovered(record: BackgroundJob) -> dict[str, object]:
+        nonlocal calls
+        del record
+        calls += 1
+        return {"recovered": True}
+
+    await queue.execute(job.id, recovered)
+    with factory() as session:
+        current = session.get(BackgroundJob, job.id)
+        assert current
+        assert current.status == "completed"
+        assert current.attempts == 2
+    assert calls == 1
+
+    delivery = queue.enqueue(
+        user_id=ids["agent_id"],
+        organization_id=ids["organization_id"],
+        kind="send",
+        payload={},
+        key="interrupted-delivery",
+    )
+    delivery_started = asyncio.Event()
+
+    async def interrupted_delivery(record: BackgroundJob) -> dict[str, object]:
+        del record
+        delivery_started.set()
+        await asyncio.Event().wait()
+        return {}
+
+    delivery_task = asyncio.create_task(queue.execute(delivery.id, interrupted_delivery))
+    await delivery_started.wait()
+    delivery_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await delivery_task
+    await queue.execute(delivery.id, recovered)
+    with factory() as session:
+        current = session.get(BackgroundJob, delivery.id)
+        assert current
+        assert current.status == "failed"
+        assert current.attempts == 1
+        assert "Review provider results" in (current.error or "")
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_lease_is_recovered_and_terminal_jobs_do_not_rerun(
+    evidence: Evidence, tmp_path: Path
+) -> None:
+    factory, ids = evidence
+    queue = JobQueue(settings(tmp_path), factory)
+    job = queue.enqueue(
+        user_id=ids["agent_id"],
+        organization_id=ids["organization_id"],
+        kind="scan",
+        payload={},
+        key="expired",
+    )
+    with factory.begin() as session:
+        current = session.get(BackgroundJob, job.id)
+        assert current
+        current.status = "running"
+        current.attempts = 1
+        current.lease_until = datetime.now(UTC) - timedelta(seconds=1)
+
+    calls = 0
+
+    async def complete(record: BackgroundJob) -> dict[str, object]:
+        nonlocal calls
+        del record
+        calls += 1
+        return {"ok": True}
+
+    await queue.execute(job.id, complete)
+    await queue.execute(job.id, complete)
+    with factory() as session:
+        current = session.get(BackgroundJob, job.id)
+        assert current and current.status == "completed" and current.attempts == 2
+    assert calls == 1
+
+    failed = queue.enqueue(
+        user_id=ids["agent_id"],
+        organization_id=ids["organization_id"],
+        kind="send",
+        payload={},
+        key="permanently-failed",
+    )
+
+    async def fail(record: BackgroundJob) -> dict[str, object]:
+        nonlocal calls
+        del record
+        calls += 1
+        raise RuntimeError("provider response unknown")
+
+    await queue.execute(failed.id, fail)
+    await queue.execute(failed.id, fail)
+    with factory() as session:
+        current = session.get(BackgroundJob, failed.id)
+        assert current and current.status == "failed" and current.attempts == 1
+    assert calls == 2

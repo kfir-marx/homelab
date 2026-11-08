@@ -11,7 +11,6 @@ from datetime import UTC, datetime, timedelta
 import aio_pika
 from aio_pika.abc import (
     AbstractChannel,
-    AbstractIncomingMessage,
     AbstractQueue,
     AbstractRobustConnection,
 )
@@ -178,6 +177,24 @@ class JobQueue:
         pulse = asyncio.create_task(heartbeat())
         try:
             result = await handler(job)
+        except asyncio.CancelledError:
+            with self.factory.begin() as session:
+                current = session.get(BackgroundJob, job_id)
+                assert current
+                if current.status == "running" and current.attempts == attempt:
+                    # message.process(requeue=True) returns the delivery to RabbitMQ.
+                    # Make ordinary work immediately claimable by another worker. A
+                    # delivery may already have reached the provider, so never resend it
+                    # automatically after an interrupted response.
+                    current.status = "failed" if job.kind == "send" else "retrying"
+                    current.error = (
+                        "Worker stopped during delivery. Review provider results before retrying."
+                        if job.kind == "send"
+                        else "Worker stopped before completion; the job will be retried."
+                    )
+                    current.available_at = datetime.now(UTC)
+                    current.lease_until = None
+            raise
         except Exception as exc:
             with self.factory.begin() as session:
                 current = session.get(BackgroundJob, job_id)
@@ -225,10 +242,15 @@ class JobQueue:
     async def consume(
         self, handler: Callable[[BackgroundJob], Awaitable[dict[str, object]]]
     ) -> None:
-        async def received(message: AbstractIncomingMessage) -> None:
-            async with message.process(requeue=True):
-                await self.execute(json.loads(message.body)["job_id"], handler)
+        queue = self.queue
+        assert queue
 
-        assert self.queue
-        await self.queue.consume(received)
-        await self.recover()
+        async def receive() -> None:
+            async with queue.iterator() as messages:
+                async for message in messages:
+                    async with message.process(requeue=True):
+                        await self.execute(json.loads(message.body)["job_id"], handler)
+
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(receive())
+            tasks.create_task(self.recover())
