@@ -81,9 +81,7 @@ class JobQueue:
                 from .database import Organization
 
                 session.scalar(
-                    select(Organization)
-                    .where(Organization.id == organization_id)
-                    .with_for_update()
+                    select(Organization).where(Organization.id == organization_id).with_for_update()
                 )
                 job = session.scalar(
                     select(BackgroundJob).where(
@@ -120,9 +118,7 @@ class JobQueue:
                 if not job:
                     raise
                 if job.kind != kind or job.payload != payload:
-                    raise ValueError(
-                        "idempotency key already used for another request"
-                    ) from None
+                    raise ValueError("idempotency key already used for another request") from None
                 return job_view(job)
 
     async def recover(self) -> None:

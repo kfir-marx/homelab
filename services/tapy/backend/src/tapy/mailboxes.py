@@ -27,9 +27,7 @@ class MailboxReader(Protocol):
 class GmailIncrementalReader(MailboxReader, Protocol):
     async def history(self, access_token: str, start_history_id: str) -> tuple[list[str], str]: ...
     async def message_ids(self, access_token: str, limit: int) -> list[str]: ...
-    async def message(
-        self, access_token: str, message_id: str
-    ) -> EmailForAnalysis | None: ...
+    async def message(self, access_token: str, message_id: str) -> EmailForAnalysis | None: ...
 
 
 def _plain_html(value: str) -> str:
@@ -156,9 +154,7 @@ class GmailReader(PagedReader):
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise MailboxError("Gmail message listing failed") from exc
 
-    async def history(
-        self, access_token: str, start_history_id: str
-    ) -> tuple[list[str], str]:
+    async def history(self, access_token: str, start_history_id: str) -> tuple[list[str], str]:
         """Return inbox messages added after a Gmail history cursor and the new cursor."""
         headers = {"Authorization": f"Bearer {access_token}"}
         result: list[str] = []

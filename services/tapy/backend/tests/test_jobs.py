@@ -126,16 +126,18 @@ def test_gmail_webhook_creates_one_job_per_incoming_message(
         mailbox.webhook_cursor = "100"
         email_address = mailbox.email_address
 
-    data = base64.urlsafe_b64encode(
-        json.dumps({"emailAddress": email_address, "historyId": "102"}).encode()
-    ).decode().rstrip("=")
+    data = (
+        base64.urlsafe_b64encode(
+            json.dumps({"emailAddress": email_address, "historyId": "102"}).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
     response = client.post(
         "/v1/webhooks/gmail?token=webhook-test", json={"message": {"data": data}}
     )
     assert response.status_code == 202
-    replay = client.post(
-        "/v1/webhooks/gmail?token=webhook-test", json={"message": {"data": data}}
-    )
+    replay = client.post("/v1/webhooks/gmail?token=webhook-test", json={"message": {"data": data}})
     assert replay.status_code == 202
 
     with app.state.factory() as session:
@@ -143,9 +145,7 @@ def test_gmail_webhook_creates_one_job_per_incoming_message(
             select(BackgroundJob).where(BackgroundJob.kind == "gmail_history")
         ).all()
         assert len(history_jobs) == 1
-        assert not session.scalars(
-            select(BackgroundJob).where(BackgroundJob.kind == "scan")
-        ).all()
+        assert not session.scalars(select(BackgroundJob).where(BackgroundJob.kind == "scan")).all()
     execute(app, client, history_jobs[0].id)
     assert reader.history_calls == ["100"]
 
@@ -164,9 +164,7 @@ def test_gmail_webhook_creates_one_job_per_incoming_message(
     assert completed["result"]["messages_analyzed"] == 1
     with app.state.factory() as session:
         assert session.scalar(
-            select(ProcessedMessage).where(
-                ProcessedMessage.provider_message_id == "incoming-1"
-            )
+            select(ProcessedMessage).where(ProcessedMessage.provider_message_id == "incoming-1")
         )
 
 
@@ -176,9 +174,7 @@ def test_gmail_watch_filters_inbox_and_preserves_consumed_cursor(
 ) -> None:
     app, client = app_client
     route = respx.post("https://gmail.googleapis.com/gmail/v1/users/me/watch").mock(
-        return_value=httpx.Response(
-            200, json={"historyId": "999", "expiration": "2000000000000"}
-        )
+        return_value=httpx.Response(200, json={"historyId": "999", "expiration": "2000000000000"})
     )
     app.state.oauth.access_token = AsyncMock(return_value="access")
     with app.state.factory.begin() as session:

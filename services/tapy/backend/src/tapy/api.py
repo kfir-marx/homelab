@@ -1909,9 +1909,7 @@ def create_app(
                 )
             )
             member = (
-                session.get(
-                    OrganizationMembership, (mailbox.organization_id, mailbox.user_id)
-                )
+                session.get(OrganizationMembership, (mailbox.organization_id, mailbox.user_id))
                 if mailbox and mailbox.organization_id
                 else None
             )
