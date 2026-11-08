@@ -1,21 +1,23 @@
-# Bitwarden private password-vault runbook
+# Bitwarden password-vault runbook
 
 This deployment runs the official Bitwarden Lite image with PostgreSQL. Lite is
 Bitwarden's single-container distribution for individuals and homelabs; it is
 used instead of the much larger multi-service Helm/MSSQL deployment.
 
-The only external entry point is the shared private Cilium Gateway at:
+The canonical client endpoint is public through the existing outbound-only
+Cloudflare Tunnel:
 
 ```text
-https://bitwarden.home.547600.xyz
+https://bitwarden.547600.xyz
 ```
 
-The Service is `ClusterIP` and has no Cloudflare Tunnel rule or public DNS
-address. On the home LAN, AdGuard resolves the private wildcard to the Gateway
-VIP `192.168.1.220`. Remote clients reach that same VIP through the existing
-Tailscale subnet router. cert-manager obtains a publicly trusted wildcard
-certificate with a Cloudflare DNS-01 challenge; certificate issuance does not
-make the Gateway or Bitwarden publicly reachable.
+The Service remains `ClusterIP`: Cloudflare terminates public HTTPS and reaches
+`bitwarden.bitwarden.svc.cluster.local:8080` through `cloudflared`, with no
+inbound home-router port forward. The existing private access route remains
+`https://bitwarden.home.547600.xyz`; AdGuard resolves it to the private Gateway
+VIP `192.168.1.220`, reachable on the LAN or through the existing Tailscale
+subnet router. cert-manager provides that private Gateway's wildcard
+certificate with a Cloudflare DNS-01 challenge.
 
 Bitwarden vault records, attachments, identity material, PostgreSQL, and local
 logical backups use retained static PVs on the critical NFS export at
@@ -29,7 +31,7 @@ Upstream references:
 - [Cilium Gateway API](https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/gateway-api/)
 - [Bitwarden LastPass import](https://bitwarden.com/help/import-from-lastpass/)
 
-## 1. Prepare private HTTPS
+## 1. Prepare HTTPS and public access
 
 No new Tailscale tag, OAuth client, or operator is needed. The existing
 `tailscale-router` continues to advertise `192.168.1.0/24`; existing tailnet
@@ -71,6 +73,19 @@ cert-manager issues `*.home.547600.xyz` into the
 `argocd/private-home-wildcard-tls` Secret. The shared Gateway terminates HTTPS
 on port 443. The existing AdGuard wildcard already maps the hostname to
 `192.168.1.220`, so no public A or CNAME record is required.
+
+After the manifests have reconciled, open the existing tunnel in Cloudflare
+Zero Trust and add this public hostname:
+
+| Public hostname | Service URL |
+|---|---|
+| `bitwarden.547600.xyz` | `http://bitwarden.bitwarden.svc.cluster.local:8080` |
+
+Let the tunnel create the proxied DNS record. Do not enable Cloudflare Access:
+native Bitwarden clients cannot complete its browser redirect. Require MFA on
+each Bitwarden account, keep public registration disabled, and do not create a
+router port forward. Cloudflare WAF or rate limiting may be applied only if it
+does not challenge or block Bitwarden API and notification traffic.
 
 ## 2. Prepare critical NFS
 
@@ -233,11 +248,18 @@ Both table names must be returned. An empty result means the schema migration
 did not complete; inspect the Admin log instead of creating tables manually.
 
 The `ClusterIssuer` and `Certificate` must report `Ready=True`, and the Gateway
-must report an accepted HTTPS listener. From the LAN and then from a tailnet
-device away from home:
+must report an accepted HTTPS listener. Test the private route from the LAN
+and then from a tailnet device away from home:
 
 ```bash
 curl --fail --show-error https://bitwarden.home.547600.xyz/alive
+```
+
+After creating the Cloudflare hostname, test the canonical endpoint from a
+device that is not on the LAN or tailnet:
+
+```bash
+curl --fail --show-error https://bitwarden.547600.xyz/alive
 ```
 
 Also verify the exposure model:
@@ -247,32 +269,32 @@ kubectl -n bitwarden get service bitwarden
 rg -n "bitwarden" kubernetes/system/cloudflared
 ```
 
-The Service must remain `ClusterIP`, and the search must find no Cloudflare
-Tunnel rule. The only application route should be the `HTTPRoute` attached to
-the shared private Gateway.
+The Service must remain `ClusterIP`, and the search must find only the scoped
+Cloudflared-to-Bitwarden TCP/8080 policy. The private `HTTPRoute` remains
+attached to the shared Gateway; no public LoadBalancer or NodePort is needed.
 
-Open the web vault, create the intended account, and record the master password
-in a safe offline recovery location. Once all intended accounts exist, change
-`globalSettings__disableUserRegistration` to `"true"` in
-`kubernetes/system/bitwarden/config.yaml`, commit, and let ArgoCD reconcile.
+Before adding the public Cloudflare hostname, create any intended accounts
+through the private route and record the master password in a safe offline
+recovery location. The checked-in configuration keeps
+`globalSettings__disableUserRegistration` set to `"true"`; temporarily opening
+registration requires a deliberate private-only maintenance change.
 
 Configure each browser, desktop, mobile, or CLI client to use the self-hosted
 server URL before signing in:
 
 ```text
-https://bitwarden.home.547600.xyz
+https://bitwarden.547600.xyz
 ```
 
-Away from the home LAN, those clients must be connected to Tailscale when
-syncing. Cached vault data remains usable offline according to normal Bitwarden
-client behavior.
+The public endpoint permits syncing without Tailscale. The private hostname
+remains available as a separate LAN/tailnet access path.
 
 ## 5. Import LastPass data
 
 Prefer direct import because it avoids creating a plaintext CSV:
 
-1. Connect the device to Tailscale and configure the Bitwarden browser
-   extension or desktop app for the self-hosted URL above.
+1. Configure the Bitwarden browser extension or desktop app for the self-hosted
+   public URL above.
 2. Sign in to the new Bitwarden account.
 3. In the extension, open **Settings → Vault → Import items**. In the desktop
    app, open **Import**.
@@ -308,7 +330,8 @@ Before retiring LastPass:
 1. Compare item and folder counts.
 2. Test a varied sample of logins, secure notes, cards, identities, TOTP codes,
    and every manually copied attachment.
-3. Confirm sync from at least two Bitwarden clients over Tailscale.
+3. Confirm sync from one client outside the tailnet through the public hostname
+   and from a second client through the private LAN/tailnet path.
 4. Run and verify a Bitwarden backup.
 5. Delete any plaintext CSV securely, empty temporary downloads, and only then
    disable or delete the LastPass account according to its retention policy.

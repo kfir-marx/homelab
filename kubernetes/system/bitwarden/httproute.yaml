@@ -1,6 +1,6 @@
-# HTTPS is terminated on the shared private Cilium Gateway. The Gateway VIP is
-# available on the LAN and through the existing Tailscale subnet router, but it
-# has no public route or Cloudflare Tunnel rule.
+# This route remains a private access path on the shared Cilium Gateway. Public
+# access reaches the same Service directly through the outbound Cloudflare
+# Tunnel and does not traverse this Gateway.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

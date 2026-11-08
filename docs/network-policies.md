@@ -26,10 +26,10 @@ apply step is required.
 | Namespace/workload | Ingress | Egress |
 |---|---|---|
 | `adguard-home` | Gateway to TCP/3000; external/LAN, Tailscale router, and forwarding nodes to TCP/UDP 53 through the private DNS VIP | Cluster DNS; named public fallback resolvers on 53; public-only TCP 80/443 for DoH and filter lists |
-| `bitwarden/server` | Gateway to TCP/8080 | PostgreSQL TCP/5432; cluster DNS; public-only TCP 80/443 for website icons; `smtp.gmail.com` TCP/587 |
+| `bitwarden/server` | Gateway and Cloudflared to TCP/8080 | PostgreSQL TCP/5432; cluster DNS; public-only TCP 80/443 for website icons; `smtp.gmail.com` TCP/587 |
 | `bitwarden/backup` | None | PostgreSQL TCP/5432 and cluster DNS |
 | `bitwarden/postgres` | Server and backup to TCP/5432 | None |
-| `cloudflared` | None | Cluster DNS; Cloudflare tunnel domains on TCP/UDP 7844; Jellyfin on TCP/8096, Seerr on TCP/5055, Immich on TCP/2283, and `tapy-frontend.tapy` on TCP/3000 |
+| `cloudflared` | None | Cluster DNS; Cloudflare tunnel domains on TCP/UDP 7844; Bitwarden on TCP/8080, Jellyfin on TCP/8096, Seerr on TCP/5055, Immich on TCP/2283, and `tapy-frontend.tapy` on TCP/3000 |
 | `immich/server` | Gateway and Cloudflared to TCP/2283 | PostgreSQL 5432, Valkey 6379, ML 3003, cluster DNS, and public-only HTTPS |
 | `immich/machine-learning` | Server to TCP/3003 | Cluster DNS and public-only HTTPS for model downloads |
 | `immich/postgres` | Server to TCP/5432 | None |
@@ -118,6 +118,7 @@ curl --fail https://adguard.home.547600.xyz
 
 kubectl -n bitwarden rollout status deployment/bitwarden
 curl --fail https://bitwarden.home.547600.xyz/alive
+curl --fail https://bitwarden.547600.xyz/alive
 kubectl -n bitwarden create job --from=cronjob/bitwarden-backup network-policy-test
 
 kubectl -n immich rollout status deployment/immich-server

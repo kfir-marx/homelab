@@ -14,11 +14,11 @@ infrastructure.
 ## Architecture
 
 ```text
-Family and friends
+External clients and approved users
         |
-        | HTTPS: jellyfin / seerr / immich / tapy public hostnames
+        | HTTPS: bitwarden / jellyfin / seerr / immich / tapy public hostnames
         v
-Cloudflare edge --- outbound Cloudflare Tunnel ---> Jellyfin / Immich services
+Cloudflare edge --- outbound Cloudflare Tunnel ---> explicitly public services
 
 Administrator devices
         |
@@ -50,6 +50,7 @@ Cloudflare. No inbound port forwarding or public home IP is required.
 
 | Service | Public hostname | Internal target | Authentication |
 |---------|-----------------|-----------------|----------------|
+| Bitwarden | `bitwarden.547600.xyz` | `bitwarden.bitwarden.svc:8080` | Bitwarden account; registration disabled |
 | Jellyfin | `jellyfin.547600.xyz` | `jellyfin.media.svc:8096` | Jellyfin account |
 | Seerr | `seerr.547600.xyz` | `seerr.media.svc:5055` | Individual Jellyfin account and Seerr permissions |
 | Immich | `immich.547600.xyz` | `immich-server.immich.svc:2283` | Immich account |
@@ -58,7 +59,9 @@ Cloudflare. No inbound port forwarding or public home IP is required.
 Add only applications intended for external users to the tunnel. Do not put
 ArgoCD, Proxmox, the Kubernetes API, or other administrative endpoints on it.
 Cloudflare Access is not placed in front of Jellyfin because browser redirects
-are incompatible with many native TV and mobile clients.
+are incompatible with many native TV and mobile clients. It is also not placed
+in front of Bitwarden because native browser, desktop, mobile, and CLI clients
+must reach the Bitwarden APIs directly; enforce MFA in Bitwarden instead.
 
 ## Official Tailscale: private administration
 
@@ -99,12 +102,15 @@ application traffic remains WireGuard encrypted between peers.
 - The Telegram assistant exposes no listener. Its gateway can reach only
   Telegram and the authenticated, ClusterIP-only model endpoint, and it has no
   Kubernetes token or execution tools.
-- The cloudflared network policy permits only the documented Jellyfin, Seerr,
-  Immich, and Tapy origins plus Cloudflare tunnel endpoints. Adding a dashboard origin
-  also requires a matching declarative policy change or it fails closed.
-- Bitwarden has no Cloudflare rule, public DNS address, LoadBalancer, NodePort,
-  or Funnel. All private web applications use the shared Cilium Gateway with
-  HTTPS terminated by its cert-manager-managed wildcard certificate.
+- The cloudflared network policy permits only the documented Bitwarden,
+  Jellyfin, Seerr, Immich, and Tapy origins plus Cloudflare tunnel endpoints.
+  Adding a dashboard origin also requires a matching declarative policy change
+  or it fails closed.
+- Bitwarden's only public path is its exact Cloudflare Tunnel hostname. Its
+  Service remains ClusterIP-only, registration is disabled, and it has no
+  LoadBalancer, NodePort, public home-IP port forward, or Funnel. The private
+  hostname remains available through the shared Cilium Gateway as a separate
+  private access path.
 - Tailscale device enrollment, tags, route approval, and grants are managed in
   the official admin console.
 - `tag:router` owns the subnet-router identity; it should receive only the
@@ -143,8 +149,8 @@ See [Tailscale subnet-router runbook](tailscale-runbook.md) for tailnet policy,
 auth Secret creation, route approval, client enrollment, and troubleshooting.
 See [AdGuard Home runbook](adguard-home-runbook.md) for storage preparation,
 initial setup, split DNS, ad blocking, and resilience.
-See [Bitwarden runbook](bitwarden-runbook.md) for private Gateway TLS, critical
-storage, LastPass migration, and backup handling.
+See [Bitwarden runbook](bitwarden-runbook.md) for Cloudflare Tunnel and private
+Gateway access, critical storage, LastPass migration, and backup handling.
 See [Jellyfin media stack runbook](media-stack-runbook.md) for restore,
 credential rotation, GPU verification, backups, and cleanup policy.
 

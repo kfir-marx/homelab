@@ -4,7 +4,8 @@ metadata:
   name: bitwarden
   namespace: bitwarden
 spec:
-  # The private Cilium Gateway is the only external entry point.
+  # Both the private Gateway and Cloudflare Tunnel reach this ClusterIP-only
+  # Service; no node port or public load balancer is required.
   type: ClusterIP
   selector:
     app: bitwarden

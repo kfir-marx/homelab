@@ -1,6 +1,7 @@
 # Official Bitwarden Lite is the single-container, homelab-oriented Bitwarden
 # distribution. Local manifests provide PostgreSQL, retained critical-NFS
-# volumes, backups, and HTTPS through the shared private Cilium Gateway.
+# volumes, backups, private HTTPS through the shared Cilium Gateway, and a
+# policy-bounded origin for the existing Cloudflare Tunnel.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
