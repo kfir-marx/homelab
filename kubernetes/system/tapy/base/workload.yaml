@@ -41,7 +41,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: migrate
-          image: ghcr.io/kfir-marx/tapy:sha-7f44405e1bb0eb44c04c63bdd5054e8784a4a1b4
+          image: ghcr.io/kfir-marx/tapy:sha-def2a632947fb368247d2e14bb1d6c941e571a3c
           args: [migrate]
           imagePullPolicy: IfNotPresent
           env:
@@ -57,7 +57,7 @@ spec:
             limits: {cpu: "1", memory: 512Mi}
       containers:
         - name: api
-          image: ghcr.io/kfir-marx/tapy:sha-7f44405e1bb0eb44c04c63bdd5054e8784a4a1b4
+          image: ghcr.io/kfir-marx/tapy:sha-def2a632947fb368247d2e14bb1d6c941e571a3c
           imagePullPolicy: IfNotPresent
           env:
             - name: MATCHER_DATABASE_URL
@@ -216,7 +216,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: migrate
-          image: ghcr.io/kfir-marx/tapy:sha-7f44405e1bb0eb44c04c63bdd5054e8784a4a1b4
+          image: ghcr.io/kfir-marx/tapy:sha-def2a632947fb368247d2e14bb1d6c941e571a3c
           args: [migrate]
           imagePullPolicy: IfNotPresent
           env:
@@ -232,7 +232,7 @@ spec:
             limits: {cpu: "1", memory: 512Mi}
       containers:
         - name: worker
-          image: ghcr.io/kfir-marx/tapy:sha-7f44405e1bb0eb44c04c63bdd5054e8784a4a1b4
+          image: ghcr.io/kfir-marx/tapy:sha-def2a632947fb368247d2e14bb1d6c941e571a3c
           args: [worker]
           imagePullPolicy: IfNotPresent
           env:
