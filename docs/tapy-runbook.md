@@ -323,6 +323,8 @@ scopes. Login and mailbox grants remain separate operations.
   as a recovery path and immediately applies confirmed action responses locally.
 - `GET /v1/notifications` lists the current user's notifications and
   `POST /v1/notifications/read` marks the current set read.
+  The frontend bell also groups recent background jobs there, including mailbox-scan
+  and incoming-email progress; background activity is not rendered on the main page.
 - `POST /v1/mailboxes/gmail/authorization` returns a Google consent URL.
 - `POST /v1/mailboxes/outlook/authorization` returns a Microsoft consent URL.
 - `GET /v1/oauth/{provider}/callback` consumes the one-time OAuth state and

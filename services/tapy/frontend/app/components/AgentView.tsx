@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useDemo } from "../lib/store";
 import type { Opportunity } from "../lib/types";
-import JobPanel from "./JobPanel";
 
 export default function AgentView() {
   const { opportunities, loading, error, setView, refresh } = useDemo();
@@ -14,7 +13,6 @@ export default function AgentView() {
       <button className="mt-3 text-sm text-indigo-600" onClick={() => setView("settings")}>Manage email and scans</button>
     </header>
     {error && <p role="alert">{error} <button onClick={() => void refresh()}>Retry refresh</button></p>}
-    <JobPanel />
     {loading ? <p role="status">Loading opportunities…</p> : <div className="mt-6 grid gap-4 lg:grid-cols-2">
       {open.map((item) => <OpportunityCard key={item.id} opportunity={item} />)}
       {!open.length && <p className="rounded-xl border border-dashed p-8 text-slate-500">No actionable opportunities. Connect your inbox and run a scan to check for flights without accommodation.</p>}

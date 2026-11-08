@@ -84,6 +84,19 @@ header {
   }
 }
 
+@keyframes activity-progress {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(260%);
+  }
+}
+
+.activity-progress {
+  animation: activity-progress 1.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

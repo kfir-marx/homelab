@@ -176,4 +176,6 @@ export type Job = {
   progress: Record<string, number>;
   result: { deliveries?: Array<{ destination_snapshot: string; status: string; error_message: string | null }> };
   error: string | null;
+  created_at?: string;
+  updated_at?: string;
 };

@@ -32,6 +32,7 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         self.page = await self.browser.new_page()
         self.user = copy.deepcopy(USER)
         self.card = copy.deepcopy(CARD)
+        self.jobs = []
         self.hold_refresh = False
         self.fail_action = False
         self.release = asyncio.Event()
@@ -64,7 +65,7 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
                 return await route.fulfill(status=204)
         values = {"/v1/users/me": self.user, "/v1/bookings": [], "/v1/opportunities": [self.card],
                   "/v1/organizations/current/team": {"members": [], "invitations": []},
-                  "/v1/metrics": METRICS, "/v1/notifications": [], "/v1/jobs": []}
+                  "/v1/metrics": METRICS, "/v1/notifications": [], "/v1/jobs": self.jobs}
         if path == "/v1/events":
             return await route.fulfill(content_type="text/event-stream", body=": keepalive\n\n")
         await route.fulfill(json=values.get(path, {}))
@@ -99,8 +100,28 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         self.hold_refresh = True
         await self.page.get_by_role("button", name="Send accommodation link", exact=True).click()
         await expect(self.page.get_by_role("article")).to_have_count(0, timeout=2000)
-        await expect(self.page.get_by_role("region", name="Background activity")).to_contain_text("queued")
+        await self.page.get_by_role("button", name="Open notifications").click()
+        await expect(self.page.get_by_role("region", name="Background activity")).to_contain_text("Queued")
         self.assertEqual(self.post_count, 1)
+
+    async def test_mailbox_activity_lives_in_notifications_with_progress(self):
+        self.jobs = [
+            {"id": "scan1", "kind": "scan", "status": "running", "attempts": 1,
+             "progress": {"messages_seen": 12, "messages_analyzed": 8, "messages_skipped": 3},
+             "result": {}, "error": None, "created_at": "2026-11-08T08:00:00Z"},
+            {"id": "email1", "kind": "incoming_email", "status": "completed", "attempts": 1,
+             "progress": {"messages_seen": 1, "messages_analyzed": 1, "messages_skipped": 0},
+             "result": {}, "error": None, "created_at": "2026-11-08T07:59:00Z"},
+        ]
+        await self.page.get_by_role("button", name="My data", exact=True).click()
+
+        await expect(self.page.get_by_role("region", name="Background activity")).to_have_count(0)
+        await self.page.get_by_role("button", name="Open notifications").click()
+        activity = self.page.get_by_role("region", name="Background activity")
+        await expect(activity).to_contain_text("Mailbox scan")
+        await expect(activity).to_contain_text("Incoming email")
+        await expect(activity.get_by_role("progressbar")).to_have_count(2)
+        await expect(activity).to_contain_text("12 seen · 8 analyzed · 3 already processed")
 
     async def test_logout_cannot_be_undone_by_an_older_refresh(self):
         self.hold_refresh = True

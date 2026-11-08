@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import JobPanel from "./JobPanel";
 import { useDemo } from "../lib/store";
 
 export function UserInfoPage() {
@@ -23,7 +22,7 @@ export function UserInfoPage() {
 }
 
 export function UserSettingsPage() {
-  const { user, updateProfile, connectMailbox, disconnectMailbox, scanMailbox, setView, pushToast } = useDemo();
+  const { user, updateProfile, connectMailbox, disconnectMailbox, scanMailbox, pushToast } = useDemo();
   const [name, setName] = useState(user?.name ?? "");
   const [working, setWorking] = useState("");
   useEffect(() => setName(user?.name ?? ""), [user?.name]);
@@ -47,9 +46,8 @@ export function UserSettingsPage() {
       pushToast({
         tone: "success",
         title: `${title} scan queued`,
-        body: "Progress will appear in background activity.",
+        body: "Track its progress from Notifications.",
       });
-      setView("personal");
     } catch (reason) {
       pushToast({
         tone: "error",
@@ -63,7 +61,6 @@ export function UserSettingsPage() {
 
   return (
     <Page title="Settings" subtitle="Manage your profile and delegated email permissions.">
-      <JobPanel />
       <section className="rounded-2xl border border-slate-200 p-5">
         <h2 className="font-semibold text-slate-900">Profile</h2>
         <label className="mt-4 block text-sm font-medium text-slate-700">Display name
