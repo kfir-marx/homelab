@@ -53,6 +53,8 @@ class WebhookService:
             headers={"Authorization": f"Bearer {access_token}"},
             json={
                 "topicName": self._settings.gmail_pubsub_topic,
+                "labelIds": ["INBOX"],
+                "labelFilterBehavior": "INCLUDE",
             },
         )
         response.raise_for_status()
@@ -62,7 +64,10 @@ class WebhookService:
             current = session.get(MailboxConnection, mailbox.id)
             if current:
                 current.webhook_subscription_id = mailbox.email_address
-                current.webhook_cursor = str(body.get("historyId", "")) or None
+                # Renewing a watch returns the mailbox's current cursor. Preserve the
+                # last consumed cursor so notifications already queued cannot be skipped.
+                if not current.webhook_cursor:
+                    current.webhook_cursor = str(body.get("historyId", "")) or None
                 current.webhook_expires_at = datetime.fromtimestamp(expires_ms / 1000, UTC)
         return True
 

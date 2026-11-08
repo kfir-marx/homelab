@@ -103,3 +103,50 @@ async def test_gmail_paginates_instead_of_repeating_newest_page() -> None:
         messages = await GmailReader(client, "").messages("inert", 200)
     assert [m.message_id for m in messages] == ["first", "second"]
     assert listing.calls[1].request.url.params["pageToken"] == "page2"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_gmail_history_returns_unique_added_inbox_message_ids() -> None:
+    listing = respx.get("https://gmail.googleapis.com/gmail/v1/users/me/history").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "history": [
+                        {
+                            "id": "101",
+                            "messagesAdded": [
+                                {"message": {"id": "gmail-1", "threadId": "thread-1"}}
+                            ],
+                        }
+                    ],
+                    "nextPageToken": "page2",
+                    "historyId": "101",
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "history": [
+                        {
+                            "id": "102",
+                            "messagesAdded": [
+                                {"message": {"id": "gmail-1"}},
+                                {"message": {"id": "gmail-2"}},
+                            ],
+                        }
+                    ],
+                    "historyId": "103",
+                },
+            ),
+        ]
+    )
+    async with httpx.AsyncClient() as client:
+        message_ids, history_id = await GmailReader(client, "").history("access", "100")
+    assert message_ids == ["gmail-1", "gmail-2"]
+    assert history_id == "103"
+    assert listing.calls[0].request.url.params["startHistoryId"] == "100"
+    assert listing.calls[0].request.url.params["historyTypes"] == "messageAdded"
+    assert listing.calls[0].request.url.params["labelId"] == "INBOX"
+    assert listing.calls[1].request.url.params["pageToken"] == "page2"

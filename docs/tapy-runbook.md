@@ -196,8 +196,11 @@ to the organization captured at connection; webhook routing follows that binding
 continue ingestion. Gmail/Outlook readers paginate (100 messages per page) through the
 configured scan scope, defaulting to at most 10,000 messages. Reaching a page cap is a
 visible failure, not a false completed scan. Gmail's default `newer_than:3m` query limits
-scans to messages from the previous three months. Full rescans for webhooks remain a cost
-bottleneck on large mailboxes; provider history/delta cursors are a future optimization.
+scans to messages from the previous three months. Gmail Pub/Sub notifications queue a
+small history-discovery job, which uses the persisted Gmail `historyId` to create one
+idempotent `incoming_email` job per newly added inbox message. Each incoming-email job
+fetches and analyzes only its message ID. An expired Gmail cursor performs a bounded
+ID-only inbox recovery and still processes every candidate in a separate job.
 
 Backend and frontend have separate deployments, images and CPU HPAs (1–3 replicas,
 70% utilization; requires metrics-server). Argo CD respects ignored replica fields
@@ -208,7 +211,7 @@ installation is not assumed. PostgreSQL and tenant reconciliation locks remain s
 capacity constraints. Browser polling reconciles cross-process changes; local SSE is
 an optional latency optimization, not the correctness mechanism.
 
-Gmail watches include all mailbox changes, consistent with scans, per the
+Gmail watches include inbox changes only, per the
 [watch API](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/watch).
 Outlook renewal uses [PATCH subscription](https://learn.microsoft.com/en-us/graph/api/subscription-update?view=graph-rest-1.0),
 recreating only when the subscription no longer exists. Queue delivery follows
@@ -259,7 +262,8 @@ scopes. Login and mailbox grants remain separate operations.
   including after upgrading from the previous schema. A connected mailbox's
   **Scan now** control in Settings exposes this bounded scan for users and
   provider reviewers.
-- `POST /v1/webhooks/gmail` accepts Google Pub/Sub pushes and
+- `POST /v1/webhooks/gmail` accepts Google Pub/Sub pushes, queues Gmail history
+  discovery, and creates one `incoming_email` analysis job per added inbox message;
   `POST /v1/webhooks/outlook` accepts Microsoft Graph notifications.
 
 OAuth state is random, one-time, database-backed, purpose-bound, and expires

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
@@ -11,13 +12,14 @@ import httpx
 import pytest
 import respx
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import select
 from test_api import FakeExtractor, register, settings
 from test_reconciliation import Evidence, flight
 from test_reconciliation import evidence as evidence
 
 from tapy.api import create_app
-from tapy.database import BackgroundJob, MailboxConnection, MessageDelivery
+from tapy.database import BackgroundJob, MailboxConnection, MessageDelivery, ProcessedMessage
 from tapy.jobs import JobQueue
 from tapy.models import EmailExtraction, EmailForAnalysis, HotelBooking
 from tapy.reconciliation import record_email
@@ -26,7 +28,11 @@ from tapy.reconciliation import record_email
 @pytest.fixture
 def app_client(tmp_path: Path) -> Iterator[tuple[Any, TestClient]]:
     configured = settings(tmp_path, twilio=True).model_copy(
-        update={"hotel_offer_url": "https://partner.example/offer?affiliate=tapy"}
+        update={
+            "hotel_offer_url": "https://partner.example/offer?affiliate=tapy",
+            "webhook_verification_token": SecretStr("webhook-test"),
+            "gmail_pubsub_topic": "projects/test/topics/gmail",
+        }
     )
     app = create_app(configured, extractor=FakeExtractor())
     with TestClient(app) as client:
@@ -89,6 +95,106 @@ def test_scan_enqueue_progress_replay_and_tenant_scope(app_client: tuple[Any, Te
     client.cookies.clear()
     register(client, "Other", "other@example.com")
     assert client.get(f"/v1/jobs/{completed['id']}").status_code == 404
+
+
+def test_gmail_webhook_creates_one_job_per_incoming_message(
+    app_client: tuple[Any, TestClient],
+) -> None:
+    app, client = app_client
+
+    class Reader:
+        def __init__(self) -> None:
+            self.history_calls: list[str] = []
+            self.message_calls: list[str] = []
+
+        async def history(self, token: str, start_history_id: str) -> tuple[list[str], str]:
+            del token
+            self.history_calls.append(start_history_id)
+            return ["incoming-1", "incoming-1"], "102"
+
+        async def message(self, token: str, message_id: str) -> EmailForAnalysis:
+            del token
+            self.message_calls.append(message_id)
+            return EmailForAnalysis(message_id=message_id, body_text="booking confirmation")
+
+    reader = Reader()
+    app.state.mailbox_readers["gmail"] = reader
+    app.state.oauth.access_token = AsyncMock(return_value="access")
+    with app.state.factory.begin() as session:
+        mailbox = session.scalar(select(MailboxConnection))
+        assert mailbox
+        mailbox.webhook_cursor = "100"
+        email_address = mailbox.email_address
+
+    data = base64.urlsafe_b64encode(
+        json.dumps({"emailAddress": email_address, "historyId": "102"}).encode()
+    ).decode().rstrip("=")
+    response = client.post(
+        "/v1/webhooks/gmail?token=webhook-test", json={"message": {"data": data}}
+    )
+    assert response.status_code == 202
+    replay = client.post(
+        "/v1/webhooks/gmail?token=webhook-test", json={"message": {"data": data}}
+    )
+    assert replay.status_code == 202
+
+    with app.state.factory() as session:
+        history_jobs = session.scalars(
+            select(BackgroundJob).where(BackgroundJob.kind == "gmail_history")
+        ).all()
+        assert len(history_jobs) == 1
+        assert not session.scalars(
+            select(BackgroundJob).where(BackgroundJob.kind == "scan")
+        ).all()
+    execute(app, client, history_jobs[0].id)
+    assert reader.history_calls == ["100"]
+
+    with app.state.factory() as session:
+        incoming_jobs = session.scalars(
+            select(BackgroundJob).where(BackgroundJob.kind == "incoming_email")
+        ).all()
+        assert len(incoming_jobs) == 1
+        mailbox = session.scalar(select(MailboxConnection))
+        assert mailbox and mailbox.webhook_cursor == "102"
+    execute(app, client, incoming_jobs[0].id)
+    assert reader.message_calls == ["incoming-1"]
+    completed = client.get(f"/v1/jobs/{incoming_jobs[0].id}").json()
+    assert completed["status"] == "completed"
+    assert completed["result"]["messages_seen"] == 1
+    assert completed["result"]["messages_analyzed"] == 1
+    with app.state.factory() as session:
+        assert session.scalar(
+            select(ProcessedMessage).where(
+                ProcessedMessage.provider_message_id == "incoming-1"
+            )
+        )
+
+
+@respx.mock
+def test_gmail_watch_filters_inbox_and_preserves_consumed_cursor(
+    app_client: tuple[Any, TestClient],
+) -> None:
+    app, client = app_client
+    route = respx.post("https://gmail.googleapis.com/gmail/v1/users/me/watch").mock(
+        return_value=httpx.Response(
+            200, json={"historyId": "999", "expiration": "2000000000000"}
+        )
+    )
+    app.state.oauth.access_token = AsyncMock(return_value="access")
+    with app.state.factory.begin() as session:
+        mailbox = session.scalar(select(MailboxConnection))
+        assert mailbox
+        mailbox.webhook_cursor = "100"
+    assert client.portal
+    assert client.portal.call(app.state.webhooks.ensure, mailbox)
+    assert json.loads(route.calls[0].request.content) == {
+        "topicName": "projects/test/topics/gmail",
+        "labelIds": ["INBOX"],
+        "labelFilterBehavior": "INCLUDE",
+    }
+    with app.state.factory() as session:
+        current = session.get(MailboxConnection, mailbox.id)
+        assert current and current.webhook_cursor == "100"
 
 
 @respx.mock

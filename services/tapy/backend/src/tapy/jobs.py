@@ -16,6 +16,7 @@ from aio_pika.abc import (
     AbstractRobustConnection,
 )
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
@@ -75,33 +76,54 @@ class JobQueue:
     def enqueue(
         self, *, user_id: str, organization_id: str, kind: str, payload: dict[str, object], key: str
     ) -> JobView:
-        with self.factory.begin() as session:
-            from .database import Organization
+        try:
+            with self.factory.begin() as session:
+                from .database import Organization
 
-            session.scalar(
-                select(Organization).where(Organization.id == organization_id).with_for_update()
-            )
-            job = session.scalar(
-                select(BackgroundJob).where(
-                    BackgroundJob.user_id == user_id,
-                    BackgroundJob.organization_id == organization_id,
-                    BackgroundJob.idempotency_key == key,
+                session.scalar(
+                    select(Organization)
+                    .where(Organization.id == organization_id)
+                    .with_for_update()
                 )
-            )
-            if job:
-                if job.kind != kind or job.payload != payload:
-                    raise ValueError("idempotency key already used for another request")
+                job = session.scalar(
+                    select(BackgroundJob).where(
+                        BackgroundJob.user_id == user_id,
+                        BackgroundJob.organization_id == organization_id,
+                        BackgroundJob.idempotency_key == key,
+                    )
+                )
+                if job:
+                    if job.kind != kind or job.payload != payload:
+                        raise ValueError("idempotency key already used for another request")
+                    return job_view(job)
+                job = BackgroundJob(
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    kind=kind,
+                    payload=payload,
+                    idempotency_key=key,
+                )
+                session.add(job)
+                session.flush()
                 return job_view(job)
-            job = BackgroundJob(
-                user_id=user_id,
-                organization_id=organization_id,
-                kind=kind,
-                payload=payload,
-                idempotency_key=key,
-            )
-            session.add(job)
-            session.flush()
-            return job_view(job)
+        except IntegrityError:
+            # Concurrent Gmail-history jobs can discover the same message. The
+            # database uniqueness constraint decides the winner; return that job.
+            with self.factory() as session:
+                job = session.scalar(
+                    select(BackgroundJob).where(
+                        BackgroundJob.user_id == user_id,
+                        BackgroundJob.organization_id == organization_id,
+                        BackgroundJob.idempotency_key == key,
+                    )
+                )
+                if not job:
+                    raise
+                if job.kind != kind or job.payload != payload:
+                    raise ValueError(
+                        "idempotency key already used for another request"
+                    ) from None
+                return job_view(job)
 
     async def recover(self) -> None:
         while True:

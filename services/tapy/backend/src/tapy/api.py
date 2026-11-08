@@ -76,7 +76,7 @@ from .database import (
 )
 from .jobs import JobFailure, JobQueue, job_view
 from .llm import BookingExtractor
-from .mailboxes import MailboxReader, readers
+from .mailboxes import GmailHistoryExpired, GmailIncrementalReader, MailboxReader, readers
 from .migrations import upgrade_database
 from .models import (
     AgentCreated,
@@ -1503,8 +1503,8 @@ def create_app(
             if job.status != "failed" or job.kind == "send":
                 raise HTTPException(
                     409,
-                    "Only failed scan jobs can be retried; "
-                    "inspect uncertain sends with the provider",
+                    "Only failed non-send jobs can be retried; inspect uncertain sends "
+                    "with the provider",
                 )
             job.status, job.attempts, job.error = "queued", 0, None
             job.available_at = datetime.now(UTC)
@@ -1655,6 +1655,77 @@ def create_app(
                 current_mailbox = session.get(MailboxConnection, mailbox.id)
                 return {"webhook_active": bool(current_mailbox and webhook_active(current_mailbox))}
         access_token = await app.state.oauth.access_token(mailbox)
+        reader = app.state.mailbox_readers[mailbox.provider]
+        if job.kind == "gmail_history":
+            if mailbox.provider != "gmail":
+                raise ValueError("Gmail history job has a non-Gmail mailbox")
+            target_history_id = str(job.payload["history_id"])
+            start_history_id = mailbox.webhook_cursor
+            gmail_reader = cast(GmailIncrementalReader, reader)
+            recovered = not start_history_id or not start_history_id.isdigit()
+            if (
+                not recovered
+                and target_history_id.isdigit()
+                and int(target_history_id) <= int(cast(str, start_history_id))
+            ):
+                return {"messages_discovered": 0, "jobs_queued": 0, "cursor_current": True}
+            try:
+                if recovered:
+                    message_ids = await gmail_reader.message_ids(
+                        access_token, resolved.maximum_messages_per_scan
+                    )
+                    next_history_id = target_history_id
+                else:
+                    message_ids, next_history_id = await gmail_reader.history(
+                        access_token, cast(str, start_history_id)
+                    )
+            except GmailHistoryExpired:
+                # Gmail requires a full sync after an expired cursor. Only list ids
+                # here; each message is still fetched and analyzed in its own job.
+                recovered = True
+                message_ids = await gmail_reader.message_ids(
+                    access_token, resolved.maximum_messages_per_scan
+                )
+                next_history_id = target_history_id
+
+            queued_ids: set[str] = set()
+            for message_id in message_ids:
+                child = queue.enqueue(
+                    user_id=user.id,
+                    organization_id=job.organization_id,
+                    kind="incoming_email",
+                    payload={"mailbox_id": mailbox.id, "message_id": message_id},
+                    key=f"incoming-email:{mailbox.id}:{message_id}",
+                )
+                queued_ids.add(child.id)
+                with suppress(Exception):
+                    await queue.publish(child.id)
+
+            with factory.begin() as session:
+                current_mailbox = session.scalar(
+                    select(MailboxConnection)
+                    .where(MailboxConnection.id == mailbox.id)
+                    .with_for_update()
+                )
+                if not current_mailbox:
+                    raise ValueError("mailbox disconnected during Gmail history sync")
+                cursor_candidates = [next_history_id, target_history_id]
+                if current_mailbox.webhook_cursor:
+                    cursor_candidates.append(current_mailbox.webhook_cursor)
+                if all(item.isdigit() for item in cursor_candidates):
+                    current_mailbox.webhook_cursor = str(
+                        max(int(item) for item in cursor_candidates)
+                    )
+                else:
+                    current_mailbox.webhook_cursor = next_history_id
+            if queued_ids:
+                event_hub.publish(user.id)
+            return {
+                "messages_discovered": len(set(message_ids)),
+                "jobs_queued": len(queued_ids),
+                "cursor_recovered": recovered,
+            }
+
         maximum = int(
             cast(int, job.payload.get("maximum_messages") or resolved.maximum_messages_per_scan)
         )
@@ -1664,60 +1735,79 @@ def create_app(
             "messages_skipped": 0,
             "opportunities_created": 0,
         }
-        # Readers paginate; extraction is performed page by page in this RabbitMQ worker.
-        reader = app.state.mailbox_readers[mailbox.provider]
-        async for messages in reader.pages(access_token, maximum):
-            for email in messages:
-                counts["messages_seen"] += 1
-                with factory() as session:
-                    require_member(session, job.organization_id, user.id)
-                    seen = session.scalar(
+
+        async def analyze_email(email: EmailForAnalysis) -> None:
+            counts["messages_seen"] += 1
+            with factory() as session:
+                require_member(session, job.organization_id, user.id)
+                seen = session.scalar(
+                    select(ProcessedMessage).where(
+                        ProcessedMessage.mailbox_id == mailbox.id,
+                        ProcessedMessage.provider_message_id == email.message_id,
+                    )
+                )
+            if (
+                seen
+                and seen.result_summary.get("schema_version") == 1
+                and not job.payload.get("reprocess")
+            ):
+                counts["messages_skipped"] += 1
+            else:
+                extracted = await configured_extractor.extract(email)
+                with factory.begin() as session:
+                    if not session.get(MailboxConnection, mailbox.id):
+                        raise ValueError("mailbox disconnected during scan")
+                    created = record_email(
+                        session,
+                        organization_id=job.organization_id,
+                        agent_id=user.id,
+                        mailbox_id=mailbox.id,
+                        provider=mailbox.provider,
+                        email=email,
+                        extraction=extracted,
+                    )
+                    processed = session.scalar(
                         select(ProcessedMessage).where(
                             ProcessedMessage.mailbox_id == mailbox.id,
                             ProcessedMessage.provider_message_id == email.message_id,
                         )
                     )
-                if (
-                    seen
-                    and seen.result_summary.get("schema_version") == 1
-                    and not job.payload.get("reprocess")
-                ):
-                    counts["messages_skipped"] += 1
-                else:
-                    extracted = await configured_extractor.extract(email)
-                    with factory.begin() as session:
-                        if not session.get(MailboxConnection, mailbox.id):
-                            raise ValueError("mailbox disconnected during scan")
-                        created = record_email(
-                            session,
-                            organization_id=job.organization_id,
-                            agent_id=user.id,
+                    if not processed:
+                        processed = ProcessedMessage(
                             mailbox_id=mailbox.id,
-                            provider=mailbox.provider,
-                            email=email,
-                            extraction=extracted,
+                            organization_id=job.organization_id,
+                            provider_message_id=email.message_id,
+                            outcome="analyzed",
                         )
-                        processed = session.scalar(
-                            select(ProcessedMessage).where(
-                                ProcessedMessage.mailbox_id == mailbox.id,
-                                ProcessedMessage.provider_message_id == email.message_id,
-                            )
-                        )
-                        if not processed:
-                            processed = ProcessedMessage(
-                                mailbox_id=mailbox.id,
-                                organization_id=job.organization_id,
-                                provider_message_id=email.message_id,
-                                outcome="analyzed",
-                            )
-                            session.add(processed)
-                        processed.result_summary = {"opportunity_ids": created, "schema_version": 1}
-                    counts["messages_analyzed"] += 1
-                    counts["opportunities_created"] += len(created)
+                        session.add(processed)
+                    processed.result_summary = {"opportunity_ids": created, "schema_version": 1}
+                counts["messages_analyzed"] += 1
+                counts["opportunities_created"] += len(created)
+            with factory.begin() as session:
+                current_job = session.get(BackgroundJob, job.id)
+                assert current_job
+                current_job.progress = dict(counts)
+
+        if job.kind == "incoming_email":
+            if mailbox.provider != "gmail":
+                raise ValueError("Incoming Gmail job has a non-Gmail mailbox")
+            email = await cast(GmailIncrementalReader, reader).message(
+                access_token, str(job.payload["message_id"])
+            )
+            if email:
+                await analyze_email(email)
+            else:
+                counts["messages_seen"] = 1
+                counts["messages_skipped"] = 1
                 with factory.begin() as session:
-                    current = session.get(BackgroundJob, job.id)
-                    assert current
-                    current.progress = dict(counts)
+                    current_job = session.get(BackgroundJob, job.id)
+                    assert current_job
+                    current_job.progress = dict(counts)
+        else:
+            # Manual scans paginate; extraction is performed page by page in this worker.
+            async for messages in reader.pages(access_token, maximum):
+                for email in messages:
+                    await analyze_email(email)
         with factory.begin() as session:
             lock_organization(session, job.organization_id)
             require_member(session, job.organization_id, user.id)
@@ -1806,6 +1896,9 @@ def create_app(
             raw = str(message["data"])
             notice = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
             email = str(notice["emailAddress"]).casefold()
+            history_id = str(notice["historyId"])
+            if not email or not history_id.isdigit():
+                raise ValueError("missing Gmail notification fields")
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise HTTPException(400, "invalid Gmail notification") from exc
         with factory() as session:
@@ -1815,8 +1908,26 @@ def create_app(
                     MailboxConnection.email_address.ilike(email),
                 )
             )
-        if mailbox:
-            await scan_from_webhook(mailbox.user_id, "gmail")
+            member = (
+                session.get(
+                    OrganizationMembership, (mailbox.organization_id, mailbox.user_id)
+                )
+                if mailbox and mailbox.organization_id
+                else None
+            )
+        if mailbox and mailbox.refresh_token and member and member.status == "active":
+            job = queue.enqueue(
+                user_id=mailbox.user_id,
+                organization_id=cast(str, mailbox.organization_id),
+                kind="gmail_history",
+                payload={"mailbox_id": mailbox.id, "history_id": history_id},
+                key=f"gmail-history:{mailbox.id}:{history_id}",
+            )
+            with suppress(Exception):
+                await queue.publish(job.id)
+            event_hub.publish(mailbox.user_id)
+        else:
+            logger.warning("gmail_webhook_mailbox_unavailable")
         return {"status": "accepted"}
 
     @app.post("/v1/webhooks/outlook")

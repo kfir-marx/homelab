@@ -170,7 +170,7 @@ export type View = "personal" | "organization" | "profile" | "settings";
 
 export type Job = {
   id: string;
-  kind: "scan" | "send" | "watch";
+  kind: "scan" | "send" | "watch" | "gmail_history" | "incoming_email";
   status: "queued" | "running" | "retrying" | "completed" | "failed";
   attempts: number;
   progress: Record<string, number>;
