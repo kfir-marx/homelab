@@ -1,16 +1,16 @@
-name: tapy portable Kubernetes
+name: homelab messaging Kubernetes
 
 on:
   pull_request:
     paths:
-      - kubernetes/system/tapy/**
       - kubernetes/system/external-ai/**
       - kubernetes/system/rabbitmq/**
-      - kubernetes/apps/tapy.yaml
       - kubernetes/apps/external-ai.yaml
       - kubernetes/apps/rabbitmq.yaml
-      - kubernetes/apps/cloud/**
-      - .github/workflows/tapy-kubernetes.yml
+      - kubernetes/apps/tapy.yaml
+      - kubernetes/system/cloudflared/**
+      - scripts/check-tapy-boundary.py
+      - .github/workflows/messaging-kubernetes.yml
 
 permissions:
   contents: read
@@ -21,18 +21,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5
+      - name: Check provider boundary
+        run: |
+          python3 -m pip install PyYAML==6.0.3
+          python3 scripts/check-tapy-boundary.py
       - name: Render every overlay
         shell: bash
         run: |
           set -euo pipefail
           overlays=(
-            kubernetes/system/tapy/overlays/homelab
-            kubernetes/system/tapy/overlays/cloud/in-cluster
-            kubernetes/system/tapy/overlays/cloud/managed
             kubernetes/system/external-ai/overlays/homelab
             kubernetes/system/external-ai/overlays/cloud/in-cluster
             kubernetes/system/external-ai/overlays/cloud/managed
             kubernetes/system/rabbitmq/overlays/homelab
+            kubernetes/system/cloudflared
             kubernetes/system/rabbitmq/overlays/cloud
           )
           for overlay in "${overlays[@]}"; do
@@ -60,8 +62,6 @@ jobs:
             -strict \
             -summary \
             "${RUNNER_TEMP}"/kubernetes-system-*.yaml \
-            kubernetes/apps/tapy.yaml \
             kubernetes/apps/external-ai.yaml \
             kubernetes/apps/rabbitmq.yaml \
-            kubernetes/apps/cloud/in-cluster \
-            kubernetes/apps/cloud/managed
+            kubernetes/apps/tapy.yaml

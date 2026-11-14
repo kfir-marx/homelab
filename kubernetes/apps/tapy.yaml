@@ -1,44 +1,45 @@
-# Public OAuth/API backend. The only public path is the remotely managed
-# Cloudflare Tunnel hostname; the origin Service remains ClusterIP-only.
+# Static source handoff only: replace the unavailable repository placeholder at
+# separately authorized cutover. Keep sync manual and pruning disabled.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: tapy
   namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   project: default
   source:
-    repoURL: https://github.com/kfir-marx/homelab.git
+    repoURL: https://github.com/REPLACE_WITH_OWNER/tapy.git
     targetRevision: main
-    path: kubernetes/system/tapy/overlays/homelab
+    path: deploy/kubernetes/overlays/homelab
   destination:
     server: https://kubernetes.default.svc
     namespace: tapy
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
     syncOptions:
-      - CreateNamespace=false
-      - ServerSideApply=true
-      - RespectIgnoreDifferences=true
-      - SkipDryRunOnMissingResource=true
+    - CreateNamespace=false
+    - ServerSideApply=true
+    - RespectIgnoreDifferences=true
+    - SkipDryRunOnMissingResource=true
   ignoreDifferences:
-    - group: ""
-      kind: Secret
-      name: tapy-secrets
-      jsonPointers: [/data]
-    - group: ""
-      kind: Secret
-      name: tapy-frontend-secrets
-      jsonPointers: [/data]
-    - group: apps
-      kind: Deployment
-      name: tapy-backend
-      jsonPointers: [/spec/replicas]
-    - group: apps
-      kind: Deployment
-      name: tapy-frontend
-      jsonPointers: [/spec/replicas]
+  - group: ''
+    kind: Secret
+    name: tapy-secrets
+    jsonPointers:
+    - /data
+  - group: ''
+    kind: Secret
+    name: tapy-frontend-secrets
+    jsonPointers:
+    - /data
+  - group: apps
+    kind: Deployment
+    name: tapy-backend
+    jsonPointers:
+    - /spec/replicas
+  - group: apps
+    kind: Deployment
+    name: tapy-frontend
+    jsonPointers:
+    - /spec/replicas

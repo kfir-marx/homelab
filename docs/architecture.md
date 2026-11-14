@@ -256,13 +256,14 @@ path. Both exports must be mountable from the Talos nodes.
 | `gpu2-scratch-pv` | `local-gpu-scratch` | `gpu-2:/var/mnt/gpu-scratch` | 390 Gi | **Scratch** — replaceable local-LLM weights and caches; unavailable in Windows mode |
 | `external-ai-*-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/external-ai/*` | 1–5 Gi | **Critical** — durable external job queue and retained ChatGPT-managed Codex authentication |
 | `tapy-postgres-tapy-pv` | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/tapy/postgres` | 5 Gi | **Critical** — Tapy-namespace agent identities, encrypted mailbox grants, and processed-message metadata |
+| `tapy-external-ai-*-pv` (Tapy repository) | `nfs-storage2` | `ubuntu-workstation:/mnt/storage2-bulk/tapy/external-ai/*` | 1–5 Gi | **Critical** — independent Tapy provider database and optional Codex authentication state |
 
-Tapy, external-ai, and RabbitMQ are organized as portable
-Kustomize bases with homelab and cloud overlays. Homelab-specific NFS bindings,
-Cloudflare access, and the public `547600.xyz` name exist only in homelab
-overlays. Cloud overlays use standard Ingress, configurable dynamic retained
-PVCs, or externally managed PostgreSQL/RabbitMQ URLs. See
-[`tapy-kubernetes-portability.md`](tapy-kubernetes-portability.md).
+Tapy is owned by the independent Tapy repository, including its own namespace-local
+RabbitMQ and external-ai stack. Homelab owns only its hosting-provider facilities
+and single Argo Application; see [Tapy hosting](tapy-runbook.md). Its provider overlay
+preserves `tapy-postgres-tapy-pv` and adds separate retained external-ai volumes under
+`/mnt/storage2-bulk/tapy/external-ai/`. Homelab's external-ai and RabbitMQ source,
+images, manifests, Secrets and storage remain independent for homelab consumers.
 
 Both PVs are `ReadWriteMany`, mounted with `nfsvers=4.2,hard`, and use `Retain` reclaim policy. Manifests live in [`kubernetes/system/storage/`](../kubernetes/system/storage/) (`storage1-bulk.yaml`, `storage2-bulk.yaml`). Physical mounts, exports, and `nfs-kernel-server` are owned by the Ansible `nfs_server` role, not by Kubernetes manifests. On the NTFS-backed bulk tier, Ansible also exports each PV child path explicitly with its own stable `fsid`; Talos mounts those child paths directly, and the parent NTFS export alone does not reliably serve a fresh child-path mount after an NFS restart.
 
@@ -335,7 +336,7 @@ transient cluster transport for backpressure and dispatch; applications retain
 irreproducible job state in their own database. The `internal-llm` Application
 uses it between a cluster-wide authenticated OpenAI-compatible API and two
 workers, while the GPU-backed vLLM Service is reachable only by those workers.
-Dedicated least-privilege `tapy` and `external-ai` RabbitMQ users are recreated
+The shared `external-ai` user and legacy rollback-only `tapy` user are recreated
 from encrypted Secrets after blank broker starts; any future manually
 provisioned application user remains subject to the transient-user durability
 limitation until it receives equivalent bootstrap coverage.

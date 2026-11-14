@@ -1,8 +1,8 @@
 # external-ai deployment, authentication, and recovery
 
-Portable storage/database/RabbitMQ variants and generic cloud deployment are
-documented in
-[`tapy-kubernetes-portability.md`](tapy-kubernetes-portability.md).
+This is the independent homelab service. Tapy owns a separate copy and broker in
+its standalone repository; see [Tapy hosting and rollback](tapy-runbook.md).
+Homelab cloud variants remain under this service's `overlays/cloud` paths.
 
 ## Service boundary
 

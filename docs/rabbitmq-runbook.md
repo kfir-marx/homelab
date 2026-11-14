@@ -1,8 +1,8 @@
 # Shared RabbitMQ runbook
 
-The portable base, retained cloud PVC variant, managed broker option, and
-cross-service configuration matrix are documented in
-[`tapy-kubernetes-portability.md`](tapy-kubernetes-portability.md).
+This is the independent homelab service. Tapy owns a separate copy and broker in
+its standalone repository; see [Tapy hosting and rollback](tapy-runbook.md).
+Homelab cloud variants remain under this service's `overlays/cloud` paths.
 
 ## Contract
 
@@ -34,6 +34,10 @@ claim, and production may instead omit the Application and use a managed AMQP
 endpoint from `RABBITMQ_URL`.
 
 ## Bootstrap secrets and users
+
+The Tapy identity/permissions below are legacy rollback support only. Do not
+remove them before the standalone cutover is authorized, verified and rollback
+is retired; new Tapy workloads never use this broker.
 
 Create `rabbitmq/rabbitmq-secrets` with strong generated values for `username`,
 `password`, and `erlang-cookie`, then capture it with the repository's encrypted
