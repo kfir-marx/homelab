@@ -59,14 +59,49 @@ The full workstation playbook also manages unrelated host configuration and is
 not the command for this cutover.
 
 Tapy uses its own broker (`tapy-rabbitmq`, disposable emptyDir) and provider
-(`tapy-external-ai-*`), never shared homelab services. New Secret contracts in
-`secrets/inventory.tsv` are pending operator creation/capture. Keep the existing
+(`tapy-external-ai-*`), never shared homelab services. Their Secret contracts in
+`secrets/inventory.tsv` are provisioned and captured for the initial cutover. Keep
+the existing
 `tapy-secrets` database/OAuth material and `tapy-frontend-secrets` Twilio values;
 change only the broker URL at the quiesced cutover, then recapture the snapshot.
 All new Secret names begin `tapy-` in namespace `tapy`. Do not decrypt or copy values
 into the product repository. Never fabricate a SOPS snapshot to satisfy inventory.
 Register/uncomment the optional Codex inventory entry and capture its bootstrap
 snapshot only if that provider is enabled.
+
+## Initial validation on 2026-11-14
+
+The existing Application was cut over to immutable Tapy release
+`806eee050b4500c5ff7370304b85e44f59e329db`, using the three published
+`sha-c193d3673918c8580cf05787ea43250f57bea9c4` images. Registry source labels and
+running image digests were verified. Public frontend/API routing, synthetic
+Alibaba extraction through the dedicated broker, allowed/denied network probes,
+broker permission denials, worker outbox recovery, and dedicated broker replacement
+passed. Cilium flow evidence confirmed shared-service policy denials. Synthetic
+markers survived replacement of the dedicated provider database/worker Pods and
+were removed afterward. No customer mailbox scans or notifications were used.
+
+An encrypted backup taken with application writers stopped restored successfully
+into network-isolated disposable PostgreSQL. Organization/member/mailbox ownership
+inventory, 3 users, 3 organizations, 3 mailboxes, 5 bookings, migration
+`20260910_03`, and the original database PV/PVC UIDs/binding were preserved. Only
+the existing application Secret's broker URL changed; database/OAuth material and
+Twilio credentials were retained. All required new/changed Secrets were recaptured.
+
+Traffic is restored. Keep both Tapy and parent `root` automatic synchronization
+and pruning disabled. Argo reports Healthy with a successful sync, but OutOfSync
+for twelve superseded legacy network policies intentionally retained during this
+no-prune validation. Their shared-broker allowances were updated in place; live
+denied-flow tests passed. Review cleanup separately rather than enabling pruning
+to clear the status.
+
+Mailbox scans, OAuth consent/token refresh and external notifications remain
+operator tests after deployment. CPU HPA metrics and the unavailable internal LLM
+were pre-existing cluster conditions and were not repaired by this cutover.
+Rollback remains the old homelab revision
+`13191e5bc6211855b1c8ca63b505c7b141d65cfd` and its protected pre-broker-change
+Secret snapshot. Stop all new writers first; preserve all retained data and new
+dependency state, and never restore the backup over the live database as a shortcut.
 
 ## Rollback boundary
 
