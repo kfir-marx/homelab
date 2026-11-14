@@ -1,5 +1,4 @@
-# Static source handoff only: replace the unavailable repository placeholder at
-# separately authorized cutover. Keep sync manual and pruning disabled.
+# Initial homelab cutover: reviewed immutable release, manual sync and no pruning.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -10,8 +9,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/REPLACE_WITH_OWNER/tapy.git
-    targetRevision: main
+    repoURL: git@github.com:kfir-marx/tapy.git
+    targetRevision: 806eee050b4500c5ff7370304b85e44f59e329db
     path: deploy/kubernetes/overlays/homelab
   destination:
     server: https://kubernetes.default.svc
