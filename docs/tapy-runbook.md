@@ -37,6 +37,21 @@ An authorized Ansible NFS convergence must create these new directories only:
 | `postgres` | 999:999 | 0700 |
 | `codex-home` | 10001:10001 | 0700 |
 
+Use the narrow playbook from `ansible/` during the authorized cutover:
+
+```bash
+ansible-playbook playbooks/prepare-tapy-external-ai-storage.yml --check --diff --ask-become-pass
+ansible-playbook playbooks/prepare-tapy-external-ai-storage.yml --diff --ask-become-pass
+```
+
+It checks the existing critical filesystem UUID and read/write mount, uses the
+declared directory ownership/modes, and creates only missing dedicated paths plus
+their root-owned 0755 `external-ai` parent. It refuses symlinks and unexpected
+existing ownership/modes rather than repairing them. It does not change existing
+directories, exports, mounts, packages, services or the application database path.
+The full workstation playbook also manages unrelated host configuration and is
+not the command for this cutover.
+
 Tapy uses its own broker (`tapy-rabbitmq`, disposable emptyDir) and provider
 (`tapy-external-ai-*`), never shared homelab services. New Secret contracts in
 `secrets/inventory.tsv` are pending operator creation/capture. Keep the existing

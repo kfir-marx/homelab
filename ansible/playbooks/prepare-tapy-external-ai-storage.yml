@@ -1,0 +1,105 @@
+---
+- name: Prepare only the dedicated Tapy external-ai directories
+  hosts: ubuntu_workstations
+  become: true
+  gather_facts: true
+  gather_subset:
+    - min
+  vars:
+    tapy_storage_root: /mnt/storage2-bulk/tapy/external-ai
+    tapy_storage_directories: >-
+      {{ nfs_server_directories
+         | selectattr('path', 'in', [tapy_storage_root + '/postgres',
+                                   tapy_storage_root + '/codex-home']) | list }}
+    tapy_storage_paths: >-
+      {{ [{'path': tapy_storage_root, 'owner': '0', 'group': '0', 'mode': '0755'}]
+         + tapy_storage_directories }}
+  tasks:
+    - name: Require the declared workstation and exact storage contracts
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_hostname == workstation_expected_hostname
+          - tapy_storage_directories | length == 2
+          - tapy_storage_directories[0].path == tapy_storage_root + '/postgres'
+          - tapy_storage_directories[0].owner | string == '999'
+          - tapy_storage_directories[0].group | string == '999'
+          - tapy_storage_directories[0].mode == '0700'
+          - tapy_storage_directories[1].path == tapy_storage_root + '/codex-home'
+          - tapy_storage_directories[1].owner | string == '10001'
+          - tapy_storage_directories[1].group | string == '10001'
+          - tapy_storage_directories[1].mode == '0700'
+
+    - name: Read the existing critical backing mount
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - --noheadings
+          - --raw
+          - --mountpoint
+          - /mnt/storage2-bulk
+          - --output
+          - UUID,TARGET,FSTYPE,OPTIONS
+      register: tapy_backing_mount
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse directory creation without the existing read-write filesystem
+      ansible.builtin.assert:
+        that:
+          - "'07445d19-37d4-4353-af1a-9511fb9c74e9' in tapy_backing_mount.stdout"
+          - "'/mnt/storage2-bulk ext4 ' in tapy_backing_mount.stdout"
+          - tapy_backing_mount.stdout is search('(^|[, ])rw([, ]|$)')
+
+    - name: Inspect parent paths without following symlinks
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /mnt/storage2-bulk
+        - /mnt/storage2-bulk/tapy
+      register: tapy_storage_parents
+
+    - name: Require existing real parent directories
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir | default(false)
+          - not (item.stat.islnk | default(false))
+      loop: "{{ tapy_storage_parents.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Inspect all destination paths before creating anything
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+        follow: false
+      loop: "{{ tapy_storage_paths }}"
+      register: tapy_storage_existing
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Refuse changes to existing paths with unexpected ownership or mode
+      ansible.builtin.assert:
+        that:
+          - item.stat.isdir | default(false)
+          - not (item.stat.islnk | default(false))
+          - item.stat.uid == item.item.owner | int
+          - item.stat.gid == item.item.group | int
+          - item.stat.mode == item.item.mode
+      loop: "{{ tapy_storage_existing.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      when: item.stat.exists
+
+    - name: Create only missing directories from the reviewed storage contract
+      ansible.builtin.file:
+        path: "{{ item.item.path }}"
+        state: directory
+        owner: "{{ item.item.owner }}"
+        group: "{{ item.item.group }}"
+        mode: "{{ item.item.mode }}"
+      loop: "{{ tapy_storage_existing.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      when: not item.stat.exists
