@@ -1,7 +1,7 @@
 # Hosting standalone Tapy
 
 Tapy application source, tests, packaging, provider copy and operations now live in
-`/home/kfir/repos/tapy` (remote repository creation/URL verification is pending).
+`/home/kfir/repos/tapy` and the private `kfir-marx/tapy` GitHub repository.
 The complete source path is `deploy/kubernetes/overlays/homelab`. Its
 `docs/cutover.md` is the authoritative source/broker handoff and rollback procedure;
 `docs/runbook.md`, `docs/kubernetes-portability.md`, `docs/production-gke.md` and
@@ -14,15 +14,21 @@ encrypted development Secret recovery snapshots, inventory and the single
 `kubernetes/apps/tapy.yaml` Application. Tapy owns all namespaced workloads in `tapy`,
 plus explicitly hard-bound retained `tapy-*` volumes in its homelab overlay.
 
-## Static handoff and cutover prerequisites
+## Initial manual cutover
 
-The Application uses an explicit unavailable repository placeholder, manual sync,
-and no deletion finalizer. Do not sync it until the remote exists, Argo credentials
-are installed if private, all three independent images are published/pinned, and
-the standalone cutover runbook is reviewed. Coordinate app-of-apps automation so
-it cannot roll out this source switch prematurely. The Application itself has
-Prune=false/Delete=false annotations; retained storage also has deletion guards.
-No final source switch, Argo sync or infrastructure mutation was performed.
+The Application points to the private standalone repository through a read-only
+deploy key in `argocd/tapy-repository` and a reviewed immutable release revision.
+The three product images are independently published from source commit
+`c193d3673918c8580cf05787ea43250f57bea9c4`; the homelab image-pull credential is
+`tapy/tapy-ghcr-pull`. Both credentials have protected recovery inventory entries.
+
+Keep automatic synchronization and pruning disabled during initial validation,
+including the parent `root` Application so it cannot reconcile the child during
+maintenance. Do not synchronize the entire parent to perform a Tapy cutover.
+The Tapy Application has no deletion finalizer and retains Prune=false/Delete=false
+annotations; retained storage also has deletion guards. Follow the standalone
+cutover runbook, review the live diff, and stage dependencies before starting new
+application writers. This configuration alone is not functional validation.
 
 Existing PostgreSQL identity remains `tapy-postgres-tapy-pv` hard-bound to
 `tapy/tapy-postgres`, 5 Gi, `nfs-storage2`, ReadWriteOnce, Retain, at
