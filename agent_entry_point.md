@@ -44,6 +44,7 @@ Do not silently edit code to match prose. Establish which side is stale first.
 | Windows VM or RTX 3080 sharing | `terraform/deployments/prod/windows-workstation/config.yml` | `terraform/modules/stacks/windows-workstation/`, `terraform/modules/components/proxmox-windows-vm/`, `docs/windows-vm-backup.md` for backup and recovery |
 | Physical Proxmox hosts | `ansible/README.md` and the relevant playbook | matching inventory host vars and role |
 | Ubuntu workstation or critical NFS | `docs/ubuntu-workstation-runbook.md` | `ansible/playbooks/configure-ubuntu-workstation.yml`, Ubuntu host vars, `nfs_server` role |
+| Standalone Tapy hosting | `docs/tapy-runbook.md` | provider Application, tunnel admission, NFS declarations and recovery inventory; product source lives in the Tapy repository |
 | Kubernetes application | matching file in `kubernetes/apps/` | its directory under `kubernetes/system/` and matching runbook |
 | Kubernetes network policy | `docs/network-policies.md` | matching workload manifests and Cilium bootstrap configuration |
 | Storage placement or PV changes | storage section in `docs/architecture.md` | `kubernetes/system/storage/`, app storage manifest, NFS host vars |

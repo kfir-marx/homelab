@@ -230,7 +230,7 @@ now runs on the 4-core / 8 GiB `nogpu` host. `tinygpu` runs `worker-1` at
 | [External AI runbook](docs/external-ai-runbook.md) | Durable broker, requester scopes, Codex authentication, rollout, and recovery |
 | [Internal LLM runbook](docs/local-llm-runbook.md) | Queued OpenAI-compatible API, Qwen/vLLM recovery, retained GPU cache, and health checks |
 | [Shared RabbitMQ runbook](docs/rabbitmq-runbook.md) | Cluster AMQP contract, credentials, transient-storage boundary, and operations |
-| [Tapy POC](docs/tapy-runbook.md) | Server-side Gmail/Outlook consent, RabbitMQ LLM fallback, durable agents, and deterministic flight scoring |
+| [Tapy hosting](docs/tapy-runbook.md) | Provider facilities and safe handoff to the standalone Tapy repository |
 | [GPU Operator runbook](docs/gpu-operator-runbook.md) | Talos NVIDIA prerequisites, rollout, CUDA validation, and metrics |
 | [Jellyfin media stack runbook](docs/media-stack-runbook.md) | Backup restoration, storage, GPU transcoding, credential rotation, and cleanup policy |
 | [Ubuntu workstation runbook](docs/ubuntu-workstation-runbook.md) | Critical NFS service and local NVIDIA/HDMI recovery |

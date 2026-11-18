@@ -1,8 +1,8 @@
 # Shared RabbitMQ runbook
 
-The portable base, retained cloud PVC variant, managed broker option, and
-cross-service configuration matrix are documented in
-[`tapy-kubernetes-portability.md`](tapy-kubernetes-portability.md).
+This is the independent homelab service. Tapy owns a separate copy and broker in
+its standalone repository; see [Tapy hosting and rollback](tapy-runbook.md).
+Homelab cloud variants remain under this service's `overlays/cloud` paths.
 
 ## Contract
 
@@ -35,6 +35,10 @@ endpoint from `RABBITMQ_URL`.
 
 ## Bootstrap secrets and users
 
+The Tapy identity/permissions below are legacy rollback support only. Do not
+remove them before the standalone cutover is authorized, verified and rollback
+is retired; new Tapy workloads never use this broker.
+
 Create `rabbitmq/rabbitmq-secrets` with strong generated values for `username`,
 `password`, and `erlang-cookie`, then capture it with the repository's encrypted
 secret workflow. The initial user exists to bootstrap administration. Other
@@ -42,16 +46,16 @@ services receive their own credentials in their own namespace. Tapy does not
 use the `internal-llm` identity: it uses the dedicated `tapy` user and keeps its
 URL in `tapy/tapy-secrets`.
 
-Tapy declares the configured durable request queue, publishes
+Tapy declares and consumes its durable `tapy.jobs` queue, publishes
 OpenAI-compatible RPC envelopes through the default exchange to
 `internal-llm.requests` and `external-ai.requests` and consumes replies from
 server-named exclusive callback queues. Its exact `homelab` vhost permissions
 are:
 
 ```text
-configure: ^(internal-llm\.requests|external-ai\.requests|amq\.gen-.*|amq_[0-9a-f]{32})$
+configure: ^(tapy\.jobs|internal-llm\.requests|external-ai\.requests|amq\.gen-.*|amq_[0-9a-f]{32})$
 write:     ^amq\.default$
-read:      ^(amq\.gen-.*|amq_[0-9a-f]{32})$
+read:      ^(tapy\.jobs|amq\.gen-.*|amq_[0-9a-f]{32})$
 ```
 
 RabbitMQ authorizes AMQP's nameless default exchange under the internal
@@ -61,6 +65,12 @@ The routing key is still one of the queues Tapy can configure. The pinned
 characters for its exclusive callback queue; `amq.gen-*` remains allowed for
 broker-generated callback names. Tapy has no administrator tag and cannot
 consume either request queue.
+
+The RabbitMQ Prometheus plugin and ServiceMonitor expose queue metrics to Prometheus,
+including ready and unacknowledged messages. The cluster does not install an
+external/custom metrics adapter, so these series cannot currently drive a Kubernetes
+HPA. RabbitMQ queue depth is also not a substitute for application oldest-job age; Tapy's
+authoritative runnable time is in PostgreSQL.
 
 The external-ai worker identity consumes `external-ai.requests` and publishes
 to callback queues through the same `^amq\.default$` write permission. Both
@@ -100,7 +110,7 @@ kubectl -n rabbitmq exec statefulset/rabbitmq -- rabbitmqctl list_vhosts
 kubectl -n rabbitmq exec statefulset/rabbitmq -- \
   rabbitmqctl list_permissions --vhost homelab
 kubectl -n rabbitmq exec statefulset/rabbitmq -- rabbitmqctl list_queues \
-  name messages_ready messages_unacknowledged consumers
+  name messages_ready messages_unacknowledged consumers | grep -E '^(tapy\.jobs|name)'
 ```
 
 Alert on broker scrape failure and sustained ready-message backlog. Consumer

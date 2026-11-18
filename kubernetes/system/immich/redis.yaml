@@ -54,7 +54,7 @@ spec:
         runAsGroup: 999
       containers:
         - name: redis
-          image: docker.io/valkey/valkey:9.1.1@sha256:64e361b630ecf18dff7ca4df6a88e6eafc193687eb48cff2c7e0a293ab67d29a
+          image: docker.io/valkey/valkey:9.1.3@sha256:3add1a336a920ea54770a001ab6feb3da5fceea96a40373a3a2cd469b815f0b7
           imagePullPolicy: IfNotPresent
           ports:
             - name: redis

@@ -26,10 +26,10 @@ apply step is required.
 | Namespace/workload | Ingress | Egress |
 |---|---|---|
 | `adguard-home` | Gateway to TCP/3000; external/LAN, Tailscale router, and forwarding nodes to TCP/UDP 53 through the private DNS VIP | Cluster DNS; named public fallback resolvers on 53; public-only TCP 80/443 for DoH and filter lists |
-| `bitwarden/server` | Gateway to TCP/8080 | PostgreSQL TCP/5432; cluster DNS; public-only TCP 80/443 for website icons; `smtp.gmail.com` TCP/587 |
+| `bitwarden/server` | Gateway and Cloudflared to TCP/8080 | PostgreSQL TCP/5432; cluster DNS; public-only TCP 80/443 for website icons; `smtp.gmail.com` TCP/587 |
 | `bitwarden/backup` | None | PostgreSQL TCP/5432 and cluster DNS |
 | `bitwarden/postgres` | Server and backup to TCP/5432 | None |
-| `cloudflared` | None | Cluster DNS; Cloudflare tunnel domains on TCP/UDP 7844; Jellyfin on TCP/8096, Seerr on TCP/5055, Immich on TCP/2283, and `tapy-frontend.tapy` on TCP/3000 |
+| `cloudflared` | None | Cluster DNS; Cloudflare tunnel domains on TCP/UDP 7844; Bitwarden on TCP/8080, Jellyfin on TCP/8096, Seerr on TCP/5055, Immich on TCP/2283, and `tapy-frontend.tapy` on TCP/3000 |
 | `immich/server` | Gateway and Cloudflared to TCP/2283 | PostgreSQL 5432, Valkey 6379, ML 3003, cluster DNS, and public-only HTTPS |
 | `immich/machine-learning` | Server to TCP/3003 | Cluster DNS and public-only HTTPS for model downloads |
 | `immich/postgres` | Server to TCP/5432 | None |
@@ -39,12 +39,13 @@ apply step is required.
 | `job-assistant/discovery` | None | PostgreSQL, cluster DNS, Gmail IMAP, and configured public ATS APIs |
 | `job-assistant/postgres` | Application roles and backup to TCP/5432 | None |
 | `external-ai/api` | Job generation broker and Prometheus to TCP/8080 | PostgreSQL and cluster DNS only |
-| `external-ai/worker` | None | PostgreSQL, cluster DNS, and allowlisted OpenAI/ChatGPT HTTPS only |
+| `external-ai/worker` | None | PostgreSQL, cluster DNS, and allowlisted OpenAI/ChatGPT and Alibaba Model Studio HTTPS |
 | `external-ai/postgres` | external-ai API and worker to TCP/5432 | None |
 | `homelab-assistant/internal-llm` | Namespaced cluster pods and node health probes to queued API TCP/8080; workers alone reach private vLLM TCP/8000 | RabbitMQ TCP/5672, private vLLM for workers, cluster DNS, and pinned-model Hugging Face HTTPS only |
 | `rabbitmq/rabbitmq` | Namespaced cluster pods to AMQP TCP/5672; Prometheus to TCP/15692; management TCP/15672 denied | Cluster DNS only |
-| `tapy/tapy-frontend` | Cloudflared (homelab) or the selected cloud Ingress controller, plus node health probes, to TCP/3000 | `tapy-backend` TCP/8080, cluster DNS, Twilio HTTPS, and Gemini HTTPS |
-| `tapy/tapy-backend` | `tapy-frontend` and node health probes to TCP/8080 | PostgreSQL, RabbitMQ, cluster DNS, Google OAuth/Gmail, and Microsoft OAuth/Graph HTTPS |
+| `tapy/tapy-frontend` | Cloudflared (homelab) or the selected cloud Ingress controller, plus node health probes, to TCP/3000 | `tapy-backend` TCP/8080 and cluster DNS |
+| `tapy/tapy-backend` (Tapy repository) | `tapy-frontend` and node health probes to TCP/8080 | Tapy-local PostgreSQL/RabbitMQ, cluster DNS, Google OAuth/Gmail, and Microsoft OAuth/Graph HTTPS |
+| `tapy/tapy-worker` (Tapy repository) | None | Tapy-local PostgreSQL/RabbitMQ, cluster DNS, Twilio HTTPS, Google OAuth/Gmail, and Microsoft OAuth/Graph HTTPS |
 | `immich/redis` | Server to TCP/6379 | None |
 | `media` | Same-namespace application traffic; Gateway to each web UI; Cloudflared to Jellyfin TCP/8096 and Seerr TCP/5055; LAN/world peers to qBittorrent TCP/UDP 51413 | Cluster DNS; public-only TCP 80/443 for metadata, indexers, subtitle providers, and trackers; qBittorrent additionally reaches public TCP/UDP peers |
 | `tailscale-router` | Public/LAN UDP 41641 (pinned in the Deployment) | Not isolated; see the Cilium Gateway hairpin exception below |
@@ -118,6 +119,7 @@ curl --fail https://adguard.home.547600.xyz
 
 kubectl -n bitwarden rollout status deployment/bitwarden
 curl --fail https://bitwarden.home.547600.xyz/alive
+curl --fail https://bitwarden.547600.xyz/alive
 kubectl -n bitwarden create job --from=cronjob/bitwarden-backup network-policy-test
 
 kubectl -n immich rollout status deployment/immich-server
@@ -148,3 +150,9 @@ hubble observe --verdict DROPPED --since 10m
 Prefer adding one specific identity/selector and destination port. Do not
 replace a failed rule with namespace-wide access, arbitrary destination ports,
 or unrestricted private-network egress.
+
+Tapy workload-local policy now lives in the standalone Tapy repository. Homelab
+retains tunnel egress and `cloudflared/tapy-admission.yaml` for ingress to
+`tapy-frontend.tapy.svc:3000`. Shared homelab RabbitMQ legacy Tapy access remains
+only for rollback until separately authorized post-cutover cleanup. See
+[Tapy hosting](tapy-runbook.md).
