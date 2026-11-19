@@ -10,7 +10,7 @@ spec:
   project: default
   source:
     repoURL: git@github.com:kfir-marx/tapy.git
-    targetRevision: 806eee050b4500c5ff7370304b85e44f59e329db
+    targetRevision: 30a7f6634c1ef5902a033c1ad3857e9b74437a9b
     path: deploy/kubernetes/overlays/homelab
   destination:
     server: https://kubernetes.default.svc
