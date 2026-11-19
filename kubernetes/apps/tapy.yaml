@@ -42,3 +42,8 @@ spec:
     name: tapy-frontend
     jsonPointers:
     - /spec/replicas
+  - group: apps
+    kind: Deployment
+    name: tapy-worker
+    jsonPointers:
+    - /spec/replicas
