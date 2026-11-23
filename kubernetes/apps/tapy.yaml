@@ -1,4 +1,4 @@
-# Initial homelab cutover: reviewed immutable release, manual sync and no pruning.
+# Reviewed immutable Tapy release, manual sync and no pruning.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -10,7 +10,7 @@ spec:
   project: default
   source:
     repoURL: git@github.com:kfir-marx/tapy.git
-    targetRevision: 30a7f6634c1ef5902a033c1ad3857e9b74437a9b
+    targetRevision: 1380c310cb604da6a13514caa27c08720cc8826c
     path: deploy/kubernetes/overlays/homelab
   destination:
     server: https://kubernetes.default.svc
